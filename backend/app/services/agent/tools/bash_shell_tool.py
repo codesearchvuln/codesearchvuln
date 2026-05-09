@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ from .evidence_protocol import (
 class BashShellInput(BaseModel):
     command: str = Field(description="要执行的 Bash 命令")
     timeout: int = Field(default=60, description="超时时间（秒），范围 1-300")
-    cwd: Optional[str] = Field(
+    cwd: str | None = Field(
         default=None,
         description="可选工作目录。绝对路径直接使用；相对路径基于项目根目录解析。",
     )
@@ -63,7 +63,7 @@ class BashShellTool(AgentTool):
             return text
         return text[:limit] + f"\n... (截断，共 {len(text)} 字符)"
 
-    def _resolve_cwd(self, cwd: Optional[str]) -> str:
+    def _resolve_cwd(self, cwd: str | None) -> str:
         raw = str(cwd or "").strip()
         if not raw:
             resolved = self.project_root
@@ -94,7 +94,7 @@ class BashShellTool(AgentTool):
         self,
         command: str,
         timeout: int = 60,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
         max_output_chars: int = 12000,
         **kwargs,
     ) -> ToolResult:
@@ -150,7 +150,7 @@ class BashShellTool(AgentTool):
 
         command_chain = unique_command_chain(["bash_shell", "bash"])
         display_command = build_display_command(command_chain)
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "exit_code": exit_code,
             "status": build_execution_status(
                 success=success,

@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from app.api.v1.endpoints.projects_shared import *
 from app.api.v1.endpoints.projects_shared import (
     _BANDIT_TEST_ID_TO_CWE,
@@ -32,11 +34,11 @@ from app.api.v1.endpoints.projects_shared import (
 )
 from app.api.v1.endpoints.static_tasks_bandit import _extract_bandit_snapshot_rules
 from app.api.v1.endpoints.static_tasks_phpstan import _extract_phpstan_snapshot_rules
-from app.models.yasa import YasaRuleConfig
-from app.services.yasa_rules_snapshot import extract_yasa_snapshot_rules
-from app.services.upload.project_info_refresher import project_info_refresher
 from app.models.project_management_metrics import ProjectManagementMetrics
-from urllib.parse import urlencode
+from app.models.yasa import YasaRuleConfig
+from app.services.opengrep_confidence import count_high_confidence_findings_by_task_ids
+from app.services.upload.project_info_refresher import project_info_refresher
+from app.services.yasa_rules_snapshot import extract_yasa_snapshot_rules
 
 router = APIRouter()
 
@@ -56,7 +58,7 @@ DASHBOARD_SCAN_TYPE_KEYS = ("static", "intelligent", "hybrid")
 
 def _build_empty_task_status_by_scan_type() -> Dict[str, Dict[str, int]]:
     return {
-        status_key: {scan_type: 0 for scan_type in DASHBOARD_SCAN_TYPE_KEYS}
+        status_key: dict.fromkeys(DASHBOARD_SCAN_TYPE_KEYS, 0)
         for status_key in DASHBOARD_TASK_STATUS_KEYS
     }
 
@@ -210,6 +212,7 @@ def _build_dashboard_static_recent_tasks(
             candidate_groups: List[Dict[str, Any]],
             *,
             ignore_window: bool,
+            assigned_project_id: str = project_id,
         ) -> None:
             task_timestamp = _normalize_dashboard_task_timestamp(item.get("created_at"))
             engine_key = engine_key_map[str(item.get("engine") or "")]
@@ -229,7 +232,7 @@ def _build_dashboard_static_recent_tasks(
 
             if best_group_index == -1:
                 next_group = {
-                    "project_id": project_id,
+                    "project_id": assigned_project_id,
                     "created_at": item.get("created_at"),
                     "opengrep_task": None,
                     "gitleaks_task": None,
@@ -1518,8 +1521,8 @@ async def get_dashboard_snapshot(
         scan_task_id,
         test_id,
         issue_severity,
-        issue_text,
-        test_name,
+        _issue_text,
+        _test_name,
         issue_confidence,
         status,
         file_path,

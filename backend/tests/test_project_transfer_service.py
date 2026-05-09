@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from conftest import _is_sqlite_incompatible_index
 from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -20,7 +21,13 @@ from app.core.config import settings
 from app.core.security import get_password_hash
 from app.db.base import Base
 from app.db.init_db import DEFAULT_DEMO_EMAIL, _build_default_seed_projects
-from app.models.agent_task import AgentCheckpoint, AgentEvent, AgentFinding, AgentTask, AgentTreeNode
+from app.models.agent_task import (
+    AgentCheckpoint,
+    AgentEvent,
+    AgentFinding,
+    AgentTask,
+    AgentTreeNode,
+)
 from app.models.bandit import BanditFinding, BanditScanTask
 from app.models.gitleaks import GitleaksFinding, GitleaksScanTask
 from app.models.opengrep import OpengrepFinding, OpengrepScanTask
@@ -37,7 +44,6 @@ from app.services.project_transfer_service import (
     import_projects_bundle,
 )
 from app.services.zip_storage import load_project_zip, save_project_zip
-from conftest import _is_sqlite_incompatible_index
 
 
 async def _make_session() -> AsyncSession:

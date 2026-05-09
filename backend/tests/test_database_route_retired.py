@@ -2,7 +2,6 @@ from pathlib import Path
 
 from app.main import app
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 API_FILE = BACKEND_DIR / "app" / "api" / "v1" / "api.py"
 DATABASE_ENDPOINT_FILE = BACKEND_DIR / "app" / "api" / "v1" / "endpoints" / "database.py"

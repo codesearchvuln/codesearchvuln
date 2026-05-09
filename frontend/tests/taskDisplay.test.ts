@@ -6,7 +6,7 @@ test("getTaskDisplayStatusSummary returns unified labels and classes", async () 
     "../src/features/tasks/services/taskDisplay.ts"
   );
 
-  assert.equal(getTaskDisplayStatusSummary("completed").statusLabel, "任务完成");
+  assert.equal(getTaskDisplayStatusSummary("completed").statusLabel, "已完成");
   assert.equal(
     getTaskDisplayStatusSummary("failed").progressHint,
     "扫描已结束，至少一个引擎失败",

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
 
 Chat2RuleEngineType = Literal["opengrep", "gitleaks", "bandit", "phpstan", "pmd", "yasa"]
 
@@ -22,11 +21,11 @@ class Chat2RuleMessageInput(BaseModel):
 class Chat2RuleValidationResult(BaseModel):
     valid: bool = Field(..., description="规则是否通过基础校验")
     errors: list[str] = Field(default_factory=list, description="校验错误列表")
-    normalized_rule_text: Optional[str] = Field(
+    normalized_rule_text: str | None = Field(
         None,
         description="服务端清洗后的规则文本",
     )
-    metadata: Optional[dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         None,
         description="从规则中解析出的元信息",
     )
@@ -35,7 +34,7 @@ class Chat2RuleValidationResult(BaseModel):
 class Chat2RuleOpengrepChatRequest(BaseModel):
     messages: list[Chat2RuleMessageInput] = Field(..., min_length=1)
     selections: list[Chat2RuleSelectionInput] = Field(..., min_length=1)
-    draft_rule_text: Optional[str] = Field(
+    draft_rule_text: str | None = Field(
         None,
         description="当前草案规则文本，用于多轮修订",
     )
@@ -52,8 +51,8 @@ class Chat2RuleOpengrepChatResponse(BaseModel):
 
 class Chat2RuleOpengrepSaveRequest(BaseModel):
     rule_text: str = Field(..., min_length=1)
-    title: Optional[str] = Field(None, description="保存时使用的规则名称")
-    description: Optional[str] = Field(None, description="规则描述")
+    title: str | None = Field(None, description="保存时使用的规则名称")
+    description: str | None = Field(None, description="规则描述")
 
 
 class Chat2RuleOpengrepSaveResponse(BaseModel):

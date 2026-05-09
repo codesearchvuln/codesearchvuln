@@ -1,17 +1,16 @@
 """Schemas and constants for agent task endpoints."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.agent_task import (
-    AgentTaskPhase,
     AgentTaskStatus,
     VulnerabilitySeverity,
 )
 
-_VALID_TASK_STATUS_VALUES: Set[str] = {
+_VALID_TASK_STATUS_VALUES: set[str] = {
     AgentTaskStatus.PENDING,
     AgentTaskStatus.INITIALIZING,
     AgentTaskStatus.RUNNING,
@@ -27,7 +26,7 @@ _VALID_TASK_STATUS_VALUES: Set[str] = {
     AgentTaskStatus.PAUSED,
 }
 
-_VALID_SEVERITY_VALUES: Set[str] = {
+_VALID_SEVERITY_VALUES: set[str] = {
     VulnerabilitySeverity.CRITICAL,
     VulnerabilitySeverity.HIGH,
     VulnerabilitySeverity.MEDIUM,
@@ -41,33 +40,33 @@ _VALID_SEVERITY_VALUES: Set[str] = {
 class AgentTaskCreate(BaseModel):
     """创建 Agent 任务请求"""
     project_id: str = Field(..., description="项目 ID")
-    name: Optional[str] = Field(None, description="任务名称")
-    description: Optional[str] = Field(None, description="任务描述")
-    
+    name: str | None = Field(None, description="任务名称")
+    description: str | None = Field(None, description="任务描述")
+
     # 审计配置
-    audit_scope: Optional[dict] = Field(None, description="审计范围")
-    target_vulnerabilities: Optional[List[str]] = Field(
+    audit_scope: dict | None = Field(None, description="审计范围")
+    target_vulnerabilities: list[str] | None = Field(
         default=["sql_injection", "xss", "command_injection", "path_traversal", "ssrf"],
         description="目标漏洞类型"
     )
-    verification_level: Optional[str] = Field(
+    verification_level: str | None = Field(
         "analysis_with_poc_plan",
         description="验证级别（统一语义）: analysis_with_poc_plan"
     )
-    authorization_confirmed: Optional[bool] = Field(
+    authorization_confirmed: bool | None = Field(
         False,
         description="兼容字段：保留请求结构，不再作为强制门禁",
     )
 
     # 排除模式
-    exclude_patterns: Optional[List[str]] = Field(
+    exclude_patterns: list[str] | None = Field(
         default=["node_modules", "__pycache__", ".git", "*.min.js"],
         description="排除模式"
     )
-    
+
     # 文件范围
-    target_files: Optional[List[str]] = Field(None, description="指定扫描的文件")
-    
+    target_files: list[str] | None = Field(None, description="指定扫描的文件")
+
     # Agent 配置
     max_iterations: int = Field(50, ge=1, le=200, description="最大迭代次数")
     timeout_seconds: int = Field(1800, ge=60, le=7200, description="超时时间（秒）")
@@ -103,35 +102,33 @@ class AgentTaskResponse(BaseModel):
     """Agent 任务响应 - 包含所有前端需要的字段"""
     id: str
     project_id: str
-    name: Optional[str]
-    description: Optional[str]
+    name: str | None
+    description: str | None
     task_type: str = "agent_audit"
     status: str
-    current_phase: Optional[str]
-    current_step: Optional[str] = None
-    workflow_phase: Optional[str] = None
-    display_phase: Optional[
-        Literal["static_scan", "recon", "analysis", "verification", "complete"]
-    ] = None
-    
+    current_phase: str | None
+    current_step: str | None = None
+    workflow_phase: str | None = None
+    display_phase: Literal["static_scan", "recon", "analysis", "verification", "complete"] | None = None
+
     # 进度统计
     total_files: int = 0
     indexed_files: int = 0
     analyzed_files: int = 0
     total_chunks: int = 0
-    
+
     # Agent 统计
     total_iterations: int = 0
     tool_calls_count: int = 0
     tokens_used: int = 0
-    
+
     # 发现统计（兼容两种命名）
     findings_count: int = 0
     total_findings: int = 0  # 兼容字段
     verified_count: int = 0
     verified_findings: int = 0  # 兼容字段
     false_positive_count: int = 0
-    
+
     # 严重程度统计
     critical_count: int = 0
     high_count: int = 0
@@ -141,31 +138,31 @@ class AgentTaskResponse(BaseModel):
     verified_high_count: int = 0
     verified_medium_count: int = 0
     verified_low_count: int = 0
-    defect_summary: Optional[AgentTaskDefectSummary] = None
-    
+    defect_summary: AgentTaskDefectSummary | None = None
+
     # 评分
     quality_score: float = 0.0
-    security_score: Optional[float] = None
-    
+    security_score: float | None = None
+
     # 进度百分比
     progress_percentage: float = 0.0
-    
+
     # 时间
     created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
     # 配置
-    audit_scope: Optional[dict] = None
-    target_vulnerabilities: Optional[List[str]] = None
-    verification_level: Optional[str] = None
-    tool_evidence_protocol: Optional[Literal["legacy", "native_v1"]] = None
-    exclude_patterns: Optional[List[str]] = None
-    target_files: Optional[List[str]] = None
-    
+    audit_scope: dict | None = None
+    target_vulnerabilities: list[str] | None = None
+    verification_level: str | None = None
+    tool_evidence_protocol: Literal["legacy", "native_v1"] | None = None
+    exclude_patterns: list[str] | None = None
+    target_files: list[str] | None = None
+
     # 错误信息
-    error_message: Optional[str] = None
-    report: Optional[str] = None
+    error_message: str | None = None
+    report: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -175,24 +172,24 @@ class AgentEventResponse(BaseModel):
     id: str
     task_id: str
     event_type: str
-    phase: Optional[str]
-    message: Optional[str] = None
+    phase: str | None
+    message: str | None = None
     sequence: int
     #  ORM 字段名是 created_at，序列化为 timestamp
     created_at: datetime = Field(serialization_alias="timestamp")
 
     # 工具相关字段
-    tool_name: Optional[str] = None
-    tool_input: Optional[Dict[str, Any]] = None
-    tool_output: Optional[Dict[str, Any]] = None
-    tool_duration_ms: Optional[int] = None
+    tool_name: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_output: dict[str, Any] | None = None
+    tool_duration_ms: int | None = None
 
     # 其他字段
-    progress_percent: Optional[float] = None
-    finding_id: Optional[str] = None
-    tokens_used: Optional[int] = None
+    progress_percent: float | None = None
+    finding_id: str | None = None
+    tokens_used: int | None = None
     #  ORM 字段名是 event_metadata，序列化为 metadata
-    event_metadata: Optional[Dict[str, Any]] = Field(default=None, serialization_alias="metadata")
+    event_metadata: dict[str, Any] | None = Field(default=None, serialization_alias="metadata")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -208,64 +205,64 @@ class AgentFindingResponse(BaseModel):
     vulnerability_type: str
     severity: str
     title: str
-    display_title: Optional[str] = None
-    description: Optional[str]
-    description_markdown: Optional[str] = None
-    file_path: Optional[str]
-    line_start: Optional[int]
-    line_end: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
-    function_name: Optional[str] = None
-    code_snippet: Optional[str]
-    code_context: Optional[str] = None
-    source: Optional[str] = None
-    sink: Optional[str] = None
-    dataflow_path: Optional[List[str]] = None
-    cwe_id: Optional[str] = None
-    cwe_name: Optional[str] = None
-    cvss_score: Optional[float] = None
-    cvss_vector: Optional[str] = None
-    context_start_line: Optional[int] = None
-    context_end_line: Optional[int] = None
-    
+    display_title: str | None = None
+    description: str | None
+    description_markdown: str | None = None
+    file_path: str | None
+    line_start: int | None
+    line_end: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
+    function_name: str | None = None
+    code_snippet: str | None
+    code_context: str | None = None
+    source: str | None = None
+    sink: str | None = None
+    dataflow_path: list[str] | None = None
+    cwe_id: str | None = None
+    cwe_name: str | None = None
+    cvss_score: float | None = None
+    cvss_vector: str | None = None
+    context_start_line: int | None = None
+    context_end_line: int | None = None
+
     is_verified: bool
     #  FIX: Map from ai_confidence in ORM, make Optional with default
-    confidence: Optional[float] = Field(
+    confidence: float | None = Field(
         default=0.5,
         validation_alias="ai_confidence",
     )
-    reachability: Optional[str] = None
-    authenticity: Optional[str] = None
-    verification_evidence: Optional[str] = None
-    verification_todo_id: Optional[str] = None
-    verification_fingerprint: Optional[str] = None
-    flow_path_score: Optional[float] = None
-    flow_call_chain: Optional[List[str]] = None
-    function_trigger_flow: Optional[List[str]] = None
-    flow_control_conditions: Optional[List[str]] = None
-    logic_authz_evidence: Optional[List[str]] = None
-    reachability_file: Optional[str] = None
-    reachability_function: Optional[str] = None
-    reachability_function_start_line: Optional[int] = None
-    reachability_function_end_line: Optional[int] = None
-    trigger_flow: Optional[dict] = None
-    poc_trigger_chain: Optional[dict] = None
+    reachability: str | None = None
+    authenticity: str | None = None
+    verification_evidence: str | None = None
+    verification_todo_id: str | None = None
+    verification_fingerprint: str | None = None
+    flow_path_score: float | None = None
+    flow_call_chain: list[str] | None = None
+    function_trigger_flow: list[str] | None = None
+    flow_control_conditions: list[str] | None = None
+    logic_authz_evidence: list[str] | None = None
+    reachability_file: str | None = None
+    reachability_function: str | None = None
+    reachability_function_start_line: int | None = None
+    reachability_function_end_line: int | None = None
+    trigger_flow: dict | None = None
+    poc_trigger_chain: dict | None = None
     status: str
-    manual_status: Optional[str] = None
-    
-    suggestion: Optional[str] = None
-    fix_code: Optional[str] = None
-    fix_description: Optional[str] = None
-    report: Optional[str] = None
+    manual_status: str | None = None
+
+    suggestion: str | None = None
+    fix_code: str | None = None
+    fix_description: str | None = None
+    report: str | None = None
     has_poc: bool = False
-    poc_code: Optional[str] = None
-    poc_description: Optional[str] = None
-    poc_steps: Optional[List[str]] = None
-    poc: Optional[dict] = None
-    
+    poc_code: str | None = None
+    poc_description: str | None = None
+    poc_steps: list[str] | None = None
+    poc: dict | None = None
+
     created_at: datetime
-    
+
     model_config = ConfigDict(
         from_attributes=True,
         populate_by_name=True,  # Allow both 'confidence' and 'ai_confidence'
@@ -276,16 +273,16 @@ class TaskSummaryResponse(BaseModel):
     """任务摘要响应"""
     task_id: str
     status: str
-    security_score: Optional[int]
-    
+    security_score: int | None
+
     total_findings: int
     verified_findings: int
-    
-    severity_distribution: Dict[str, int]
-    vulnerability_types: Dict[str, int]
-    
-    duration_seconds: Optional[int]
-    phases_completed: List[str]
+
+    severity_distribution: dict[str, int]
+    vulnerability_types: dict[str, int]
+
+    duration_seconds: int | None
+    phases_completed: list[str]
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

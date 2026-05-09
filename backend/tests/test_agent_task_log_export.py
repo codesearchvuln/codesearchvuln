@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -59,7 +59,7 @@ def _make_tool_events(task_id: str, started_at: datetime) -> list[AgentEvent]:
 
 
 def test_build_agent_task_log_export_payload_merges_tool_events():
-    started_at = datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc)
+    started_at = datetime(2026, 4, 21, 9, 0, 0, tzinfo=UTC)
     task = AgentTask(
         id="task-export-1",
         project_id="project-1",
@@ -96,7 +96,7 @@ def test_build_agent_task_log_export_payload_merges_tool_events():
 
 @pytest.mark.asyncio
 async def test_export_agent_task_logs_uses_task_based_download_filename():
-    started_at = datetime(2026, 4, 21, 9, 0, 0, tzinfo=timezone.utc)
+    started_at = datetime(2026, 4, 21, 9, 0, 0, tzinfo=UTC)
     task = SimpleNamespace(
         id="task-export-2",
         project_id="project-1",

@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.api.v1.endpoints.agent_tasks import (
     _build_core_audit_exclude_patterns,
     _collect_project_info,
@@ -9,8 +11,6 @@ from app.api.v1.endpoints.agent_tasks import (
     _filter_bootstrap_findings,
 )
 from app.services.agent.tools.smart_scan_tool import SmartScanTool
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
 
 
 def _write_file(path: Path, content: str) -> None:

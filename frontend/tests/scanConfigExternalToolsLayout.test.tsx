@@ -4,11 +4,12 @@ import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import ScanConfigExternalTools from "../src/pages/ScanConfigExternalTools.tsx";
+import type { ExternalToolResourcePayload } from "../src/shared/api/database.ts";
 import { SsrRouter } from "./ssrTestRouter.tsx";
 
 globalThis.React = React;
 
-const initialResources = [
+const initialResources: ExternalToolResourcePayload[] = [
   {
     tool_type: "skill",
     tool_id: "search_code",

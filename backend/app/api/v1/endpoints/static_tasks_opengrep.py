@@ -1,87 +1,40 @@
 import asyncio
-import hashlib
 import json
-import logging
 import os
 import re
-import shlex
 import shutil
-import subprocess
 import tempfile
-import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.bandit import BanditFinding, BanditScanTask
-from app.db.static_finding_paths import (
-    build_zip_member_path_candidates,
-    normalize_static_scan_file_path,
-    resolve_static_finding_location,
-)
-from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
-from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanScanTask
-from app.models.project import Project
-from app.models.user import User
-from app.schemas.gitleaks_rules import (
-    GitleaksRuleBatchUpdateRequest,
-    GitleaksRuleCreateRequest,
-    GitleaksRuleResponse,
-    GitleaksRuleUpdateRequest,
-)
-from app.schemas.opengrep import (
-    OpengrepRuleCreateRequest,
-    OpengrepRulePatchResponse,
-    OpengrepRuleTextCreateRequest,
-    OpengrepRuleTextResponse,
-    OpengrepRuleUpdateRequest,
-)
-from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
-from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
-from app.services.opengrep_confidence import (
-    count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
-    extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
-    extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
-    normalize_confidence as shared_normalize_confidence,
-)
-from app.services.rule import get_rule_by_patch, validate_generic_rule
-from app.services.upload.upload_manager import UploadManager
-
 from app.api.v1.endpoints.static_tasks_shared import (
-    _cleanup_incorrect_rules,
-    _clear_scan_task_cancel,
     _build_core_audit_exclude_patterns,
-    copy_project_tree_to_scan_dir,
+    _clear_scan_task_cancel,
     _dt_to_iso,
     _ensure_opengrep_xdg_dirs,
-    _is_core_ignored_path,
     _get_project_root,
-    _get_user_config,
+    _is_core_ignored_path,
     _is_scan_task_cancelled,
     _is_test_like_directory,
     _launch_static_background_job,
     _pop_scan_container,
+    _record_scan_progress,
     _register_scan_container,
     _release_request_db_session,
-    _normalize_llm_config_error_message,
-    _record_scan_progress,
     _request_scan_task_cancel,
-    _run_subprocess_with_tracking,
     _scan_progress_store,
     _sync_task_scan_duration,
     _utc_now_iso,
-    _validate_user_llm_config,
     async_session_factory,
     cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
     deps,
     ensure_scan_logs_dir,
     ensure_scan_meta_dir,
@@ -92,6 +45,26 @@ from app.api.v1.endpoints.static_tasks_shared import (
     logger,
     settings,
 )
+from app.db.static_finding_paths import (
+    build_zip_member_path_candidates,
+    normalize_static_scan_file_path,
+    resolve_static_finding_location,
+)
+from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
+from app.models.project import Project
+from app.models.user import User
+from app.services.opengrep_confidence import (
+    count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
+)
+from app.services.opengrep_confidence import (
+    extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
+)
+from app.services.opengrep_confidence import (
+    extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
+)
+from app.services.opengrep_confidence import (
+    normalize_confidence as shared_normalize_confidence,
+)
 from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
@@ -101,8 +74,8 @@ class OpengrepScanTaskCreate(BaseModel):
     """创建 Opengrep 扫描任务请求"""
 
     project_id: str = Field(..., description="项目ID")
-    name: Optional[str] = Field(None, description="任务名称")
-    rule_ids: List[str] = Field(default_factory=list, description="选择的规则ID列表")
+    name: str | None = Field(None, description="任务名称")
+    rule_ids: list[str] = Field(default_factory=list, description="选择的规则ID列表")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
 
 
@@ -122,7 +95,7 @@ class OpengrepScanTaskResponse(BaseModel):
     files_scanned: int
     lines_scanned: int
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 def _build_opengrep_scan_task_response(task: OpengrepScanTask) -> OpengrepScanTaskResponse:
@@ -139,11 +112,11 @@ def _build_opengrep_scan_task_response(task: OpengrepScanTask) -> OpengrepScanTa
         scan_duration_ms=int(task.scan_duration_ms or 0),
         files_scanned=int(task.files_scanned or 0),
         lines_scanned=int(task.lines_scanned or 0),
-        created_at=task.created_at or datetime.now(timezone.utc),
+        created_at=task.created_at or datetime.now(UTC),
         updated_at=task.updated_at,
     )
 
-    model_config = ConfigDict(from_attributes=True)
+    ConfigDict(from_attributes=True)
 
 
 class OpengrepFindingResponse(BaseModel):
@@ -151,18 +124,18 @@ class OpengrepFindingResponse(BaseModel):
 
     id: str
     scan_task_id: str
-    rule: Dict[str, Any]
-    description: Optional[str]
+    rule: dict[str, Any]
+    description: str | None
     file_path: str
-    start_line: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
-    code_snippet: Optional[str]
+    start_line: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
+    code_snippet: str | None
     severity: str
     status: str
-    confidence: Optional[str] = Field(None, description="规则置信度: HIGH, MEDIUM, LOW")
-    cwe: Optional[List[str]] = Field(None, description="CWE列表")
-    rule_name: Optional[str] = Field(None, description="命中规则名称")
+    confidence: str | None = Field(None, description="规则置信度: HIGH, MEDIUM, LOW")
+    cwe: list[str] | None = Field(None, description="CWE列表")
+    rule_name: str | None = Field(None, description="命中规则名称")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -182,7 +155,7 @@ class OpengrepFindingContextResponse(BaseModel):
     before: int
     after: int
     total_lines: int
-    lines: List[OpengrepFindingContextLine]
+    lines: list[OpengrepFindingContextLine]
 
 
 class OpengrepScanProgressLogEntry(BaseModel):
@@ -201,12 +174,12 @@ class OpengrepScanProgressResponse(BaseModel):
     task_id: str
     status: str
     progress: float = 0
-    current_stage: Optional[str] = None
-    message: Optional[str] = None
-    started_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    logs: List[OpengrepScanProgressLogEntry] = Field(default_factory=list)
-def _parse_opengrep_output(stdout: str) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    current_stage: str | None = None
+    message: str | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    logs: list[OpengrepScanProgressLogEntry] = Field(default_factory=list)
+def _parse_opengrep_output(stdout: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """解析 opengrep JSON 输出并返回 (results, errors)。"""
     if not stdout or not stdout.strip():
         return [], []
@@ -230,7 +203,7 @@ def _parse_opengrep_output(stdout: str) -> tuple[List[Dict[str, Any]], List[Dict
         return results, errors
     except json.JSONDecodeError as e:
         raise ValueError("Failed to parse opengrep output") from e
-def _is_fatal_rule_error(error_item: Dict[str, Any]) -> bool:
+def _is_fatal_rule_error(error_item: dict[str, Any]) -> bool:
     """
     判断是否为应导致任务失败的规则错误。
 
@@ -274,7 +247,7 @@ def _truncate_for_progress_log(value: Any, max_length: int = 220) -> str:
     return text[: max_length - 3] + "..."
 
 
-def _extract_error_message(error_item: Dict[str, Any]) -> str:
+def _extract_error_message(error_item: dict[str, Any]) -> str:
     for key in ("message", "long_msg", "short_msg", "details", "error"):
         value = error_item.get(key)
         if value:
@@ -282,9 +255,9 @@ def _extract_error_message(error_item: Dict[str, Any]) -> str:
     return ""
 
 
-def _extract_error_rule_ids(error_item: Dict[str, Any]) -> List[str]:
+def _extract_error_rule_ids(error_item: dict[str, Any]) -> list[str]:
     """尽可能从 opengrep error 中提取规则 ID 候选。"""
-    rule_ids: List[str] = []
+    rule_ids: list[str] = []
     ignored_tokens = {
         "rule",
         "rules",
@@ -328,11 +301,11 @@ def _extract_error_rule_ids(error_item: Dict[str, Any]) -> List[str]:
 
 
 def _summarize_fatal_rule_errors(
-    errors: List[Dict[str, Any]],
+    errors: list[dict[str, Any]],
     *,
     max_rule_ids: int = 6,
-) -> tuple[List[str], str]:
-    rule_ids: List[str] = []
+) -> tuple[list[str], str]:
+    rule_ids: list[str] = []
     message = ""
     for err in errors:
         for rid in _extract_error_rule_ids(err):
@@ -347,7 +320,7 @@ async def _execute_opengrep_scan(
     task_id: str,
     project_root: str,
     target_path: str,
-    rule_ids: List[str],
+    rule_ids: list[str],
 ) -> None:
     """
     后台执行 Opengrep 扫描
@@ -358,19 +331,19 @@ async def _execute_opengrep_scan(
         target_path: 扫描目标路径
         rule_ids: 规则ID列表
     """
-    workspace_dir: Optional[Path] = None
-    active_container_id: Optional[str] = None
+    workspace_dir: Path | None = None
+    active_container_id: str | None = None
 
     async def _update_task_state(
         status: str,
         *,
-        findings: Optional[List[Dict[str, Any]]] = None,
-        error_count: Optional[int] = None,
-        warning_count: Optional[int] = None,
+        findings: list[dict[str, Any]] | None = None,
+        error_count: int | None = None,
+        warning_count: int | None = None,
         files_scanned_count: int = 0,
         lines_scanned_count: int = 0,
         increment_error_count: bool = False,
-    ) -> Optional[OpengrepScanTask]:
+    ) -> OpengrepScanTask | None:
         async with async_session_factory() as db:
             result = await db.execute(
                 select(OpengrepScanTask).where(OpengrepScanTask.id == task_id)
@@ -446,7 +419,7 @@ async def _execute_opengrep_scan(
 
             result = await db.execute(
                 select(OpengrepRule).where(
-                    (OpengrepRule.id.in_(rule_ids)) & (OpengrepRule.is_active == True)
+                    (OpengrepRule.id.in_(rule_ids)) & (OpengrepRule.is_active)
                 )
             )
             rules = result.scalars().all()
@@ -566,7 +539,7 @@ async def _execute_opengrep_scan(
             "no_proxy": "*",
         }
 
-        valid_rule_entries: List[Dict[str, Any]] = []
+        valid_rule_entries: list[dict[str, Any]] = []
         skipped_rule_count = 0
         total_rules = len(rules)
         _record_scan_progress(
@@ -656,8 +629,8 @@ async def _execute_opengrep_scan(
             ),
         )
 
-        all_findings: List[Dict[str, Any]] = []
-        all_scan_errors: List[Dict[str, Any]] = []
+        all_findings: list[dict[str, Any]] = []
+        all_scan_errors: list[dict[str, Any]] = []
         successful_rule_count = 0
         failed_rule_count = 0
         total_rules_for_execution = len(executable_rule_entries)
@@ -666,10 +639,10 @@ async def _execute_opengrep_scan(
         use_jobs_option = True
 
         async def run_merged_group_scan(
-            rule_entries: List[Dict[str, Any]],
+            rule_entries: list[dict[str, Any]],
             *,
             timeout_seconds: int,
-        ) -> Dict[str, Any]:
+        ) -> dict[str, Any]:
             nonlocal use_jobs_option
             rule_file = None
             report_file = output_dir / "report.json"
@@ -846,13 +819,13 @@ async def _execute_opengrep_scan(
                         pass
 
         async def run_bisect_fallback_scan(reason: str) -> tuple[
-            List[Dict[str, Any]],
-            List[Dict[str, Any]],
+            list[dict[str, Any]],
+            list[dict[str, Any]],
             int,
             int,
         ]:
-            fallback_findings: List[Dict[str, Any]] = []
-            fallback_errors: List[Dict[str, Any]] = []
+            fallback_findings: list[dict[str, Any]] = []
+            fallback_errors: list[dict[str, Any]] = []
             fallback_success = 0
             fallback_failed = 0
             fallback_failure_log_count = 0
@@ -878,7 +851,7 @@ async def _execute_opengrep_scan(
                     message=f"二分回退进度（{processed_rules}/{total_rules_for_execution}）",
                 )
 
-            async def bisect_and_scan(rule_entries: List[Dict[str, Any]]) -> None:
+            async def bisect_and_scan(rule_entries: list[dict[str, Any]]) -> None:
                 nonlocal fallback_success, fallback_failed, fallback_failure_log_count, split_log_count, processed_rules
                 if _is_scan_task_cancelled("opengrep", task_id):
                     return
@@ -1093,7 +1066,7 @@ async def _execute_opengrep_scan(
         warning_count = 0
         files_scanned = set()
         lines_scanned = 0
-        findings_to_persist: List[Dict[str, Any]] = []
+        findings_to_persist: list[dict[str, Any]] = []
         _record_scan_progress(
             task_id,
             progress=90,
@@ -1204,18 +1177,18 @@ async def _execute_opengrep_scan(
                 logger.info(f"Cleaned up temporary project directory: {project_root}")
             except Exception as e:
                 logger.warning(f"Failed to clean up temporary directory {project_root}: {e}")
-def _normalize_confidence(confidence: Any) -> Optional[str]:
+def _normalize_confidence(confidence: Any) -> str | None:
     """标准化置信度字段，内部统一为 HIGH/MEDIUM/LOW。"""
     return shared_normalize_confidence(confidence)
 
 
-def _format_confidence_for_response(confidence: Optional[str]) -> Optional[str]:
+def _format_confidence_for_response(confidence: str | None) -> str | None:
     """接口返回统一为 HIGH/MEDIUM/LOW。"""
     normalized = _normalize_confidence(confidence)
     return normalized
 
 
-def _extract_rule_lookup_keys(check_id: Any) -> List[str]:
+def _extract_rule_lookup_keys(check_id: Any) -> list[str]:
     """
     从 finding.rule.check_id 里提取可用于匹配 OpengrepRule.name 的候选键。
 
@@ -1225,7 +1198,7 @@ def _extract_rule_lookup_keys(check_id: Any) -> List[str]:
     return shared_extract_rule_lookup_keys(check_id)
 
 
-def _extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
+def _extract_finding_payload_confidence(rule_data: Any) -> str | None:
     """
     从 finding.rule 结构中提取置信度。
 
@@ -1240,11 +1213,11 @@ def _extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
 
 async def _build_finding_rule_lookup_maps(
     db: AsyncSession,
-    findings: List[OpengrepFinding],
+    findings: list[OpengrepFinding],
 ) -> tuple[
-    Dict[str, Optional[str]],
-    Dict[str, Optional[List[str]]],
-    Dict[str, str],
+    dict[str, str | None],
+    dict[str, list[str] | None],
+    dict[str, str],
 ]:
     """为 finding 列表批量构建规则查找映射，避免重复查询。"""
     rule_name_candidates: set[str] = set()
@@ -1255,9 +1228,9 @@ async def _build_finding_rule_lookup_maps(
         for key in _extract_rule_lookup_keys(check_id):
             rule_name_candidates.add(key)
 
-    rule_confidence_map: Dict[str, Optional[str]] = {}
-    rule_cwe_map: Dict[str, Optional[List[str]]] = {}
-    rule_display_name_map: Dict[str, str] = {}
+    rule_confidence_map: dict[str, str | None] = {}
+    rule_cwe_map: dict[str, list[str] | None] = {}
+    rule_display_name_map: dict[str, str] = {}
     if not rule_name_candidates:
         return rule_confidence_map, rule_cwe_map, rule_display_name_map
 
@@ -1281,16 +1254,16 @@ async def _build_finding_rule_lookup_maps(
 def _resolve_finding_enrichment(
     finding: OpengrepFinding,
     *,
-    rule_confidence_map: Dict[str, Optional[str]],
-    rule_cwe_map: Dict[str, Optional[List[str]]],
-    rule_display_name_map: Dict[str, str],
-) -> tuple[Optional[str], Optional[List[str]], Optional[str]]:
+    rule_confidence_map: dict[str, str | None],
+    rule_cwe_map: dict[str, list[str] | None],
+    rule_display_name_map: dict[str, str],
+) -> tuple[str | None, list[str] | None, str | None]:
     """统一解析 finding 的 confidence/cwe/rule_name。"""
     resolved_confidence = _extract_finding_payload_confidence(finding.rule)
-    resolved_cwe: Optional[List[str]] = None
-    resolved_rule_name: Optional[str] = None
+    resolved_cwe: list[str] | None = None
+    resolved_rule_name: str | None = None
 
-    lookup_keys: List[str] = []
+    lookup_keys: list[str] = []
     if isinstance(finding.rule, dict):
         check_id = finding.rule.get("check_id") or finding.rule.get("id")
         lookup_keys = _extract_rule_lookup_keys(check_id)
@@ -1320,11 +1293,11 @@ def _resolve_finding_enrichment(
 def _serialize_finding_response(
     finding: OpengrepFinding,
     *,
-    rule_confidence_map: Dict[str, Optional[str]],
-    rule_cwe_map: Dict[str, Optional[List[str]]],
-    rule_display_name_map: Dict[str, str],
-    project_root: Optional[str] = None,
-) -> Dict[str, Any]:
+    rule_confidence_map: dict[str, str | None],
+    rule_cwe_map: dict[str, list[str] | None],
+    rule_display_name_map: dict[str, str],
+    project_root: str | None = None,
+) -> dict[str, Any]:
     resolved_confidence, resolved_cwe, resolved_rule_name = _resolve_finding_enrichment(
         finding,
         rule_confidence_map=rule_confidence_map,
@@ -1370,17 +1343,17 @@ def _serialize_finding_response(
 
 async def _count_high_confidence_findings_by_task_ids(
     db: AsyncSession,
-    task_ids: List[str],
-) -> Dict[str, int]:
+    task_ids: list[str],
+) -> dict[str, int]:
     return await shared_count_high_confidence_findings_by_task_ids(db, task_ids)
 
 
-def _build_finding_path_candidates(file_path: Optional[str]) -> List[str]:
+def _build_finding_path_candidates(file_path: str | None) -> list[str]:
     raw = str(file_path or "").strip().replace("\\", "/")
     if not raw:
         return []
 
-    deduplicated: List[str] = []
+    deduplicated: list[str] = []
     seen = set()
 
     def _append(value: str) -> None:
@@ -1399,11 +1372,11 @@ def _build_finding_path_candidates(file_path: Optional[str]) -> List[str]:
     return deduplicated
 
 
-def _extract_opengrep_finding_path_hints(finding: OpengrepFinding) -> List[str]:
-    hints: List[str] = []
+def _extract_opengrep_finding_path_hints(finding: OpengrepFinding) -> list[str]:
+    hints: list[str] = []
     seen = set()
 
-    def _append(value: Optional[str]) -> None:
+    def _append(value: str | None) -> None:
         normalized = str(value or "").strip()
         if not normalized or normalized in seen:
             return
@@ -1425,7 +1398,7 @@ def _extract_opengrep_finding_path_hints(finding: OpengrepFinding) -> List[str]:
     return hints
 
 
-LANGUAGE_EXTENSION_MAP: Dict[str, str] = {
+LANGUAGE_EXTENSION_MAP: dict[str, str] = {
     ".py": "python",
     ".pyi": "python",
     ".js": "javascript",
@@ -1455,12 +1428,12 @@ LANGUAGE_EXTENSION_MAP: Dict[str, str] = {
     ".mm": "objective-c",
 }
 
-LANGUAGE_FILENAME_MAP: Dict[str, str] = {
+LANGUAGE_FILENAME_MAP: dict[str, str] = {
     "dockerfile": "dockerfile",
     "makefile": "make",
 }
 
-RULE_LANGUAGE_ALIASES: Dict[str, str] = {
+RULE_LANGUAGE_ALIASES: dict[str, str] = {
     "js": "javascript",
     "node": "javascript",
     "nodejs": "javascript",
@@ -1501,14 +1474,14 @@ SKIP_LANGUAGE_DETECTION_DIRS = {
 MAX_PROJECT_LANGUAGE_DETECTION_FILES = 120000
 
 
-def _normalize_rule_language(language: Optional[str]) -> str:
+def _normalize_rule_language(language: str | None) -> str:
     normalized = str(language or "").strip().lower()
     if not normalized:
         return ""
     return RULE_LANGUAGE_ALIASES.get(normalized, normalized)
 
 
-def _extract_rule_languages(rule_payload: Dict[str, Any], fallback_language: Optional[str]) -> set[str]:
+def _extract_rule_languages(rule_payload: dict[str, Any], fallback_language: str | None) -> set[str]:
     languages: set[str] = set()
     rule_languages = rule_payload.get("languages")
     if isinstance(rule_languages, list):
@@ -1528,7 +1501,7 @@ def _detect_project_languages(scan_root: str) -> set[str]:
     detected: set[str] = set()
     scanned_files = 0
 
-    for root, dirs, files in os.walk(scan_root):
+    for _root, dirs, files in os.walk(scan_root):
         dirs[:] = [
             item
             for item in dirs
@@ -1573,9 +1546,9 @@ def _resolve_opengrep_scan_jobs() -> int:
     return max(1, min(8, cpu_count))
 
 
-@router.get("/tasks", response_model=List[OpengrepScanTaskResponse])
+@router.get("/tasks", response_model=list[OpengrepScanTaskResponse])
 async def list_static_tasks(
-    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
+    project_id: str | None = Query(None, description="按项目ID过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1602,7 +1575,7 @@ async def list_static_tasks(
         [task.id for task in tasks],
     )
     for task in tasks:
-        setattr(task, "high_confidence_count", int(high_confidence_counts.get(task.id, 0)))
+        task.high_confidence_count = int(high_confidence_counts.get(task.id, 0))
     return tasks
 
 
@@ -1643,7 +1616,7 @@ async def create_static_task(
     if not project_root:
         raise HTTPException(
             status_code=400,
-            detail=f"找不到项目的 zip 文件，请先上传项目 ZIP 文件到 uploads/zip_files 目录",
+            detail="找不到项目的 zip 文件，请先上传项目 ZIP 文件到 uploads/zip_files 目录",
         )
 
     # 创建扫描任务
@@ -1714,7 +1687,7 @@ async def get_static_task(
         db,
         [task.id],
     )
-    setattr(task, "high_confidence_count", int(high_confidence_counts.get(task.id, 0)))
+    task.high_confidence_count = int(high_confidence_counts.get(task.id, 0))
     return task
 
 
@@ -1791,12 +1764,12 @@ async def get_static_task_progress(
     return response_payload
 
 
-@router.get("/tasks/{task_id}/findings", response_model=List[OpengrepFindingResponse])
+@router.get("/tasks/{task_id}/findings", response_model=list[OpengrepFindingResponse])
 async def get_static_task_findings(
     task_id: str,
-    severity: Optional[str] = Query(None, description="按严重程度过滤: ERROR, WARNING, INFO"),
-    confidence: Optional[str] = Query(None, description="按置信度过滤: HIGH, MEDIUM, LOW"),
-    status: Optional[str] = Query(None, description="按状态过滤: open, verified, false_positive"),
+    severity: str | None = Query(None, description="按严重程度过滤: ERROR, WARNING, INFO"),
+    confidence: str | None = Query(None, description="按置信度过滤: HIGH, MEDIUM, LOW"),
+    status: str | None = Query(None, description="按状态过滤: open, verified, false_positive"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1946,8 +1919,8 @@ async def get_static_task_finding_context(
         if not end_line or end_line < start_line:
             end_line = start_line
 
-        resolved_file_path: Optional[str] = None
-        selected_relative_path: Optional[str] = None
+        resolved_file_path: str | None = None
+        selected_relative_path: str | None = None
 
         path_hints = _extract_opengrep_finding_path_hints(finding)
         if not path_hints:
@@ -1992,7 +1965,7 @@ async def get_static_task_finding_context(
         if not resolved_file_path:
             raise HTTPException(status_code=404, detail="未找到命中源码文件")
 
-        with open(resolved_file_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(resolved_file_path, encoding="utf-8", errors="ignore") as f:
             source_lines = f.read().splitlines()
 
         total_lines = len(source_lines)
@@ -2011,7 +1984,7 @@ async def get_static_task_finding_context(
 
         context_start = max(1, start_line - before)
         context_end = min(total_lines, end_line + after)
-        context_lines: List[Dict[str, Any]] = []
+        context_lines: list[dict[str, Any]] = []
 
         for line_no in range(context_start, context_end + 1):
             context_lines.append(

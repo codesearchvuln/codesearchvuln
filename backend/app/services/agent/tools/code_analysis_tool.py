@@ -3,11 +3,11 @@
 使用 LLM 深度分析代码安全问题
 """
 
-import json
 import logging
 import os
 import re
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from .base import AgentTool, ToolResult
@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 def _build_flow_analysis_metadata(
     *,
     command_name: str,
-    analysis: Dict[str, Any],
+    analysis: dict[str, Any],
     file_path: str,
-    extra_metadata: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    extra_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     source_nodes = list(analysis.get("source_nodes") or [])
     sink_nodes = list(analysis.get("sink_nodes") or [])
     taint_steps = list(analysis.get("taint_steps") or [])
@@ -74,11 +74,11 @@ class CodeAnalysisInput(BaseModel):
     code: str = Field(description="要分析的代码内容")
     file_path: str = Field(default="unknown", description="文件路径")
     language: str = Field(default="python", description="编程语言")
-    focus: Optional[str] = Field(
+    focus: str | None = Field(
         default=None,
         description="重点关注的漏洞类型，如 sql_injection, xss, command_injection"
     )
-    context: Optional[str] = Field(
+    context: str | None = Field(
         default=None,
         description="额外的上下文信息，如相关的其他代码片段"
     )
@@ -89,21 +89,21 @@ class CodeAnalysisTool(AgentTool):
     代码分析工具
     使用 LLM 对代码进行深度安全分析
     """
-    
+
     def __init__(self, llm_service):
         """
         初始化代码分析工具
-        
+
         Args:
             llm_service: LLM 服务实例
         """
         super().__init__()
         self.llm_service = llm_service
-    
+
     @property
     def name(self) -> str:
         return "code_analysis"
-    
+
     @property
     def description(self) -> str:
         return """深度分析代码安全问题。
@@ -123,43 +123,43 @@ class CodeAnalysisTool(AgentTool):
 - context: 选填，补充上下文（调用链、上游输入、下游危险操作等）
 
 这个工具会消耗较多的 Token，建议在确认有疑似问题后使用。"""
-    
+
     @property
     def args_schema(self):
         return CodeAnalysisInput
-    
+
     async def _execute(
         self,
         code: str,
         file_path: str = "unknown",
         language: str = "python",
-        focus: Optional[str] = None,
-        context: Optional[str] = None,
+        focus: str | None = None,
+        context: str | None = None,
         **kwargs
     ) -> ToolResult:
         """执行代码分析"""
         import asyncio
-        
+
         try:
             # 限制代码长度，避免超时
             max_code_length = 50000  # 约 50KB
             if len(code) > max_code_length:
                 code = code[:max_code_length] + "\n\n... (代码已截断，仅分析前 50000 字符)"
-            
+
             # 添加超时保护（5分钟）
             try:
                 analysis = await asyncio.wait_for(
                     self.llm_service.analyze_code(code, language),
                     timeout=300.0  # 5分钟超时
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return ToolResult(
                     success=False,
                     error="代码分析超时（超过5分钟）。代码可能过长或过于复杂，请尝试分析较小的代码片段。",
                 )
-            
+
             issues = analysis.get("issues", [])
-            
+
             if not issues:
                 return ToolResult(
                     success=True,
@@ -172,36 +172,36 @@ class CodeAnalysisTool(AgentTool):
                         "quality_score": analysis.get("quality_score"),
                     }
                 )
-            
+
             # 格式化输出
             output_parts = [f" 代码分析结果 - {file_path}\n"]
             output_parts.append(f"发现 {len(issues)} 个问题:\n")
-            
+
             for i, issue in enumerate(issues):
                 severity_icon = {
                     "critical": "🔴",
-                    "high": "🟠", 
+                    "high": "🟠",
                     "medium": "🟡",
                     "low": "🟢"
                 }.get(issue.get("severity", ""), "⚪")
-                
+
                 output_parts.append(f"\n{severity_icon} 问题 {i+1}: {issue.get('title', 'Unknown')}")
                 output_parts.append(f"   类型: {issue.get('type', 'unknown')}")
                 output_parts.append(f"   严重程度: {issue.get('severity', 'unknown')}")
                 output_parts.append(f"   行号: {issue.get('line', 'N/A')}")
                 output_parts.append(f"   描述: {issue.get('description', '')}")
-                
+
                 if issue.get("code_snippet"):
                     output_parts.append(f"   代码片段:\n   ```\n   {issue.get('code_snippet')}\n   ```")
-                
+
                 if issue.get("suggestion"):
                     output_parts.append(f"   修复建议: {issue.get('suggestion')}")
-                
+
                 if issue.get("ai_explanation"):
                     output_parts.append(f"   AI解释: {issue.get('ai_explanation')}")
-            
+
             output_parts.append(f"\n质量评分: {analysis.get('quality_score', 'N/A')}/100")
-            
+
             return ToolResult(
                 success=True,
                 data="\n".join(output_parts),
@@ -212,7 +212,7 @@ class CodeAnalysisTool(AgentTool):
                     "issues": issues,
                 }
             )
-            
+
         except Exception as e:
             import traceback
             logger.error(f"代码分析失败: {e}")
@@ -228,15 +228,15 @@ class CodeAnalysisTool(AgentTool):
 
 class DataFlowAnalysisInput(BaseModel):
     """数据流分析输入"""
-    source_code: Optional[str] = Field(default=None, description="包含数据源的代码")
-    sink_code: Optional[str] = Field(default=None, description="包含数据汇的代码（如危险函数）")
+    source_code: str | None = Field(default=None, description="包含数据源的代码")
+    sink_code: str | None = Field(default=None, description="包含数据汇的代码（如危险函数）")
     variable_name: str = Field(default="user_input", description="要追踪的变量名")
     file_path: str = Field(default="unknown", description="文件路径")
-    start_line: Optional[int] = Field(default=None, description="源码起始行")
-    end_line: Optional[int] = Field(default=None, description="源码结束行")
-    source_hints: Optional[List[str]] = Field(default=None, description="Source 提示词列表")
-    sink_hints: Optional[List[str]] = Field(default=None, description="Sink 提示词列表")
-    language: Optional[str] = Field(default=None, description="编程语言")
+    start_line: int | None = Field(default=None, description="源码起始行")
+    end_line: int | None = Field(default=None, description="源码结束行")
+    source_hints: list[str] | None = Field(default=None, description="Source 提示词列表")
+    sink_hints: list[str] | None = Field(default=None, description="Sink 提示词列表")
+    language: str | None = Field(default=None, description="编程语言")
     max_hops: int = Field(default=5, ge=1, le=20, description="最大传播步数")
 
 
@@ -245,16 +245,16 @@ class DataFlowAnalysisTool(AgentTool):
     数据流分析工具
     追踪变量从源到汇的数据流
     """
-    
-    def __init__(self, llm_service, project_root: Optional[str] = None):
+
+    def __init__(self, llm_service, project_root: str | None = None):
         super().__init__()
         self.llm_service = llm_service
         self.project_root = project_root
-    
+
     @property
     def name(self) -> str:
         return "dataflow_analysis"
-    
+
     @property
     def description(self) -> str:
         return """分析代码中的数据流，追踪变量从源（如用户输入）到汇（如危险函数）的路径。
@@ -271,22 +271,22 @@ class DataFlowAnalysisTool(AgentTool):
 - file_path: 文件路径
 - start_line/end_line: 可选，限定分析片段
 - source_hints/sink_hints: 可选，补充语义提示"""
-    
+
     @property
     def args_schema(self):
         return DataFlowAnalysisInput
-    
+
     async def _execute(
         self,
-        source_code: Optional[str] = None,
+        source_code: str | None = None,
         variable_name: str = "user_input",
-        sink_code: Optional[str] = None,
+        sink_code: str | None = None,
         file_path: str = "unknown",
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
-        source_hints: Optional[List[str]] = None,
-        sink_hints: Optional[List[str]] = None,
-        language: Optional[str] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        source_hints: list[str] | None = None,
+        sink_hints: list[str] | None = None,
+        language: str | None = None,
         max_hops: int = 5,
         **kwargs
     ) -> ToolResult:
@@ -321,7 +321,7 @@ class DataFlowAnalysisTool(AgentTool):
             max_hops=max_hops,
         )
 
-        llm_analysis: Optional[Dict[str, Any]] = None
+        llm_analysis: dict[str, Any] | None = None
         try:
             prompt = self._build_analysis_prompt(
                 source_code=source_text,
@@ -339,7 +339,7 @@ class DataFlowAnalysisTool(AgentTool):
                 timeout=120.0,
             )
             llm_analysis = self._normalize_llm_analysis(raw_result)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("dataflow_analysis LLM 调用超时，回退规则分析")
         except Exception as exc:
             logger.warning("dataflow_analysis LLM 调用失败，回退规则分析: %s", exc)
@@ -371,30 +371,30 @@ class DataFlowAnalysisTool(AgentTool):
                 },
             ),
         )
-    
+
     def _quick_pattern_analysis(
         self,
         source_code: str,
         variable_name: str,
-        sink_code: Optional[str] = None,
-        source_hints: Optional[List[str]] = None,
-        sink_hints: Optional[List[str]] = None,
+        sink_code: str | None = None,
+        source_hints: list[str] | None = None,
+        sink_hints: list[str] | None = None,
         max_hops: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """基于规则的快速数据流分析（不依赖 LLM）。"""
 
         code_to_analyze = f"{source_code}\n{sink_code or ''}"
-        lower_code = code_to_analyze.lower()
+        code_to_analyze.lower()
         hints_source = self._normalize_hints(source_hints)
         hints_sink = self._normalize_hints(sink_hints)
 
-        source_patterns: List[tuple[str, str]] = [
+        source_patterns: list[tuple[str, str]] = [
             (r"\$_GET\[|\$_POST\[|\$_REQUEST\[|\$_COOKIE\[", "http_request_input"),
             (r"request\.(args|form|get_json|values|data)|ctx\.query|ctx\.params", "http_request_input"),
             (r"\binput\s*\(|argv\\b|getenv\s*\(", "runtime_input"),
             (r"\brecv\s*\(|\bread\s*\(|\bfgets\s*\(", "io_input"),
         ]
-        sink_patterns: List[tuple[str, str]] = [
+        sink_patterns: list[tuple[str, str]] = [
             (r"execute\s*\(|query\s*\(|rawquery", "sql_sink"),
             (r"system\s*\(|exec\s*\(|popen\s*\(|shell_exec", "command_sink"),
             (r"eval\s*\(|new\\s+Function", "code_exec_sink"),
@@ -403,7 +403,7 @@ class DataFlowAnalysisTool(AgentTool):
             (r"memcpy\s*\(|memmove\s*\(", "buffer_overflow_risk"),
             (r"gets\s*\(|scanf\s*\(", "unsafe_io_sink"),
         ]
-        sanitizer_patterns: List[tuple[str, str]] = [
+        sanitizer_patterns: list[tuple[str, str]] = [
             (r"htmlspecialchars\s*\(|escape\(|encodeURIComponent", "output_encoding"),
             (r"filter_var\s*\(|validate|sanitize", "input_validation"),
             (r"preparedstatement|bindparam|parameterized|execute\s*\([^)]*[,)]", "parameter_binding"),
@@ -443,7 +443,7 @@ class DataFlowAnalysisTool(AgentTool):
         taint_steps = self._build_taint_steps(source_nodes, sanitizers, sink_nodes, variable_name, max_hops=max_hops)
         confidence = self._estimate_confidence(risk_level, source_nodes, sink_nodes, sanitizers)
 
-        next_actions: List[str] = []
+        next_actions: list[str] = []
         if risk_level in {"high", "medium"}:
             next_actions.append("结合 controlflow_analysis_light 验证可达性和控制条件。")
         if any(node in {"stack_overflow_risk", "buffer_overflow_risk"} for node in sink_nodes):
@@ -469,14 +469,14 @@ class DataFlowAnalysisTool(AgentTool):
         self,
         file_path: str,
         *,
-        start_line: Optional[int],
-        end_line: Optional[int],
-    ) -> Dict[str, Any]:
+        start_line: int | None,
+        end_line: int | None,
+    ) -> dict[str, Any]:
         normalized = str(file_path or "").strip()
         if not normalized:
             return {"ok": False, "error": "file_path 为空"}
 
-        candidates: List[str] = []
+        candidates: list[str] = []
         if self.project_root:
             candidates.append(os.path.normpath(os.path.join(self.project_root, normalized)))
         candidates.append(os.path.normpath(normalized))
@@ -496,7 +496,7 @@ class DataFlowAnalysisTool(AgentTool):
             return {"ok": False, "error": f"无法读取文件: {normalized}"}
 
         try:
-            with open(full_path, "r", encoding="utf-8", errors="ignore") as file_obj:
+            with open(full_path, encoding="utf-8", errors="ignore") as file_obj:
                 lines = file_obj.readlines()
         except Exception as exc:
             return {"ok": False, "error": f"读取文件失败: {exc}"}
@@ -518,14 +518,14 @@ class DataFlowAnalysisTool(AgentTool):
         }
 
     @staticmethod
-    def _normalize_hints(value: Optional[List[str]]) -> List[str]:
+    def _normalize_hints(value: list[str] | None) -> list[str]:
         if not isinstance(value, list):
             return []
         return [str(item).strip() for item in value if str(item).strip()]
 
     @staticmethod
-    def _unique_list(values: List[str]) -> List[str]:
-        output: List[str] = []
+    def _unique_list(values: list[str]) -> list[str]:
+        output: list[str] = []
         seen = set()
         for item in values:
             key = str(item).strip()
@@ -536,9 +536,9 @@ class DataFlowAnalysisTool(AgentTool):
         return output
 
     @staticmethod
-    def _collect_evidence_lines(source_code: str, patterns: List[str], max_lines: int = 12) -> List[int]:
+    def _collect_evidence_lines(source_code: str, patterns: list[str], max_lines: int = 12) -> list[int]:
         lines = source_code.splitlines()
-        results: List[int] = []
+        results: list[int] = []
         for idx, line in enumerate(lines, start=1):
             if any(pattern and pattern.lower() in line.lower() for pattern in patterns):
                 results.append(idx)
@@ -548,15 +548,15 @@ class DataFlowAnalysisTool(AgentTool):
 
     def _build_taint_steps(
         self,
-        source_nodes: List[str],
-        sanitizers: List[str],
-        sink_nodes: List[str],
+        source_nodes: list[str],
+        sanitizers: list[str],
+        sink_nodes: list[str],
         variable_name: str,
         *,
         max_hops: int,
-    ) -> List[str]:
+    ) -> list[str]:
         hops = max(2, min(max_hops, 12))
-        steps: List[str] = [f"source -> {variable_name}"]
+        steps: list[str] = [f"source -> {variable_name}"]
         if sanitizers:
             for sanitizer in sanitizers[: max(1, hops - 2)]:
                 steps.append(f"{variable_name} -> {sanitizer}")
@@ -569,9 +569,9 @@ class DataFlowAnalysisTool(AgentTool):
     @staticmethod
     def _estimate_confidence(
         risk_level: str,
-        source_nodes: List[str],
-        sink_nodes: List[str],
-        sanitizers: List[str],
+        source_nodes: list[str],
+        sink_nodes: list[str],
+        sanitizers: list[str],
     ) -> float:
         base = {"high": 0.85, "medium": 0.72, "low": 0.55, "none": 0.35}.get(risk_level, 0.5)
         if source_nodes and sink_nodes:
@@ -584,10 +584,10 @@ class DataFlowAnalysisTool(AgentTool):
         self,
         *,
         source_code: str,
-        sink_code: Optional[str],
+        sink_code: str | None,
         variable_name: str,
-        source_hints: Optional[List[str]],
-        sink_hints: Optional[List[str]],
+        source_hints: list[str] | None,
+        sink_hints: list[str] | None,
     ) -> str:
         source_hint_text = ", ".join(self._normalize_hints(source_hints)) or "无"
         sink_hint_text = ", ".join(self._normalize_hints(sink_hints)) or "无"
@@ -597,7 +597,7 @@ class DataFlowAnalysisTool(AgentTool):
         prompt += f"""提示:\n- source_hints: {source_hint_text}\n- sink_hints: {sink_hint_text}\n\n请输出 JSON，字段必须包含：\n- source_nodes: string[]\n- sink_nodes: string[]\n- sanitizers: string[]\n- taint_steps: string[]\n- risk_level: high|medium|low|none\n- confidence: 0-1\n- evidence_lines: integer[]\n- next_actions: string[]\n"""
         return prompt
 
-    def _normalize_llm_analysis(self, result: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_llm_analysis(self, result: Any) -> dict[str, Any] | None:
         if not isinstance(result, dict):
             return None
         source_nodes = result.get("source_nodes")
@@ -620,7 +620,7 @@ class DataFlowAnalysisTool(AgentTool):
         except Exception:
             confidence_value = 0.65
         evidence_lines_raw = result.get("evidence_lines")
-        evidence_lines: List[int] = []
+        evidence_lines: list[int] = []
         if isinstance(evidence_lines_raw, list):
             for item in evidence_lines_raw:
                 try:
@@ -647,7 +647,7 @@ class DataFlowAnalysisTool(AgentTool):
         }
 
     @staticmethod
-    def _merge_risk_level(primary: str, secondary: Optional[str]) -> str:
+    def _merge_risk_level(primary: str, secondary: str | None) -> str:
         ranking = {"none": 0, "low": 1, "medium": 2, "high": 3}
         if not secondary:
             return primary
@@ -664,9 +664,9 @@ class DataFlowAnalysisTool(AgentTool):
 
     def _merge_analysis(
         self,
-        quick_analysis: Dict[str, Any],
-        llm_analysis: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        quick_analysis: dict[str, Any],
+        llm_analysis: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         if not isinstance(llm_analysis, dict):
             return quick_analysis
 
@@ -693,7 +693,7 @@ class DataFlowAnalysisTool(AgentTool):
         return merged
 
     @staticmethod
-    def _format_analysis_result(analysis: Dict[str, Any], variable_name: str, file_path: str) -> str:
+    def _format_analysis_result(analysis: dict[str, Any], variable_name: str, file_path: str) -> str:
         lines = [
             "数据流分析结果",
             f"变量: {variable_name}",
@@ -723,8 +723,8 @@ class VulnerabilityValidationInput(BaseModel):
     code: str = Field(description="可能存在漏洞的代码")
     vulnerability_type: str = Field(description="漏洞类型")
     file_path: str = Field(default="unknown", description="文件路径")
-    line_number: Optional[int] = Field(default=None, description="行号")
-    context: Optional[str] = Field(default=None, description="额外上下文")
+    line_number: int | None = Field(default=None, description="行号")
+    context: str | None = Field(default=None, description="额外上下文")
 
 
 class VulnerabilityValidationTool(AgentTool):
@@ -732,15 +732,15 @@ class VulnerabilityValidationTool(AgentTool):
     漏洞验证工具
     验证疑似漏洞是否真实存在
     """
-    
+
     def __init__(self, llm_service):
         super().__init__()
         self.llm_service = llm_service
-    
+
     @property
     def name(self) -> str:
         return "vulnerability_validation"
-    
+
     @property
     def description(self) -> str:
         return """验证疑似漏洞是否真实存在。
@@ -758,18 +758,18 @@ class VulnerabilityValidationTool(AgentTool):
 - 详细分析
 - 利用条件
 - PoC 思路（如果确认存在漏洞）"""
-    
+
     @property
     def args_schema(self):
         return VulnerabilityValidationInput
-    
+
     async def _execute(
         self,
         code: str,
         vulnerability_type: str,
         file_path: str = "unknown",
-        line_number: Optional[int] = None,
-        context: Optional[str] = None,
+        line_number: int | None = None,
+        context: str | None = None,
         **kwargs
     ) -> ToolResult:
         """执行漏洞验证"""
@@ -781,7 +781,7 @@ class VulnerabilityValidationTool(AgentTool):
 {code}
 ```
 
-{f'额外上下文:' + chr(10) + '```' + chr(10) + context + chr(10) + '```' if context else ''}
+{'额外上下文:' + chr(10) + '```' + chr(10) + context + chr(10) + '```' if context else ''}
 
 请分析:
 1. 这段代码是否真的存在 {vulnerability_type} 漏洞？
@@ -801,20 +801,20 @@ class VulnerabilityValidationTool(AgentTool):
     "detailed_analysis": "详细分析"
 }}
 """
-            
+
             result = await self.llm_service.analyze_code_with_custom_prompt(
                 code=code,
                 language="text",
                 custom_prompt=validation_prompt,
             )
-            
+
             # 格式化输出
             output_parts = [f"🔎 漏洞验证结果 - {vulnerability_type}\n"]
             output_parts.append(f"文件: {file_path}")
             if line_number:
                 output_parts.append(f"行号: {line_number}")
             output_parts.append("")
-            
+
             if isinstance(result, dict):
                 # 验证结果
                 verdict_icons = {
@@ -825,29 +825,29 @@ class VulnerabilityValidationTool(AgentTool):
                 }
                 verdict = result.get("verdict", "unknown")
                 output_parts.append(f"判定: {verdict_icons.get(verdict, verdict)}")
-                
+
                 if result.get("confidence"):
                     output_parts.append(f"置信度: {result.get('confidence') * 100:.0f}%")
-                
+
                 if result.get("exploitation_conditions"):
-                    output_parts.append(f"\n利用条件:")
+                    output_parts.append("\n利用条件:")
                     for cond in result.get("exploitation_conditions", []):
                         output_parts.append(f"  - {cond}")
-                
+
                 if result.get("attack_vector"):
                     output_parts.append(f"\n攻击向量: {result.get('attack_vector')}")
-                
+
                 if result.get("poc_idea") and verdict in ["confirmed", "likely"]:
                     output_parts.append(f"\nPoC思路: {result.get('poc_idea')}")
-                
+
                 if result.get("false_positive_reason") and verdict in ["unlikely", "false_positive"]:
                     output_parts.append(f"\n误报原因: {result.get('false_positive_reason')}")
-                
+
                 if result.get("detailed_analysis"):
                     output_parts.append(f"\n详细分析:\n{result.get('detailed_analysis')}")
             else:
                 output_parts.append(str(result))
-            
+
             return ToolResult(
                 success=True,
                 data="\n".join(output_parts),
@@ -858,7 +858,7 @@ class VulnerabilityValidationTool(AgentTool):
                     "validation": result,
                 }
             )
-            
+
         except Exception as e:
             return ToolResult(
                 success=False,

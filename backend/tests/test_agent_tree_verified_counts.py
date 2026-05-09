@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -24,7 +24,7 @@ class _ScalarListResult:
 @pytest.mark.asyncio
 async def test_get_agent_tree_includes_verified_counts_and_preserves_legacy_totals():
     task_id = "task-1"
-    now = datetime(2026, 3, 23, 10, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 23, 10, 0, 0, tzinfo=UTC)
     root_node = SimpleNamespace(
         id="node-root",
         agent_id="root-agent",

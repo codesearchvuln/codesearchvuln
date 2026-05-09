@@ -1,13 +1,15 @@
 """Shared access and response helpers for agent task routes."""
 
-from datetime import datetime, timezone
 import re
-from typing import Any, Dict, Mapping, Optional
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException
 
 from app.models.agent_task import AgentTask, AgentTaskStatus
 from app.models.project import Project
+
 from .agent_tasks_contracts import AgentTaskDefectSummary, AgentTaskResponse
 from .agent_tasks_runtime import _collect_orchestrator_stats, _running_orchestrators
 
@@ -26,7 +28,7 @@ def _resolve_agent_task_source_mode(task: AgentTask) -> str:
 def _resolve_runtime_workflow_phase(
     task: AgentTask,
     orchestrator: Any = None,
-) -> Optional[str]:
+) -> str | None:
     phase = ""
     if orchestrator is not None and hasattr(orchestrator, "get_current_workflow_phase"):
         try:
@@ -50,8 +52,8 @@ def _resolve_runtime_workflow_phase(
 
 def _resolve_display_phase(
     task: AgentTask,
-    workflow_phase: Optional[str],
-) -> Optional[str]:
+    workflow_phase: str | None,
+) -> str | None:
     status = _normalize_token(task.status)
     source_mode = _resolve_agent_task_source_mode(task)
     current_step = str(task.current_step or "").strip()
@@ -93,7 +95,7 @@ def ensure_project_access(task: AgentTask, project: Project | None) -> Project:
 def build_agent_task_response(
     task: AgentTask,
     verified_severity_counts: Mapping[str, int] | None = None,
-    defect_summary: Dict[str, Any] | AgentTaskDefectSummary | None = None,
+    defect_summary: dict[str, Any] | AgentTaskDefectSummary | None = None,
 ) -> AgentTaskResponse:
     progress = float(task.progress_percentage) if hasattr(task, "progress_percentage") else 0.0
     total_iterations = int(task.total_iterations or 0)
@@ -162,7 +164,7 @@ def build_agent_task_response(
         quality_score=float(task.quality_score or 0.0),
         security_score=float(task.security_score) if task.security_score is not None else None,
         progress_percentage=progress,
-        created_at=task.created_at or datetime.now(timezone.utc),
+        created_at=task.created_at or datetime.now(UTC),
         started_at=task.started_at,
         completed_at=task.completed_at,
         error_message=task.error_message,

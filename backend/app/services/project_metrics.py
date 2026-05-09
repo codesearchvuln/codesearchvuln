@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Dict, Optional, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,7 +66,7 @@ class ProjectMetricsService:
             metrics = ProjectManagementMetrics(project_id=project_id)
         metrics.status = cls.STATUS_PENDING
         metrics.error_message = None
-        metrics.updated_at = datetime.now(timezone.utc)
+        metrics.updated_at = datetime.now(UTC)
         db.add(metrics)
         await db.flush()
 
@@ -76,7 +76,7 @@ class ProjectMetricsService:
             logger.exception("Failed to build project metrics: %s", project_id)
             metrics.status = cls.STATUS_FAILED
             metrics.error_message = str(exc)
-            metrics.updated_at = datetime.now(timezone.utc)
+            metrics.updated_at = datetime.now(UTC)
             db.add(metrics)
             await db.commit()
             await db.refresh(metrics)
@@ -85,7 +85,7 @@ class ProjectMetricsService:
         cls._apply_payload(metrics, payload)
         metrics.status = cls.STATUS_READY
         metrics.error_message = None
-        metrics.updated_at = datetime.now(timezone.utc)
+        metrics.updated_at = datetime.now(UTC)
         db.add(metrics)
         await db.commit()
         await db.refresh(metrics)
@@ -102,7 +102,7 @@ class ProjectMetricsService:
         payload = await cls._build_base_payload(project_id)
         cls._apply_payload(pending_metrics, payload)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         pending_metrics.status = cls.STATUS_PENDING
         pending_metrics.error_message = None
         pending_metrics.created_at = pending_metrics.created_at or now
@@ -147,7 +147,7 @@ class ProjectMetricsService:
     def _apply_payload(
         cls,
         metrics: ProjectManagementMetrics,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
     ) -> None:
         for field, value in payload.items():
             setattr(metrics, field, value)
@@ -156,8 +156,8 @@ class ProjectMetricsService:
     async def _build_base_payload(
         cls,
         project_id: str,
-    ) -> Dict[str, Optional[object]]:
-        payload: Dict[str, Optional[object]] = {
+    ) -> dict[str, object | None]:
+        payload: dict[str, object | None] = {
             "archive_size_bytes": 0,
             "archive_original_filename": None,
             "archive_uploaded_at": None,
@@ -173,7 +173,7 @@ class ProjectMetricsService:
         cls,
         db: AsyncSession,
         project_id: str,
-    ) -> Dict[str, Optional[int]]:
+    ) -> dict[str, int | None]:
         payload = await cls._build_base_payload(project_id)
         await cls._apply_agent_tasks(db, payload, project_id)
         await cls._apply_opengrep_tasks(db, payload, project_id)
@@ -184,7 +184,7 @@ class ProjectMetricsService:
         return payload
 
     @staticmethod
-    async def _apply_archive_meta(payload: Dict[str, Optional[object]], project_id: str) -> None:
+    async def _apply_archive_meta(payload: dict[str, object | None], project_id: str) -> None:
         meta = await get_project_zip_meta(project_id)
         if not meta:
             return
@@ -203,7 +203,7 @@ class ProjectMetricsService:
     async def _apply_agent_tasks(
         cls,
         db: AsyncSession,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
         project_id: str,
     ) -> None:
         stmt = select(
@@ -259,7 +259,7 @@ class ProjectMetricsService:
     async def _apply_opengrep_tasks(
         cls,
         db: AsyncSession,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
         project_id: str,
     ) -> None:
         stmt = select(
@@ -284,7 +284,7 @@ class ProjectMetricsService:
     async def _apply_gitleaks_tasks(
         cls,
         db: AsyncSession,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
         project_id: str,
     ) -> None:
         stmt = select(
@@ -302,7 +302,7 @@ class ProjectMetricsService:
     async def _apply_bandit_tasks(
         cls,
         db: AsyncSession,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
         project_id: str,
     ) -> None:
         stmt = select(
@@ -328,7 +328,7 @@ class ProjectMetricsService:
     async def _apply_phpstan_tasks(
         cls,
         db: AsyncSession,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
         project_id: str,
     ) -> None:
         stmt = select(
@@ -345,7 +345,7 @@ class ProjectMetricsService:
     @classmethod
     def _apply_task_rollup(
         cls,
-        payload: Dict[str, Optional[object]],
+        payload: dict[str, object | None],
         rows: Sequence,
         *,
         bucket_key: str,
@@ -353,7 +353,7 @@ class ProjectMetricsService:
         total = len(rows)
         completed = 0
         running = 0
-        last_completed: Optional[datetime] = payload.get("last_completed_task_at")
+        last_completed: datetime | None = payload.get("last_completed_task_at")
         for row in rows:
             status = cls._normalize_status(row.status)
             if status in cls.COMPLETED_STATUSES:
@@ -372,13 +372,13 @@ class ProjectMetricsService:
             payload["last_completed_task_at"] = last_completed
 
     @staticmethod
-    def _normalize_status(value: Optional[str]) -> str:
+    def _normalize_status(value: str | None) -> str:
         return str(value or "").strip().lower()
 
     @staticmethod
     def _resolve_agent_source_mode(
-        name: Optional[str],
-        description: Optional[str],
+        name: str | None,
+        description: str | None,
     ) -> str:
         normalized_name = str(name or "").strip().lower()
         normalized_description = str(description or "").strip().lower()
@@ -397,7 +397,7 @@ class ProjectMetricsService:
         cls,
         db: AsyncSession,
         task_ids: Sequence[str],
-    ) -> Dict[str, Dict[str, int]]:
+    ) -> dict[str, dict[str, int]]:
         normalized_task_ids = [str(task_id).strip() for task_id in task_ids if str(task_id).strip()]
         if not normalized_task_ids:
             return {}
@@ -429,7 +429,7 @@ class ProjectMetricsService:
             .group_by(AgentFinding.task_id)
         )
 
-        counts_by_task: Dict[str, Dict[str, int]] = {}
+        counts_by_task: dict[str, dict[str, int]] = {}
         for task_id, critical, high, medium, low in rows.fetchall():
             counts_by_task[str(task_id)] = {
                 "critical": int(critical or 0),
@@ -444,7 +444,7 @@ class ProjectMetricsRefresher:
     def __init__(self) -> None:
         self._pending: set[str] = set()
 
-    def enqueue(self, project_id: Optional[str]) -> None:
+    def enqueue(self, project_id: str | None) -> None:
         if not project_id:
             return
         if project_id in self._pending:

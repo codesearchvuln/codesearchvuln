@@ -8,14 +8,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import importlib
 import json
 import logging
 import os
-from pathlib import Path
 import tempfile
-from typing import Any, Dict, List, Tuple
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +27,10 @@ _MAX_DOC_LENGTH = 4000
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def _extract_doc_texts(raw_doc: Any) -> Tuple[str, str]:
+def _extract_doc_texts(raw_doc: Any) -> tuple[str, str]:
     """提取文档首行摘要和截断后的完整描述。"""
     doc = str(raw_doc or "").strip()
     if not doc:
@@ -41,10 +41,10 @@ def _extract_doc_texts(raw_doc: Any) -> Tuple[str, str]:
     return summary, full
 
 
-def _normalize_checks(raw_checks: Any) -> List[str]:
+def _normalize_checks(raw_checks: Any) -> list[str]:
     if not isinstance(raw_checks, list):
         return []
-    checks: List[str] = []
+    checks: list[str] = []
     for item in raw_checks:
         text = str(item or "").strip()
         if text and text not in checks:
@@ -52,7 +52,7 @@ def _normalize_checks(raw_checks: Any) -> List[str]:
     return checks
 
 
-def _import_bandit_runtime() -> Tuple[str, Any]:
+def _import_bandit_runtime() -> tuple[str, Any]:
     """导入 bandit 运行时并返回版本和插件 manager。"""
     try:
         bandit_module = importlib.import_module("bandit")
@@ -72,7 +72,7 @@ def build_bandit_builtin_snapshot(
     bandit_version: str | None = None,
     manager: Any = None,
     generated_at: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """构建 Bandit 内置规则快照（内存对象）。"""
     resolved_version = str(bandit_version or "").strip()
     resolved_manager = manager
@@ -83,7 +83,7 @@ def build_bandit_builtin_snapshot(
         resolved_version = "unknown"
 
     plugins = getattr(resolved_manager, "plugins", []) or []
-    rules: List[Dict[str, Any]] = []
+    rules: list[dict[str, Any]] = []
 
     for plugin_descriptor in plugins:
         plugin = getattr(plugin_descriptor, "plugin", None)
@@ -124,7 +124,7 @@ def build_bandit_builtin_snapshot(
     }
 
 
-def write_bandit_builtin_snapshot(output_path: Path | str | None = None) -> Dict[str, Any]:
+def write_bandit_builtin_snapshot(output_path: Path | str | None = None) -> dict[str, Any]:
     """生成并写入 Bandit 内置规则快照文件。"""
     snapshot = build_bandit_builtin_snapshot()
     target_path = Path(output_path) if output_path is not None else _BANDIT_BUILTIN_JSON_PATH
@@ -137,7 +137,7 @@ def write_bandit_builtin_snapshot(output_path: Path | str | None = None) -> Dict
     return snapshot
 
 
-def load_bandit_builtin_snapshot(snapshot_path: Path | str | None = None) -> Dict[str, Any]:
+def load_bandit_builtin_snapshot(snapshot_path: Path | str | None = None) -> dict[str, Any]:
     """读取 Bandit 内置规则快照（后续可用于 seed 同步入口）。"""
     target_path = Path(snapshot_path) if snapshot_path is not None else _BANDIT_BUILTIN_JSON_PATH
     if not target_path.exists():
@@ -151,9 +151,9 @@ def load_bandit_builtin_snapshot(snapshot_path: Path | str | None = None) -> Dic
 def update_bandit_builtin_snapshot_rule(
     *,
     rule_id: str,
-    updates: Dict[str, Any],
+    updates: dict[str, Any],
     snapshot_path: Path | str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """更新快照中的单条规则并原子写回文件。"""
     if not isinstance(updates, dict) or not updates:
         raise ValueError("updates must contain at least one field")
@@ -168,7 +168,7 @@ def update_bandit_builtin_snapshot_rule(
     if not normalized_rule_id:
         raise ValueError("rule_id is required")
 
-    matched_rule: Dict[str, Any] | None = None
+    matched_rule: dict[str, Any] | None = None
     for rule in rules:
         if not isinstance(rule, dict):
             continue

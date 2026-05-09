@@ -17,7 +17,7 @@ def test_static_tasks_split_modules_exist_and_aggregator_keeps_exports():
 
     loaded_modules = [importlib.import_module(name) for name in module_names]
 
-    assert all(hasattr(module, "router") or name.endswith("_shared") for module, name in zip(loaded_modules, module_names))
+    assert all(hasattr(module, "router") or name.endswith("_shared") for module, name in zip(loaded_modules, module_names, strict=False))
     assert hasattr(static_tasks, "router")
     assert hasattr(static_tasks, "_parse_opengrep_output")
     assert hasattr(static_tasks, "_parse_bandit_output_payload")

@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from app.services.agent.agents.base import AgentConfig, AgentResult, AgentType, BaseAgent
-import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
+from app.services.agent.agents.base import AgentConfig, AgentResult, AgentType, BaseAgent
 
 
 class _DummyAgent(BaseAgent):

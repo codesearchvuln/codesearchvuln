@@ -2,18 +2,17 @@
 搜索功能测试配置和 Fixtures
 """
 
-import pytest
 import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.db.base import Base
-from app.models.user import User
-from app.models.project import Project
-from app.models.agent_task import AgentTask, AgentTaskStatus
-from app.models.opengrep import OpengrepRule, OpengrepScanTask, OpengrepFinding
-from app.models.gitleaks import GitleaksScanTask, GitleaksFinding
 from app.core.security import get_password_hash
+from app.db.base import Base
+from app.models.agent_task import AgentTask, AgentTaskStatus
+from app.models.project import Project
+from app.models.user import User
 
 
 def _is_sqlite_incompatible_index(index) -> bool:

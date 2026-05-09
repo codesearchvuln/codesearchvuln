@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from app.services.agent.skills.scan_core import build_scan_core_skill_availability
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.services.agent.agents.base import (
     RETRY_GUARD_TOOLS,
     AgentConfig,
@@ -12,8 +13,7 @@ from app.services.agent.agents.base import (
     AgentType,
     BaseAgent,
 )
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
+from app.services.agent.skills.scan_core import build_scan_core_skill_availability
 
 
 class _DummyAgent(BaseAgent):

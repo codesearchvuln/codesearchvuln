@@ -1,3 +1,4 @@
+from datetime import timezone
 from app.api.v1.endpoints.projects_shared import *
 from app.api.v1.endpoints.projects_shared import (
     _build_zip_project,
@@ -70,7 +71,7 @@ async def generate_project_description_preview(
             raise
         except Exception as e:
             logger.error(f"生成项目描述失败: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"生成项目描述失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"生成项目描述失败: {str(e)}") from e
 
 
 @router.post(
@@ -158,7 +159,7 @@ async def generate_project_description_for_project(
             await db.commit()
         except Exception:
             logger.exception("保存项目简介失败状态时出错")
-        raise HTTPException(status_code=500, detail=f"生成项目简介失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"生成项目简介失败: {str(e)}") from e
 
 
 @router.post("/create-with-zip", response_model=ProjectResponse)
@@ -201,14 +202,14 @@ async def create_project_with_zip(
             raise HTTPException(
                 status_code=409,
                 detail="检测到相同压缩包已存在，请勿重复上传",
-            )
+            ) from None
         response_project = await load_project_for_response(
             db,
             project.id,
             include_metrics=False,
         )
         if response_project is not None:
-            setattr(response_project, "project_info_status", "pending")
+            response_project.project_info_status = "pending"
         return response_project
     except HTTPException:
         await db.rollback()
@@ -419,7 +420,7 @@ async def upload_project_directory(
 
             try:
                 # 使用 shutil.make_archive 压缩
-                archive_path = shutil.make_archive(
+                shutil.make_archive(
                     temp_zip_path.replace(".zip", ""),  # 去掉 .zip 后缀（make_archive 会自动添加）
                     "zip",
                     temp_base_dir,
@@ -428,7 +429,7 @@ async def upload_project_directory(
                 # 清理临时 ZIP 文件
                 if os.path.exists(temp_zip_path):
                     os.remove(temp_zip_path)
-                raise HTTPException(status_code=500, detail=f"压缩文件失败: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"压缩文件失败: {str(e)}") from e
 
             # 验证压缩文件
             is_valid, error = UploadManager.validate_file(temp_zip_path)
@@ -491,7 +492,7 @@ async def upload_project_directory(
                 raise HTTPException(
                     status_code=409,
                     detail="检测到相同压缩包已存在，请勿重复上传",
-                )
+                ) from None
 
             return {
                 "message": "文件夹上传成功",
@@ -511,7 +512,7 @@ async def upload_project_directory(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}") from e
 
 
 @router.delete("/{id}/zip")

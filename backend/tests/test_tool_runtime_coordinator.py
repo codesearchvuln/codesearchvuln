@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
 import pytest
+from pydantic import BaseModel, Field
 
 from app.services.agent.tools.base import AgentTool, ToolResult
 from app.services.agent.tools.queue_tools import PushFindingToQueueTool

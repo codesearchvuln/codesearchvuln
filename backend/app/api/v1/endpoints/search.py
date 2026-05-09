@@ -3,7 +3,8 @@
 支持跨 Project、AgentTask、AgentFinding 的统一搜索
 """
 
-from typing import Any, Optional
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +12,11 @@ from app.api import deps
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.search import (
-    SearchRequest,
+    SearchAgentFindingItem,
+    SearchAgentTaskItem,
+    SearchProjectItem,
     SearchResponse,
     SearchStats,
-    SearchProjectItem,
-    SearchAgentTaskItem,
-    SearchAgentFindingItem,
 )
 from app.services.search_service import SearchService
 
@@ -35,14 +35,14 @@ async def search_global(
 ) -> SearchResponse:
     """
     全局搜索接口
-    
+
     同时搜索项目、审计任务、漏洞发现
-    
+
     搜索字段：
     - Project: name, description, repository_url
     - AgentTask: name, description, task_type, status
     - AgentFinding: title, description, vulnerability_type, file_path, code_snippet
-    
+
     返回格式：
     {
         "findings": [...],
@@ -61,7 +61,7 @@ async def search_global(
     # 验证排序参数
     if sort_order not in ("asc", "desc"):
         sort_order = "desc"
-    
+
     # 执行全局搜索
     search_result = await SearchService.search_all(
         db=db,
@@ -72,7 +72,7 @@ async def search_global(
         sort_by=sort_by,
         sort_order=sort_order,
     )
-    
+
     # 构建响应
     findings_items = [
         SearchAgentFindingItem.model_validate(f)
@@ -86,13 +86,13 @@ async def search_global(
         SearchProjectItem.model_validate(p)
         for p in search_result["projects"]
     ]
-    
+
     stats = SearchStats(
         findings_total=search_result["total"]["findings_total"],
         tasks_total=search_result["total"]["tasks_total"],
         projects_total=search_result["total"]["projects_total"],
     )
-    
+
     return SearchResponse(
         findings=findings_items,
         tasks=tasks_items,
@@ -116,12 +116,12 @@ async def search_findings(
 ) -> Any:
     """
     搜索漏洞发现
-    
+
     搜索字段: title, description, vulnerability_type, file_path, code_snippet
     """
     if sort_order not in ("asc", "desc"):
         sort_order = "desc"
-    
+
     findings, total = await SearchService.search_findings(
         db=db,
         keyword=keyword,
@@ -131,7 +131,7 @@ async def search_findings(
         sort_by=sort_by,
         sort_order=sort_order,
     )
-    
+
     return {
         "data": [SearchAgentFindingItem.model_validate(f) for f in findings],
         "total": total,
@@ -152,12 +152,12 @@ async def search_tasks(
 ) -> Any:
     """
     搜索审计任务
-    
+
     搜索字段: name, description, task_type, status
     """
     if sort_order not in ("asc", "desc"):
         sort_order = "desc"
-    
+
     tasks, total = await SearchService.search_tasks(
         db=db,
         keyword=keyword,
@@ -167,7 +167,7 @@ async def search_tasks(
         sort_by=sort_by,
         sort_order=sort_order,
     )
-    
+
     return {
         "data": [SearchAgentTaskItem.model_validate(t) for t in tasks],
         "total": total,
@@ -188,12 +188,12 @@ async def search_projects(
 ) -> Any:
     """
     搜索项目
-    
+
     搜索字段: name, description, repository_url
     """
     if sort_order not in ("asc", "desc"):
         sort_order = "desc"
-    
+
     projects, total = await SearchService.search_projects(
         db=db,
         keyword=keyword,
@@ -203,7 +203,7 @@ async def search_projects(
         sort_by=sort_by,
         sort_order=sort_order,
     )
-    
+
     return {
         "data": [SearchProjectItem.model_validate(p) for p in projects],
         "total": total,

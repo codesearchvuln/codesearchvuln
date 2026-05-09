@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
 import sys
 import types
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -105,7 +105,7 @@ async def test_list_agent_tasks_returns_verified_severity_buckets_and_defect_sum
         high_count=2,
         medium_count=1,
         low_count=0,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     db = AsyncMock()
@@ -204,7 +204,7 @@ async def test_get_agent_task_returns_defect_summary(monkeypatch):
         quality_score=0.0,
         security_score=0.0,
         progress_percentage=100.0,
-        created_at=datetime(2026, 2, 12, 8, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 2, 12, 8, 0, 0, tzinfo=UTC),
         started_at=None,
         completed_at=None,
         error_message=None,

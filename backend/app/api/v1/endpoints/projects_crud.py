@@ -1,4 +1,5 @@
 import json
+from datetime import timezone
 
 from fastapi import Query
 
@@ -55,11 +56,12 @@ async def create_project(
     db.add(project)
     await db.commit()
     project_metrics_refresher.enqueue(project.id)
-    return await load_project_for_response(
+    loaded_project = await load_project_for_response(
         db,
         project.id,
         include_metrics=False,
     )
+    return loaded_project or project
 
 @router.get("/", response_model=List[ProjectResponse])
 async def read_projects(

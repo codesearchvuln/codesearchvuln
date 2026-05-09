@@ -3,15 +3,13 @@
 
 import re
 import sys
-from typing import Dict
 
 
 class SimpleExtractFunctionTool:
     """简化版的 PHP 函数提取工具（用于测试）"""
-    
-    def _extract_php(self, code: str, function_name: str) -> Dict:
+
+    def _extract_php(self, code: str, function_name: str) -> dict:
         """提取 PHP 函数（支持类方法、独立函数）"""
-        import re
 
         # 支持类方法（访问修饰符 + static/abstract/final）和独立函数
         # 匹配: public static function name(...) 或 function name(...)
@@ -25,9 +23,9 @@ class SimpleExtractFunctionTool:
         # 检查是否为接口/抽象方法（以分号结尾）
         matched_text = match.group(0)
         is_abstract = matched_text.rstrip().endswith(';')
-        
+
         start_pos = match.start()
-        
+
         if is_abstract:
             # 接口/抽象方法，到分号结束
             end_pos = match.end()
@@ -61,10 +59,9 @@ class SimpleExtractFunctionTool:
             "code": func_code,
             "parameters": params,
         }
-    
-    def _extract_generic(self, code: str, function_name: str) -> Dict:
+
+    def _extract_generic(self, code: str, function_name: str) -> dict:
         """通用函数提取（正则）"""
-        import re
 
         # 尝试多种模式
         patterns = [
@@ -105,7 +102,7 @@ class SimpleExtractFunctionTool:
 
 def test_php_class_method_extraction():
     """测试 PHP 类方法提取"""
-    
+
     # 模拟 RunScriptCommand.php 中的代码
     php_code = """<?php
 
@@ -126,26 +123,26 @@ class RunScriptCommand extends Command
     public function execute(InputInterface $input, OutputInterface $output): int
     {
         $scriptPath = $input->getArgument('script');
-        
+
         if (!file_exists($scriptPath)) {
             $output->writeln('<error>Script not found</error>');
             return Command::FAILURE;
         }
-        
+
         include $scriptPath;
-        
+
         return Command::SUCCESS;
     }
-    
+
     private static function validateScript($path)
     {
         return is_file($path) && is_readable($path);
     }
 }
 """
-    
+
     tool = SimpleExtractFunctionTool()
-    
+
     # 测试 1: 提取 public 方法
     print("测试 1: 提取 public function execute(...)")
     result = tool._extract_php(php_code, "execute")
@@ -159,7 +156,7 @@ class RunScriptCommand extends Command
     else:
         print(f"✗ 失败: {result.get('error')}")
         return False
-    
+
     # 测试 2: 提取 protected 方法
     print("\n测试 2: 提取 protected function configure(...)")
     result = tool._extract_php(php_code, "configure")
@@ -169,7 +166,7 @@ class RunScriptCommand extends Command
     else:
         print(f"✗ 失败: {result.get('error')}")
         return False
-    
+
     # 测试 3: 提取 private static 方法
     print("\n测试 3: 提取 private static function validateScript(...)")
     result = tool._extract_php(php_code, "validateScript")
@@ -179,14 +176,14 @@ class RunScriptCommand extends Command
     else:
         print(f"✗ 失败: {result.get('error')}")
         return False
-    
+
     # 测试 4: 测试接口方法（抽象方法）
     print("\n测试 4: 提取接口方法")
     interface_code = """<?php
 interface CommandInterface
 {
     public function execute(InputInterface $input, OutputInterface $output): int;
-    
+
     public function getName(): string;
 }
 """
@@ -198,7 +195,7 @@ interface CommandInterface
     else:
         print(f"✗ 失败: {result.get('error')}")
         return False
-    
+
     # 测试 5: 测试独立函数（向后兼容）
     print("\n测试 5: 提取独立函数（向后兼容）")
     standalone_code = """<?php
@@ -217,7 +214,7 @@ function execute($command) {
     else:
         print(f"✗ 失败: {result.get('error')}")
         return False
-    
+
     print("\n" + "="*60)
     print("所有测试通过! ✓")
     print("="*60)
@@ -226,13 +223,13 @@ function execute($command) {
 
 def test_generic_fallback():
     """测试通用提取的降级策略"""
-    
+
     print("\n" + "="*60)
     print("测试通用提取降级策略")
     print("="*60)
-    
+
     tool = SimpleExtractFunctionTool()
-    
+
     # 测试通用提取也能处理 PHP 类方法
     php_code = """<?php
 class TestClass {
@@ -241,7 +238,7 @@ class TestClass {
     }
 }
 """
-    
+
     result = tool._extract_generic(php_code, "execute")
     if result["success"]:
         print("✓ 通用提取也能处理 PHP 类方法")
@@ -249,7 +246,7 @@ class TestClass {
     else:
         print(f"✗ 通用提取失败: {result.get('error')}")
         return False
-    
+
     return True
 
 
@@ -258,7 +255,7 @@ if __name__ == "__main__":
         success = test_php_class_method_extraction()
         if success:
             success = test_generic_fallback()
-        
+
         sys.exit(0 if success else 1)
     except Exception as e:
         print(f"\n✗ 测试异常: {e}")

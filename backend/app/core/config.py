@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
-from typing import List, Union, Optional, Self
+from typing import Self
+
 from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 BACKEND_ENV_FILE = Path(__file__).resolve().parents[3] / "backend" / "docker" / "env" / "backend" / ".env"
 
@@ -33,18 +34,18 @@ def _default_image(name: str) -> str:
 class Settings(BaseSettings):
     PROJECT_NAME: str = "VulHunter"
     API_V1_STR: str = "/api/v1"
-    
+
     # SECURITY
     SECRET_KEY: str = "changethis_in_production_to_a_long_random_string"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
-    
+
     # CORS
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    BACKEND_CORS_ORIGINS: list[AnyHttpUrl] = []
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
-    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
+    def assemble_cors_origins(cls, v: str | list[str]) -> list[str] | str:
         if isinstance(v, str) and not v.startswith("["):
             return [i.strip() for i in v.split(",")]
         elif isinstance(v, (list, str)):
@@ -53,7 +54,7 @@ class Settings(BaseSettings):
 
     @field_validator("FUNCTION_LOCATOR_LANGUAGES", mode="before")
     @classmethod
-    def assemble_function_locator_languages(cls, v: Union[str, List[str]]) -> List[str]:
+    def assemble_function_locator_languages(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
             text = v.strip()
             if not text:
@@ -89,9 +90,9 @@ class Settings(BaseSettings):
 
     # LLM配置
     LLM_PROVIDER: str = "openai"  # gemini, openai, claude, qwen, deepseek, zhipu, moonshot, baidu, minimax, doubao, ollama
-    LLM_API_KEY: Optional[str] = None
-    LLM_MODEL: Optional[str] = None  # 不指定时使用provider的默认模型
-    LLM_BASE_URL: Optional[str] = None  # 自定义API端点（如中转站）
+    LLM_API_KEY: str | None = None
+    LLM_MODEL: str | None = None  # 不指定时使用provider的默认模型
+    LLM_BASE_URL: str | None = None  # 自定义API端点（如中转站）
     LLM_TIMEOUT: int = 300  # 超时时间（秒）
     LLM_TEMPERATURE: float = 0.1
     LLM_MAX_TOKENS: int = 4096
@@ -104,36 +105,36 @@ class Settings(BaseSettings):
     LLM_STREAM_TIMEOUT: int = 300  # 流式输出中两个Token之间的超时时间
     SUB_AGENT_TIMEOUT_SECONDS: int = 1200  # 子Agent超时时间（20分钟）
     TOOL_TIMEOUT_SECONDS: int = 60  # 工具执行默认超时时间
-    
+
     # 各LLM提供商的API Key配置（兼容单独配置）
-    OPENAI_API_KEY: Optional[str] = None
-    OPENAI_BASE_URL: Optional[str] = None
-    GEMINI_API_KEY: Optional[str] = None
-    CLAUDE_API_KEY: Optional[str] = None
-    QWEN_API_KEY: Optional[str] = None
-    DEEPSEEK_API_KEY: Optional[str] = None
-    ZHIPU_API_KEY: Optional[str] = None
-    MOONSHOT_API_KEY: Optional[str] = None
-    BAIDU_API_KEY: Optional[str] = None  # 格式: api_key:secret_key
-    MINIMAX_API_KEY: Optional[str] = None
-    DOUBAO_API_KEY: Optional[str] = None
-    OLLAMA_BASE_URL: Optional[str] = "http://localhost:11434/v1"
-    
+    OPENAI_API_KEY: str | None = None
+    OPENAI_BASE_URL: str | None = None
+    GEMINI_API_KEY: str | None = None
+    CLAUDE_API_KEY: str | None = None
+    QWEN_API_KEY: str | None = None
+    DEEPSEEK_API_KEY: str | None = None
+    ZHIPU_API_KEY: str | None = None
+    MOONSHOT_API_KEY: str | None = None
+    BAIDU_API_KEY: str | None = None  # 格式: api_key:secret_key
+    MINIMAX_API_KEY: str | None = None
+    DOUBAO_API_KEY: str | None = None
+    OLLAMA_BASE_URL: str | None = "http://localhost:11434/v1"
+
     # GitHub配置
-    GITHUB_TOKEN: Optional[str] = None
-    
+    GITHUB_TOKEN: str | None = None
+
     # GitLab配置
-    GITLAB_TOKEN: Optional[str] = None
-    
+    GITLAB_TOKEN: str | None = None
+
     # Gitea配置
-    GITEA_TOKEN: Optional[str] = None
-    
+    GITEA_TOKEN: str | None = None
+
     # 扫描配置
     MAX_ANALYZE_FILES: int = 0  # 最大分析文件数，0表示无限制
     MAX_FILE_SIZE_BYTES: int = 200 * 1024  # 最大文件大小 200KB
     LLM_CONCURRENCY: int = 3  # LLM并发数
     LLM_GAP_MS: int = 2000  # LLM请求间隔（毫秒）
-    
+
     # ZIP文件存储配置
     ZIP_STORAGE_PATH: str = "./uploads/zip_files"  # ZIP文件存储目录
     NEXUS_CACHE_STORAGE_PATH: str = "./nexus_cache"  # Nexus 缓存文件存储目录
@@ -160,15 +161,15 @@ class Settings(BaseSettings):
 
     # 通用缓存目录（git缓存等）
     CACHE_DIR: str = "./data/cache"  # 缓存目录基础路径
-    
+
     # ============ Agent 模块配置 ============
 
     # 嵌入模型配置（独立于 LLM 配置）
     EMBEDDING_PROVIDER: str = "openai"  # openai, azure, ollama, cohere, huggingface, jina, qwen
     EMBEDDING_MODEL: str = "text-embedding-3-small"
-    EMBEDDING_API_KEY: Optional[str] = None  # 嵌入模型专用 API Key（留空则使用 LLM_API_KEY）
-    EMBEDDING_BASE_URL: Optional[str] = None  # 嵌入模型专用 Base URL（留空使用提供商默认地址）
-    
+    EMBEDDING_API_KEY: str | None = None  # 嵌入模型专用 API Key（留空则使用 LLM_API_KEY）
+    EMBEDDING_BASE_URL: str | None = None  # 嵌入模型专用 Base URL（留空使用提供商默认地址）
+
     # 向量数据库配置
     VECTOR_DB_PATH: str = "./data/vector_db"  # 向量数据库持久化目录
 
@@ -185,14 +186,14 @@ class Settings(BaseSettings):
     ANALYSIS_MAX_WORKERS: int = 5  # Analysis 阶段最大 worker 数量
     VERIFICATION_MAX_WORKERS: int = 3  # Verification 阶段最大 worker 数量
     REPORT_MAX_WORKERS: int = 3  # Report 阶段最大 worker 数量
-    
+
     # 沙箱配置（必须）
     SANDBOX_RUNNER_IMAGE: str = _default_image("vulhunter-sandbox-runner")  # 唯一沙箱 runner 镜像
     SANDBOX_MEMORY_LIMIT: str = "512m"  # 沙箱内存限制
     SANDBOX_CPU_LIMIT: float = 1.0  # 沙箱 CPU 限制
     SANDBOX_TIMEOUT: int = 60  # 沙箱命令超时（秒）
     SANDBOX_NETWORK_MODE: str = "none"  # 沙箱网络模式 (none, bridge)
-    
+
     # RAG 配置
     #  默认禁用 RAG（Embedding/向量索引）初始化：智能审计任务不应依赖 embedding 配置
     # 如需启用，可通过环境变量显式开启（例如：RAG_ENABLED=true）
@@ -212,7 +213,7 @@ class Settings(BaseSettings):
     FLOW_PARSER_RUNNER_BATCH_MAX_BYTES: int = 8 * 1024 * 1024
 
     # 命中代码归属函数定位配置
-    FUNCTION_LOCATOR_LANGUAGES: List[str] = [
+    FUNCTION_LOCATOR_LANGUAGES: list[str] = [
         "python",
         "javascript",
         "typescript",
@@ -266,7 +267,7 @@ class Settings(BaseSettings):
     # YASA static engine
     YASA_ENABLED: bool = True
     YASA_BIN_PATH: str = "yasa"
-    YASA_RESOURCE_DIR: Optional[str] = None
+    YASA_RESOURCE_DIR: str | None = None
     YASA_TIMEOUT_SECONDS: int = 600
     YASA_ORPHAN_STALE_SECONDS: int = 120
     YASA_PROCESS_KILL_GRACE_SECONDS: int = 2

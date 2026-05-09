@@ -3,9 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core import security
-
 from app.db.session import get_db
 from app.models.user import User
+
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -602,7 +602,7 @@ def _build_agent_trend_split_side_effect(now: datetime):
 
 @pytest.mark.asyncio
 async def test_dashboard_snapshot_v2_exposes_summary_and_windowed_panels(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = SimpleNamespace(execute=AsyncMock(side_effect=_build_execute_side_effect(now)))
     monkeypatch.setattr(
         projects_insights,
@@ -688,7 +688,7 @@ async def test_dashboard_snapshot_v2_exposes_summary_and_windowed_panels(monkeyp
 
 @pytest.mark.asyncio
 async def test_dashboard_snapshot_v2_builds_weighted_hotspots_and_language_risk(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = SimpleNamespace(execute=AsyncMock(side_effect=_build_execute_side_effect(now)))
     monkeypatch.setattr(
         projects_insights,
@@ -772,7 +772,7 @@ async def test_dashboard_snapshot_v2_builds_weighted_hotspots_and_language_risk(
 async def test_dashboard_snapshot_v2_static_engine_rule_totals_follow_engine_page_counts(
     monkeypatch,
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = SimpleNamespace(
         execute=AsyncMock(side_effect=_build_static_engine_rule_total_mismatch_side_effect(now))
     )
@@ -832,7 +832,7 @@ async def test_dashboard_snapshot_v2_static_engine_rule_totals_follow_engine_pag
 async def test_dashboard_snapshot_v2_splits_intelligent_and_hybrid_verified_daily_activity(
     monkeypatch,
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = SimpleNamespace(execute=AsyncMock(side_effect=_build_agent_trend_split_side_effect(now)))
     monkeypatch.setattr(
         projects_insights,
@@ -883,7 +883,7 @@ async def test_dashboard_snapshot_v2_splits_intelligent_and_hybrid_verified_dail
 
 @pytest.mark.asyncio
 async def test_dashboard_snapshot_v2_groups_multi_engine_static_recent_tasks(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = SimpleNamespace(
         execute=AsyncMock(side_effect=_build_grouped_static_recent_tasks_side_effect(now))
     )

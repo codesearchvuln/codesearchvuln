@@ -6,8 +6,8 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +21,7 @@ from app.db.session import get_db
 from app.models.agent_task import AgentFinding, AgentTask, FindingStatus
 from app.models.project import Project
 from app.models.user import User
+from app.services.agent.utils.vulnerability_naming import infer_code_fence_language
 
 from .agent_tasks_findings import *
 
@@ -51,7 +52,7 @@ def _compact_markdown(markdown_text: str) -> str:
     return normalized.strip()
 
 
-def _normalize_report_export_verification_evidence(value: Any) -> Optional[str]:
+def _normalize_report_export_verification_evidence(value: Any) -> str | None:
     text = _normalize_optional_text(value)
     if not text:
         return None
@@ -60,7 +61,7 @@ def _normalize_report_export_verification_evidence(value: Any) -> Optional[str]:
     return text
 
 
-def _sanitize_report_export_verification_result(value: Any) -> Optional[Dict[str, Any]]:
+def _sanitize_report_export_verification_result(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
 
@@ -88,7 +89,7 @@ def _resolve_query_bool(value: Any, default: bool) -> bool:
     return bool(value)
 
 
-def _sanitize_download_filename_segment(value: Optional[str], fallback: str) -> str:
+def _sanitize_download_filename_segment(value: str | None, fallback: str) -> str:
     text = str(value or "").strip()
     if not text:
         return fallback
@@ -121,7 +122,7 @@ def _build_download_content_disposition(filename: str) -> str:
         f"filename*=UTF-8''{encoded_filename}"
     )
 
-def _escape_markdown_inline(text: Optional[str]) -> str:
+def _escape_markdown_inline(text: str | None) -> str:
     """转义 Markdown 行内特殊字符，避免标题/位置等结构被破坏。"""
     if text is None:
         return ""
@@ -131,17 +132,17 @@ def _escape_markdown_inline(text: Optional[str]) -> str:
     return escaped
 
 
-def _escape_markdown_table_cell(text: Optional[str]) -> str:
+def _escape_markdown_table_cell(text: str | None) -> str:
     return _escape_markdown_inline(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br/>")
 
 
-def _render_markdown_heading_text(text: Optional[str]) -> str:
+def _render_markdown_heading_text(text: str | None) -> str:
     if text is None:
         return ""
     return re.sub(r"\s+", " ", str(text).replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")).strip()
 
 
-def _render_markdown_code_span(text: Optional[str]) -> str:
+def _render_markdown_code_span(text: str | None) -> str:
     value = "" if text is None else str(text)
     value = value.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ").strip()
     delimiter_width = max((len(run) for run in re.findall(r"`+", value)), default=0) + 1
@@ -155,11 +156,11 @@ def _strip_markdown_escape_backslashes(text: str) -> str:
     return re.sub(r"\\([\\`*_{}\[\]()#+\-.!|>])", r"\1", str(text))
 
 
-def _normalize_severity(sev: Optional[str]) -> str:
+def _normalize_severity(sev: str | None) -> str:
     return str(sev).lower().strip() if sev else ""
 
 
-def _get_report_export_severity_label(severity: Optional[str]) -> str:
+def _get_report_export_severity_label(severity: str | None) -> str:
     severity_map = {
         "critical": "严重",
         "high": "高危",
@@ -175,7 +176,7 @@ def _get_report_export_severity_label(severity: Optional[str]) -> str:
     return fallback or "未知"
 
 
-def _get_report_export_authenticity_label(value: Optional[str]) -> str:
+def _get_report_export_authenticity_label(value: str | None) -> str:
     label_map = {
         "confirmed": "已确认真实漏洞",
         "verified": "已确认真实漏洞",
@@ -191,7 +192,7 @@ def _get_report_export_authenticity_label(value: Optional[str]) -> str:
     return fallback or "待确认"
 
 
-def _get_report_export_reachability_label(value: Optional[str]) -> str:
+def _get_report_export_reachability_label(value: str | None) -> str:
     label_map = {
         "reachable": "可达",
         "likely_reachable": "可能可达",
@@ -206,11 +207,11 @@ def _get_report_export_reachability_label(value: Optional[str]) -> str:
 
 
 def _get_report_export_vulnerability_type_label(
-    vulnerability_type: Optional[str],
+    vulnerability_type: str | None,
     *,
-    title: Optional[str] = None,
-    description: Optional[str] = None,
-    code_snippet: Optional[str] = None,
+    title: str | None = None,
+    description: str | None = None,
+    code_snippet: str | None = None,
 ) -> str:
     raw_type = _normalize_optional_text(vulnerability_type)
     profile = _resolve_vulnerability_profile(
@@ -233,14 +234,14 @@ def _get_report_export_project_description(project: Project) -> str:
 def _build_project_scan_result_lines(
     *,
     project: Project,
-    findings: List[AgentFinding],
-    export_statuses: Optional[Dict[str, str]] = None,
+    findings: list[AgentFinding],
+    export_statuses: dict[str, str] | None = None,
     export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
-) -> List[str]:
+) -> list[str]:
     status_map = export_statuses or {}
     severity_stats = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     status_stats = {"pending": 0, "verified": 0, "false_positive": 0}
-    vuln_type_stats: Dict[str, int] = {}
+    vuln_type_stats: dict[str, int] = {}
 
     for finding_row in findings:
         severity = _normalize_severity(getattr(finding_row, "severity", None))
@@ -302,7 +303,7 @@ def _remove_markdown_sections(markdown_text: str, titles: set[str]) -> str:
         return ""
 
     lines = content.split("\n")
-    headings: List[Tuple[int, int, str]] = []
+    headings: list[tuple[int, int, str]] = []
     in_code_block = False
 
     for index, raw_line in enumerate(lines):
@@ -322,7 +323,7 @@ def _remove_markdown_sections(markdown_text: str, titles: set[str]) -> str:
                 )
             )
 
-    remove_ranges: List[Tuple[int, int]] = []
+    remove_ranges: list[tuple[int, int]] = []
     for heading_index, (start_line, level, normalized_title) in enumerate(headings):
         if normalized_title not in titles:
             continue
@@ -337,7 +338,7 @@ def _remove_markdown_sections(markdown_text: str, titles: set[str]) -> str:
     if not remove_ranges:
         return content
 
-    merged_ranges: List[Tuple[int, int]] = []
+    merged_ranges: list[tuple[int, int]] = []
     for start_line, end_line in sorted(remove_ranges):
         if not merged_ranges or start_line > merged_ranges[-1][1]:
             merged_ranges.append((start_line, end_line))
@@ -345,7 +346,7 @@ def _remove_markdown_sections(markdown_text: str, titles: set[str]) -> str:
             prev_start, prev_end = merged_ranges[-1]
             merged_ranges[-1] = (prev_start, max(prev_end, end_line))
 
-    cleaned_lines: List[str] = []
+    cleaned_lines: list[str] = []
     cursor = 0
     for start_line, end_line in merged_ranges:
         cleaned_lines.extend(lines[cursor:start_line])
@@ -367,7 +368,7 @@ def _insert_section_after_title(markdown_text: str, section_markdown: str) -> st
 
     lines = content.split("\n")
     in_code_block = False
-    title_index: Optional[int] = None
+    title_index: int | None = None
 
     for index, raw_line in enumerate(lines):
         stripped = raw_line.strip()
@@ -401,7 +402,7 @@ def _ensure_project_report_title(markdown_text: str, project: Project) -> str:
         return title_line
 
     lines = content.split("\n")
-    first_non_empty_index: Optional[int] = None
+    first_non_empty_index: int | None = None
     for index, line in enumerate(lines):
         if line.strip():
             first_non_empty_index = index
@@ -418,7 +419,7 @@ def _ensure_project_report_title(markdown_text: str, project: Project) -> str:
     return f"{title_line}\n\n{content}".strip()
 
 
-def _strip_report_export_footer(markdown_text: Optional[str]) -> str:
+def _strip_report_export_footer(markdown_text: str | None) -> str:
     content = _normalize_optional_text(markdown_text)
     if not content:
         return ""
@@ -444,7 +445,7 @@ def _append_report_export_footer(markdown_text: str) -> str:
     return f"{content.rstrip()}\n\n---\n\n{REPORT_EXPORT_FOOTER}"
 
 
-def _normalize_poc_reference_text(text: Optional[str]) -> str:
+def _normalize_poc_reference_text(text: str | None) -> str:
     normalized = _normalize_optional_text(text)
     if not normalized:
         return ""
@@ -458,7 +459,7 @@ def _normalize_top_risk_entries(markdown_text: str) -> str:
 
     lines = content.split("\n")
     in_code_block = False
-    active_top_risk_level: Optional[int] = None
+    active_top_risk_level: int | None = None
 
     for index, raw_line in enumerate(lines):
         stripped = raw_line.strip()
@@ -487,7 +488,7 @@ def _normalize_top_risk_entries(markdown_text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _finding_sort_key(finding: AgentFinding) -> Tuple[int, float]:
+def _finding_sort_key(finding: AgentFinding) -> tuple[int, float]:
     severity_rank = {
         "critical": 1,
         "high": 2,
@@ -499,12 +500,12 @@ def _finding_sort_key(finding: AgentFinding) -> Tuple[int, float]:
     created_ts = 0.0
     if isinstance(created_at, datetime):
         if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
+            created_at = created_at.replace(tzinfo=UTC)
         created_ts = created_at.timestamp()
     return rank, -created_ts
 
 
-def _looks_like_degraded_function_text(text: Optional[str]) -> bool:
+def _looks_like_degraded_function_text(text: str | None) -> bool:
     normalized = _normalize_optional_text(text)
     if not normalized:
         return True
@@ -520,7 +521,7 @@ def _looks_like_degraded_function_text(text: Optional[str]) -> bool:
     return False
 
 
-def _count_degraded_function_markers(text: Optional[str]) -> int:
+def _count_degraded_function_markers(text: str | None) -> int:
     normalized = _normalize_optional_text(text) or ""
     lowered = normalized.lower()
     return (
@@ -532,14 +533,14 @@ def _count_degraded_function_markers(text: Optional[str]) -> int:
     )
 
 
-def _normalize_export_function_name(candidate: Optional[str]) -> Optional[str]:
+def _normalize_export_function_name(candidate: str | None) -> str | None:
     normalized = _normalize_optional_text(candidate)
     if not normalized or _looks_like_degraded_function_text(normalized):
         return None
     return normalized
 
 
-def _extract_function_name_from_title(title: Optional[str]) -> Optional[str]:
+def _extract_function_name_from_title(title: str | None) -> str | None:
     normalized = _normalize_optional_text(title)
     if not normalized:
         return None
@@ -555,7 +556,7 @@ def _extract_function_name_from_title(title: Optional[str]) -> Optional[str]:
     return None
 
 
-def _extract_function_name_from_flow_steps(steps: Optional[List[str]]) -> Optional[str]:
+def _extract_function_name_from_flow_steps(steps: list[str] | None) -> str | None:
     if not isinstance(steps, list):
         return None
     for raw_step in reversed(steps):
@@ -582,7 +583,7 @@ def _extract_function_name_from_flow_steps(steps: Optional[List[str]]) -> Option
     return None
 
 
-def _normalize_report_flow_steps(raw_steps: Any) -> List[str]:
+def _normalize_report_flow_steps(raw_steps: Any) -> list[str]:
     if not isinstance(raw_steps, list):
         return []
     return [
@@ -594,7 +595,7 @@ def _normalize_report_flow_steps(raw_steps: Any) -> List[str]:
 
 def _extract_report_function_context(
     finding_row: AgentFinding,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     verification_payload = (
         getattr(finding_row, "verification_result", None)
         if isinstance(getattr(finding_row, "verification_result", None), dict)
@@ -631,7 +632,7 @@ def _extract_report_function_context(
     if not flow_call_chain and root_function_flow:
         flow_call_chain = root_function_flow
 
-    function_name: Optional[str] = None
+    function_name: str | None = None
     for candidate in (
         verification_payload.get("function")
         if isinstance(verification_payload, dict)
@@ -659,7 +660,7 @@ def _extract_report_function_context(
 def _build_export_finding_display_title(
     finding_row: AgentFinding,
     *,
-    function_name: Optional[str],
+    function_name: str | None,
 ) -> str:
     title_text = _normalize_optional_text(getattr(finding_row, "title", None))
     if title_text and not _looks_like_degraded_function_text(title_text):
@@ -771,7 +772,7 @@ def _resolve_report_export_finding_authenticity(finding_row: AgentFinding) -> st
     )
 
 
-def _resolve_report_export_status(finding_row: AgentFinding) -> Optional[str]:
+def _resolve_report_export_status(finding_row: AgentFinding) -> str | None:
     normalized_status = _resolve_report_export_finding_status(finding_row)
     normalized_verdict = _resolve_report_export_finding_verdict(finding_row)
     normalized_authenticity = _resolve_report_export_finding_authenticity(finding_row)
@@ -811,13 +812,20 @@ def _resolve_report_export_manual_status(finding_row: AgentFinding) -> str:
         if isinstance(getattr(finding_row, "verification_result", None), dict)
         else {}
     )
+    explicit_manual_status = getattr(finding_row, "manual_status", None)
     raw_status = _normalize_export_finding_token(
-        getattr(finding_row, "manual_status", None) or verification_payload.get("manual_status")
+        explicit_manual_status or verification_payload.get("manual_status")
     )
     if raw_status == FindingStatus.VERIFIED:
         return FindingStatus.VERIFIED
     if raw_status == FindingStatus.FALSE_POSITIVE:
         return FindingStatus.FALSE_POSITIVE
+    if raw_status in {"pending", FindingStatus.NEEDS_REVIEW, FindingStatus.LIKELY, FindingStatus.UNCERTAIN}:
+        return "pending"
+    if explicit_manual_status is None and not verification_payload.get("manual_status"):
+        export_status = _resolve_report_export_status(finding_row)
+        if export_status in {FindingStatus.VERIFIED, FindingStatus.FALSE_POSITIVE}:
+            return export_status
     return "pending"
 
 
@@ -839,8 +847,8 @@ def _get_report_export_status_rank(status: str) -> int:
     return 3
 
 
-def _parse_inline_distribution_pairs(raw_text: Optional[str]) -> List[Tuple[str, str]]:
-    pairs: List[Tuple[str, str]] = []
+def _parse_inline_distribution_pairs(raw_text: str | None) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
     for chunk in re.split(r",\s*", str(raw_text or "").strip()):
         candidate = chunk.strip()
         if not candidate:
@@ -855,7 +863,7 @@ def _parse_inline_distribution_pairs(raw_text: Optional[str]) -> List[Tuple[str,
     return pairs
 
 
-def _parse_vuln_type_distribution_entries(raw_text: Optional[str]) -> List[Tuple[str, str]]:
+def _parse_vuln_type_distribution_entries(raw_text: str | None) -> list[tuple[str, str]]:
     normalized = str(raw_text or "").strip()
     if not normalized or normalized == "{}":
         return []
@@ -872,7 +880,7 @@ def _parse_vuln_type_distribution_entries(raw_text: Optional[str]) -> List[Tuple
     if not isinstance(parsed, dict):
         return []
 
-    entries: List[Tuple[str, str]] = []
+    entries: list[tuple[str, str]] = []
     for key, value in parsed.items():
         normalized_key = str(key).strip()
         if not normalized_key:
@@ -885,8 +893,8 @@ def _normalize_project_report_risk_overview(
     markdown_text: str,
     *,
     project: Project,
-    findings: List[AgentFinding],
-    export_statuses: Optional[Dict[str, str]] = None,
+    findings: list[AgentFinding],
+    export_statuses: dict[str, str] | None = None,
     export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
 ) -> str:
     normalized_content = _strip_report_export_footer(markdown_text)
@@ -911,9 +919,9 @@ def _normalize_project_report_risk_overview(
 def _build_project_report_fallback(
     *,
     project: Project,
-    findings: List[AgentFinding],
-    report_descriptions: Dict[str, Dict[str, Optional[str]]],
-    export_statuses: Optional[Dict[str, str]] = None,
+    findings: list[AgentFinding],
+    report_descriptions: dict[str, dict[str, str | None]],
+    export_statuses: dict[str, str] | None = None,
     export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
 ) -> str:
     status_map = export_statuses or {}
@@ -1013,7 +1021,7 @@ def _build_project_report_fallback(
 
 
 def _should_use_project_report_fallback(
-    stored_report: Optional[str],
+    stored_report: str | None,
     fallback_report: str,
 ) -> bool:
     stored_unknown_count = _count_degraded_function_markers(stored_report)
@@ -1061,13 +1069,13 @@ def _section_has_hidden_verification_evidence(body: str) -> bool:
     return False
 
 
-def _strip_hidden_verification_evidence_sections(markdown_text: Optional[str]) -> str:
+def _strip_hidden_verification_evidence_sections(markdown_text: str | None) -> str:
     content = _normalize_optional_text(markdown_text)
     if not content:
         return ""
 
     lines = str(content).split("\n")
-    headings: List[Tuple[int, int, str]] = []
+    headings: list[tuple[int, int, str]] = []
     in_code_block = False
 
     for index, raw_line in enumerate(lines):
@@ -1084,7 +1092,7 @@ def _strip_hidden_verification_evidence_sections(markdown_text: Optional[str]) -
     if not headings:
         return content
 
-    remove_ranges: List[Tuple[int, int]] = []
+    remove_ranges: list[tuple[int, int]] = []
     for heading_index, (start_line, level, title) in enumerate(headings):
         end_line = len(lines)
         for next_start, next_level, _next_title in headings[heading_index + 1 :]:
@@ -1100,7 +1108,7 @@ def _strip_hidden_verification_evidence_sections(markdown_text: Optional[str]) -
     if not remove_ranges:
         return content
 
-    cleaned_lines: List[str] = []
+    cleaned_lines: list[str] = []
     cursor = 0
     for start_line, end_line in remove_ranges:
         cleaned_lines.extend(lines[cursor:start_line])
@@ -1112,13 +1120,13 @@ def _strip_hidden_verification_evidence_sections(markdown_text: Optional[str]) -
     return cleaned.strip()
 
 
-def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
+def _strip_finding_export_noise(markdown_text: str | None) -> str:
     content = _strip_hidden_verification_evidence_sections(markdown_text)
     if not content:
         return ""
 
     lines = str(content).split("\n")
-    headings: List[Tuple[int, int, str]] = []
+    headings: list[tuple[int, int, str]] = []
     in_code_block = False
 
     for index, raw_line in enumerate(lines):
@@ -1135,7 +1143,7 @@ def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
     if not headings:
         return content
 
-    remove_ranges: List[Tuple[int, int]] = []
+    remove_ranges: list[tuple[int, int]] = []
     for heading_index, (start_line, level, title) in enumerate(headings):
         end_line = len(lines)
         for next_start, next_level, _next_title in headings[heading_index + 1 :]:
@@ -1160,7 +1168,7 @@ def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
     if not remove_ranges:
         return content
 
-    merged_ranges: List[Tuple[int, int]] = []
+    merged_ranges: list[tuple[int, int]] = []
     for start_line, end_line in sorted(remove_ranges):
         if not merged_ranges or start_line > merged_ranges[-1][1]:
             merged_ranges.append((start_line, end_line))
@@ -1168,7 +1176,7 @@ def _strip_finding_export_noise(markdown_text: Optional[str]) -> str:
             prev_start, prev_end = merged_ranges[-1]
             merged_ranges[-1] = (prev_start, max(prev_end, end_line))
 
-    cleaned_lines: List[str] = []
+    cleaned_lines: list[str] = []
     cursor = 0
     for start_line, end_line in merged_ranges:
         cleaned_lines.extend(lines[cursor:start_line])
@@ -1185,10 +1193,10 @@ def _build_finding_markdown_report(
     task: AgentTask,
     project: Project,
     finding_id: str,
-    finding_data: Dict[str, Any],
+    finding_data: dict[str, Any],
     export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
 ) -> str:
-    sections: List[str] = []
+    sections: list[str] = []
 
     title = str(finding_data.get("display_title") or finding_data.get("title") or "未命名漏洞")
     severity = _get_report_export_severity_label(finding_data.get("severity"))
@@ -1309,10 +1317,10 @@ def _build_finding_markdown_report(
 
 def _build_finding_payload_from_row(
     finding_row: AgentFinding,
-    report_descriptions: Dict[str, Dict[str, Optional[str]]],
+    report_descriptions: dict[str, dict[str, str | None]],
     export_status: str,
     export_options: ReportExportOptions = DEFAULT_REPORT_EXPORT_OPTIONS,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     finding_id = str(getattr(finding_row, "id", "") or "")
     verification_payload = (
         _sanitize_report_export_verification_result(
@@ -1379,6 +1387,7 @@ def _build_finding_payload_from_row(
             if export_options.include_metadata
             else None
         ),
+        "report": getattr(finding_row, "report", None),
         "description_markdown": description_markdown,
         "description": getattr(finding_row, "description", None),
         "code_snippet": (
@@ -1425,7 +1434,7 @@ def _normalize_inline_code_escapes(markdown_text: str) -> str:
     )
 
 
-def _split_markdown_table_row(line: str) -> List[str]:
+def _split_markdown_table_row(line: str) -> list[str]:
     stripped = line.strip()
     if stripped.startswith("|"):
         stripped = stripped[1:]
@@ -1444,11 +1453,11 @@ def _is_markdown_table_separator(line: str) -> bool:
 
 def _markdown_to_html(markdown_text: str) -> str:
     lines = markdown_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    html_parts: List[str] = []
-    paragraph_lines: List[str] = []
-    code_lines: List[str] = []
+    html_parts: list[str] = []
+    paragraph_lines: list[str] = []
+    code_lines: list[str] = []
     in_code_block = False
-    list_stack: List[Dict[str, Any]] = []
+    list_stack: list[dict[str, Any]] = []
 
     def _flush_paragraph() -> None:
         if not paragraph_lines:
@@ -1480,7 +1489,7 @@ def _markdown_to_html(markdown_text: str) -> str:
             _open_list(indent, list_type)
         else:
             current_indent = int(list_stack[-1]["indent"])
-            current_type = str(list_stack[-1]["type"])
+            str(list_stack[-1]["type"])
 
             if indent > current_indent:
                 # 嵌套列表必须挂在当前打开的 <li> 下。
@@ -1623,7 +1632,7 @@ def _markdown_to_html(markdown_text: str) -> str:
     return "\n".join(html_parts)
 
 
-def _strip_leading_markdown_heading(markdown_text: str, title_patterns: List[str]) -> str:
+def _strip_leading_markdown_heading(markdown_text: str, title_patterns: list[str]) -> str:
     lines = markdown_text.split("\n")
     index = 0
     while index < len(lines) and not lines[index].strip():
@@ -1665,7 +1674,7 @@ def _strip_leading_markdown_rules(markdown_text: str) -> str:
 def _shift_markdown_headings(markdown_text: str, level_offset: int = 1) -> str:
     if not markdown_text:
         return markdown_text
-    shifted_lines: List[str] = []
+    shifted_lines: list[str] = []
     in_code_block = False
     for raw_line in markdown_text.split("\n"):
         stripped = raw_line.lstrip()
@@ -1684,9 +1693,9 @@ def _shift_markdown_headings(markdown_text: str, level_offset: int = 1) -> str:
 
 
 def _normalize_embedded_markdown(
-    markdown_text: Optional[str],
+    markdown_text: str | None,
     *,
-    title_patterns: List[str],
+    title_patterns: list[str],
     level_offset: int = 1,
 ) -> str:
     content = _normalize_optional_text(markdown_text)
@@ -1790,9 +1799,9 @@ def _build_task_export_markdown(
     *,
     task: AgentTask,
     project: Project,
-    findings: List[AgentFinding],
-    report_descriptions: Dict[str, Dict[str, Optional[str]]],
-    export_statuses: Dict[str, str],
+    findings: list[AgentFinding],
+    report_descriptions: dict[str, dict[str, str | None]],
+    export_statuses: dict[str, str],
     project_report_fallback: str,
     export_options: ReportExportOptions,
 ) -> str:
@@ -1826,7 +1835,7 @@ def _build_task_export_markdown(
     )
     project_report = _strip_report_export_footer(project_report)
 
-    lines: List[str] = []
+    lines: list[str] = []
     if export_options.include_metadata:
         lines.append(str(project_report).strip() if project_report else "_无项目报告内容_")
         lines.append("")
@@ -1879,7 +1888,12 @@ def _build_task_export_markdown(
                 export_status=finding_export_status,
                 export_options=export_options,
             )
-            finding_report = _build_finding_markdown_report(
+            stored_finding_report = _normalize_optional_text(finding_payload.get("report"))
+            use_stored_finding_report = bool(
+                stored_finding_report
+                and _resolve_report_export_manual_status(finding_row) == finding_export_status
+            )
+            finding_report = stored_finding_report if use_stored_finding_report else _build_finding_markdown_report(
                 task=task,
                 project=project,
                 finding_id=str(getattr(finding_row, "id", "") or ""),
@@ -1931,17 +1945,17 @@ async def generate_audit_report(
 ):
     """
     生成审计报告
-    
+
     支持 Markdown / JSON / PDF 格式
     """
     task = await db.get(AgentTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     project = await db.get(Project, task.project_id)
     if not project:
         raise HTTPException(status_code=403, detail="无权访问此任务")
-    
+
     # 读取任务下全部 findings，由导出层统一按 status/verdict 做兼容归一化。
     findings_result = await db.execute(
         select(AgentFinding)
@@ -1958,8 +1972,8 @@ async def generate_audit_report(
         )
     )
     all_task_findings = findings_result.scalars().all()
-    export_statuses: Dict[str, str] = {}
-    findings: List[AgentFinding] = []
+    export_statuses: dict[str, str] = {}
+    findings: list[AgentFinding] = []
     for finding_row in all_task_findings:
         export_status = _resolve_report_export_status(finding_row)
         if export_status is None:
@@ -1977,11 +1991,11 @@ async def generate_audit_report(
             _finding_sort_key(finding_row)[1],
         ),
     )
-    
+
     #  Helper function to normalize severity for comparison (case-insensitive)
     def normalize_severity(sev: str) -> str:
         return str(sev).lower().strip() if sev else ""
-    
+
     # Log findings for debugging
     logger.info(
         "[Report] Task %s: found %d task findings, exporting %d report findings",
@@ -2002,7 +2016,7 @@ async def generate_audit_report(
 
     def _build_report_descriptions(
         finding_row: AgentFinding,
-    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None, str | None]:
         function_context = _extract_report_function_context(finding_row)
         verification_payload = (
             _sanitize_report_export_verification_result(function_context["verification_payload"])
@@ -2088,7 +2102,7 @@ async def generate_audit_report(
         )
         return structured_text, structured_markdown, display_title
 
-    report_descriptions: Dict[str, Dict[str, Optional[str]]] = {}
+    report_descriptions: dict[str, dict[str, str | None]] = {}
     for finding_row in findings:
         structured_text, structured_markdown, display_title = _build_report_descriptions(finding_row)
         report_descriptions[str(finding_row.id)] = {
@@ -2096,7 +2110,7 @@ async def generate_audit_report(
             "description_markdown": structured_markdown,
             "display_title": display_title,
         }
-    
+
     if format == "json":
         status_distribution = {
             "pending": sum(
@@ -2116,7 +2130,7 @@ async def generate_audit_report(
             ),
         }
         # Enhanced JSON report with full metadata
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "summary": {
                 "security_score": task.security_score,
                 "total_files_analyzed": task.analyzed_files,
@@ -2224,7 +2238,7 @@ async def generate_audit_report(
                 "task_id": task.id,
                 "project_id": task.project_id,
                 "project_name": project.name,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "task_status": task.status,
                 "duration_seconds": int((task.completed_at - task.started_at).total_seconds()) if task.completed_at and task.started_at else None,
             }
@@ -2278,8 +2292,8 @@ async def generate_audit_report(
     # Report Info
     md_lines.append("## 报告信息")
     md_lines.append("")
-    md_lines.append(f"| 属性 | 内容 |")
-    md_lines.append(f"|----------|-------|")
+    md_lines.append("| 属性 | 内容 |")
+    md_lines.append("|----------|-------|")
     md_lines.append(f"| **项目名称** | {_escape_markdown_table_cell(project.name)} |")
     md_lines.append(f"| **任务 ID** | `{task.id[:8]}...` |")
     md_lines.append(f"| **生成时间** | {timestamp} |")
@@ -2311,8 +2325,8 @@ async def generate_audit_report(
     # Findings Summary
     md_lines.append("### 漏洞发现概览")
     md_lines.append("")
-    md_lines.append(f"| 严重程度 | 数量 |")
-    md_lines.append(f"|----------|-------|")
+    md_lines.append("| 严重程度 | 数量 |")
+    md_lines.append("|----------|-------|")
     if critical > 0:
         md_lines.append(f"| **严重 (CRITICAL)** | {critical} |")
     if high > 0:
@@ -2353,7 +2367,7 @@ async def generate_audit_report(
             'medium': '中危 (Medium)',
             'low': '低危 (Low)'
         }
-        
+
         for severity_level, severity_name in severity_map.items():
             severity_findings = [f for f in findings if normalize_severity(f.severity) == severity_level]
             if not severity_findings:
@@ -2599,7 +2613,7 @@ async def get_finding_report(
                 "finding_id": finding.id,
                 "project_id": task.project_id,
                 "project_name": project.name,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "task_status": task.status,
             },
             "finding": finding_data,

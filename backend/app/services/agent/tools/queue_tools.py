@@ -3,7 +3,8 @@ Orchestrator 漏洞队列管理工具
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from ..push_finding_payload import normalize_push_finding_payload
@@ -56,7 +57,7 @@ class GetQueueStatusTool(AgentTool):
         """执行工具"""
         try:
             stats = self.queue_service.get_queue_stats(self.task_id)
-            
+
             # 获取队列前几项预览
             peek_findings = self.queue_service.peek_queue(self.task_id, limit=3)
             peek_list = []
@@ -68,7 +69,7 @@ class GetQueueStatusTool(AgentTool):
                         "title": finding.get("title", "N/A"),
                         "severity": finding.get("severity", "N/A"),
                     })
-            
+
             result_data = {
                 "queue_status": {
                     "current_size": stats.get("current_size", 0),
@@ -80,14 +81,14 @@ class GetQueueStatusTool(AgentTool):
                 "pending_count": stats.get("current_size", 0),
                 "peek": peek_list,
             }
-            
+
             logger.info(
                 f"[Queue] Status check for task {self.task_id}: "
                 f"{result_data['pending_count']} pending findings"
             )
-            
+
             return ToolResult(success=True, data=result_data)
-        
+
         except Exception as e:
             logger.error(f"[Queue] Failed to get queue status: {e}")
             return ToolResult(
@@ -142,7 +143,7 @@ class DequeueFindingTool(AgentTool):
         """执行工具"""
         try:
             finding = self.queue_service.dequeue_finding(self.task_id)
-            
+
             if finding is None:
                 result_data = {
                     "finding": None,
@@ -163,9 +164,9 @@ class DequeueFindingTool(AgentTool):
                     f"[Queue] Dequeued finding from task {self.task_id}: "
                     f"{finding.get('file_path')} (remaining: {remaining})"
                 )
-            
+
             return ToolResult(success=True, data=result_data)
-        
+
         except Exception as e:
             logger.error(f"[Queue] Failed to dequeue finding: {e}")
             return ToolResult(
@@ -179,8 +180,8 @@ class IsFindingInQueueInput(BaseModel):
     """查询漏洞是否在队列中"""
     file_path: str = Field(..., description="漏洞文件路径")
     line_start: int = Field(..., description="漏洞起始行号")
-    vulnerability_type: Optional[str] = Field(default="", description="漏洞类型")
-    title: Optional[str] = Field(default="", description="漏洞标题")
+    vulnerability_type: str | None = Field(default="", description="漏洞类型")
+    title: str | None = Field(default="", description="漏洞标题")
 
 
 class IsFindingInQueueTool(AgentTool):
@@ -247,7 +248,7 @@ class PushFindingToQueueInput(BaseModel):
     """推送漏洞到队列输入参数"""
     file_path: str = Field(..., description="漏洞所在文件路径")
     line_start: int = Field(..., description="起始行号")
-    line_end: Optional[int] = Field(default=None, description="结束行号")
+    line_end: int | None = Field(default=None, description="结束行号")
     title: str = Field(..., description="漏洞标题")
     description: str = Field(..., description="漏洞描述")
     vulnerability_type: str = Field(..., description="漏洞类型")
@@ -259,16 +260,16 @@ class PushFindingToQueueInput(BaseModel):
         default=0.8,
         description="置信度 0.0-1.0"
     )
-    function_name: Optional[str] = Field(default=None, description="函数名")
-    code_snippet: Optional[str] = Field(default=None, description="漏洞代码片段")
-    source: Optional[str] = Field(default=None, description="污点源或攻击入口")
-    sink: Optional[str] = Field(default=None, description="危险点或敏感操作")
-    suggestion: Optional[str] = Field(default=None, description="修复建议")
-    evidence_chain: Optional[List[str]] = Field(default=None, description="证据链列表")
-    attacker_flow: Optional[str] = Field(default=None, description="攻击路径描述")
-    missing_checks: Optional[List[str]] = Field(default=None, description="缺失校验列表")
-    taint_flow: Optional[List[str]] = Field(default=None, description="污点传播链路")
-    finding_metadata: Optional[Dict[str, Any]] = Field(default=None, description="附加元数据")
+    function_name: str | None = Field(default=None, description="函数名")
+    code_snippet: str | None = Field(default=None, description="漏洞代码片段")
+    source: str | None = Field(default=None, description="污点源或攻击入口")
+    sink: str | None = Field(default=None, description="危险点或敏感操作")
+    suggestion: str | None = Field(default=None, description="修复建议")
+    evidence_chain: list[str] | None = Field(default=None, description="证据链列表")
+    attacker_flow: str | None = Field(default=None, description="攻击路径描述")
+    missing_checks: list[str] | None = Field(default=None, description="缺失校验列表")
+    taint_flow: list[str] | None = Field(default=None, description="污点传播链路")
+    finding_metadata: dict[str, Any] | None = Field(default=None, description="附加元数据")
 
 
 class PushFindingToQueueTool(AgentTool):
@@ -319,7 +320,7 @@ class PushFindingToQueueTool(AgentTool):
         return PushFindingToQueueInput
 
     @staticmethod
-    def _flatten_finding_payload(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def _flatten_finding_payload(kwargs: dict[str, Any]) -> dict[str, Any]:
         payload = dict(kwargs or {})
         nested = payload.get("finding")
         if isinstance(nested, dict):
@@ -329,7 +330,7 @@ class PushFindingToQueueTool(AgentTool):
         return payload
 
     @staticmethod
-    def _extract_enqueue_counters(stats: Optional[Dict[str, Any]]) -> tuple[int, int]:
+    def _extract_enqueue_counters(stats: dict[str, Any] | None) -> tuple[int, int]:
         if not isinstance(stats, dict):
             return 0, 0
 
@@ -346,24 +347,24 @@ class PushFindingToQueueTool(AgentTool):
 
     async def _execute(
         self,
-        file_path: Optional[str] = None,
-        line_start: Optional[int] = None,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
-        vulnerability_type: Optional[str] = None,
-        line_end: Optional[int] = None,
+        file_path: str | None = None,
+        line_start: int | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        vulnerability_type: str | None = None,
+        line_end: int | None = None,
         severity: str = "medium",
         confidence: float = 0.8,
-        function_name: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        source: Optional[str] = None,
-        sink: Optional[str] = None,
-        suggestion: Optional[str] = None,
-        evidence_chain: Optional[List[str]] = None,
-        attacker_flow: Optional[str] = None,
-        missing_checks: Optional[List[str]] = None,
-        taint_flow: Optional[List[str]] = None,
-        finding_metadata: Optional[Dict[str, Any]] = None,
+        function_name: str | None = None,
+        code_snippet: str | None = None,
+        source: str | None = None,
+        sink: str | None = None,
+        suggestion: str | None = None,
+        evidence_chain: list[str] | None = None,
+        attacker_flow: str | None = None,
+        missing_checks: list[str] | None = None,
+        taint_flow: list[str] | None = None,
+        finding_metadata: dict[str, Any] | None = None,
         **kwargs
     ) -> ToolResult:
         """执行工具"""

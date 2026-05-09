@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from app.core.config import settings
 from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
@@ -24,7 +24,7 @@ class FlowEvidencePipeline:
         self,
         *,
         project_root: str,
-        target_files: Optional[List[str]] = None,
+        target_files: list[str] | None = None,
     ):
         self.project_root = project_root
         self.target_files = target_files or []
@@ -58,7 +58,7 @@ class FlowEvidencePipeline:
             logger.warning("Code2Flow generation failed: %s", exc)
             self.code2flow_result = None
 
-    async def _build_lightweight(self, finding: Dict[str, Any]) -> FlowEvidence:
+    async def _build_lightweight(self, finding: dict[str, Any]) -> FlowEvidence:
         if not self.light_enabled:
             return FlowEvidence(
                 path_found=False,
@@ -79,7 +79,7 @@ class FlowEvidencePipeline:
         line_start = self._normalize_line(finding.get("line_start"))
         # Optional hint: restrict entry points for path search (improves cross-file chain quality).
         raw_entry_points = finding.get("entry_points")
-        entry_points: Optional[List[str]] = None
+        entry_points: list[str] | None = None
         if isinstance(raw_entry_points, list):
             normalized = [
                 str(item).strip()
@@ -114,7 +114,7 @@ class FlowEvidencePipeline:
             )
         return evidence
 
-    async def _build_logic_evidence(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+    async def _build_logic_evidence(self, finding: dict[str, Any]) -> dict[str, Any]:
         if not self.logic_engine:
             return {
                 "missing_authz_checks": False,
@@ -126,7 +126,7 @@ class FlowEvidencePipeline:
             }
         return self.logic_engine.analyze_finding(finding)
 
-    async def analyze_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_finding(self, finding: dict[str, Any]) -> dict[str, Any]:
         lightweight = await self._build_lightweight(finding)
         logic_authz = await self._build_logic_evidence(finding)
 
@@ -137,9 +137,9 @@ class FlowEvidencePipeline:
 
     async def enrich_findings(
         self,
-        findings: List[Dict[str, Any]],
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-        enriched: List[Dict[str, Any]] = []
+        findings: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        enriched: list[dict[str, Any]] = []
         counters = {
             "total": len(findings),
             "path_found": 0,

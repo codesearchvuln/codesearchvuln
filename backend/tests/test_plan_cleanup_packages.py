@@ -1,7 +1,6 @@
 import importlib.util
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "plan_cleanup_packages.py"
 

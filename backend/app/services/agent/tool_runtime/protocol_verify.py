@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from .runtime import ToolExecutionResult, ToolRuntime
 
 
-def normalize_listed_tools(raw: Any) -> List[Dict[str, Any]]:
+def normalize_listed_tools(raw: Any) -> list[dict[str, Any]]:
     tools: Any = raw
     if isinstance(raw, dict):
         if isinstance(raw.get("tools"), list):
@@ -21,7 +20,7 @@ def normalize_listed_tools(raw: Any) -> List[Dict[str, Any]]:
     if not isinstance(tools, list):
         return []
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in tools:
         if isinstance(item, dict):
@@ -85,7 +84,7 @@ def _default_string_value(field_name: str, *, project_root: str, probe_file: str
     return "runtime_verify"
 
 
-def _normalize_schema_type(schema: Dict[str, Any]) -> Optional[str]:
+def _normalize_schema_type(schema: dict[str, Any]) -> str | None:
     type_value = schema.get("type")
     if isinstance(type_value, str) and type_value.strip():
         return type_value.strip().lower()
@@ -101,7 +100,7 @@ def _normalize_schema_type(schema: Dict[str, Any]) -> Optional[str]:
 
 
 def _schema_value(
-    schema: Dict[str, Any],
+    schema: dict[str, Any],
     *,
     field_name: str,
     project_root: str,
@@ -109,7 +108,7 @@ def _schema_value(
     probe_function: str,
     probe_line: int,
     depth: int = 0,
-) -> Tuple[Any, Optional[str]]:
+) -> tuple[Any, str | None]:
     if depth > 4:
         return None, "arg_generation_failed:max_depth"
     if not isinstance(schema, dict):
@@ -199,7 +198,7 @@ def _schema_value(
     if schema_type == "object":
         properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
         required_fields = [str(item) for item in schema.get("required", []) if isinstance(item, str)]
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         for req_key in required_fields:
             child_schema = properties.get(req_key) if isinstance(properties.get(req_key), dict) else {}
             child_value, child_error = _schema_value(
@@ -238,7 +237,7 @@ def _known_tool_args(
     *,
     adapter_id: str,
     tool_name: str,
-    input_schema: Optional[Dict[str, Any]],
+    input_schema: dict[str, Any] | None,
     project_root: str,
     filesystem_probe_file: str,
     filesystem_media_probe_file: str,
@@ -246,8 +245,8 @@ def _known_tool_args(
     code_probe_file: str,
     code_probe_function: str,
     code_probe_line: int,
-) -> Optional[Dict[str, Any]]:
-    normalized_adapter = str(adapter_id or "").strip().lower()
+) -> dict[str, Any] | None:
+    str(adapter_id or "").strip().lower()
     normalized_tool = str(tool_name or "").strip().lower()
     normalized_project_root = os.path.normpath(str(project_root or "").strip()) if str(project_root or "").strip() else ""
 
@@ -277,7 +276,7 @@ def build_tool_args(
     *,
     adapter_id: str,
     tool_name: str,
-    input_schema: Optional[Dict[str, Any]],
+    input_schema: dict[str, Any] | None,
     project_root: str,
     filesystem_probe_file: str,
     filesystem_media_probe_file: str,
@@ -285,7 +284,7 @@ def build_tool_args(
     code_probe_file: str,
     code_probe_function: str,
     code_probe_line: int,
-) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+) -> tuple[dict[str, Any] | None, str | None]:
     known_args = _known_tool_args(
         adapter_id=adapter_id,
         tool_name=tool_name,
@@ -331,10 +330,10 @@ def _check_record(
     action: str,
     success: bool,
     duration_ms: int,
-    tool: Optional[str] = None,
-    runtime_domain: Optional[str] = None,
-    error: Optional[str] = None,
-) -> Dict[str, Any]:
+    tool: str | None = None,
+    runtime_domain: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
     return {
         "step": step,
         "action": action,
@@ -374,13 +373,13 @@ async def run_protocol_verification(
     runtime: ToolRuntime,
     adapter_id: str,
     project_root: str,
-    filesystem_probe_file: Optional[str] = None,
-    filesystem_media_probe_file: Optional[str] = None,
-    qmd_probe_file: Optional[str] = None,
-    code_probe_file: Optional[str] = None,
-    code_probe_function: Optional[str] = None,
-    code_probe_line: Optional[int] = None,
-) -> Dict[str, Any]:
+    filesystem_probe_file: str | None = None,
+    filesystem_media_probe_file: str | None = None,
+    qmd_probe_file: str | None = None,
+    code_probe_file: str | None = None,
+    code_probe_function: str | None = None,
+    code_probe_line: int | None = None,
+) -> dict[str, Any]:
     normalized_adapter = str(adapter_id or "").strip().lower()
     probe_file = str(filesystem_probe_file or "tmp/.runtime_verify_protocol_probe.txt").strip()
     probe_media_file = str(filesystem_media_probe_file or "tmp/.runtime_verify_protocol_probe.png").strip()
@@ -389,7 +388,7 @@ async def run_protocol_verification(
     probe_function = str(code_probe_function or "runtime_probe_sum").strip()
     probe_line = max(1, int(code_probe_line or 2))
 
-    checks: List[Dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
     runtime_domains: set[str] = set()
 
     list_started = time.perf_counter()

@@ -1,6 +1,6 @@
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
-import time
 
 import pytest
 

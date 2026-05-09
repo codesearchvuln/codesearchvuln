@@ -6,9 +6,8 @@ ZIP文件存储服务
 import json
 import os
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
-from datetime import datetime, timezone
 
 from app.core.config import settings
 
@@ -33,110 +32,110 @@ def get_project_zip_meta_path(project_id: str) -> Path:
 async def save_project_zip(project_id: str, file_path: str, original_filename: str) -> dict:
     """
     保存项目ZIP文件
-    
+
     Args:
         project_id: 项目ID
         file_path: 临时文件路径
         original_filename: 原始文件名
-        
+
     Returns:
         文件元数据
     """
     target_path = get_project_zip_path(project_id)
     meta_path = get_project_zip_meta_path(project_id)
-    
+
     # 复制文件到存储目录
     shutil.copy2(file_path, target_path)
-    
+
     # 获取文件大小
     file_size = os.path.getsize(target_path)
-    
+
     # 保存元数据
     meta = {
         "original_filename": original_filename,
         "file_size": file_size,
-        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_at": datetime.now(UTC).isoformat(),
         "project_id": project_id
     }
 
     with open(meta_path, 'w') as f:
         json.dump(meta, f)
-    
+
     print(f"✓ ZIP文件已保存: {project_id} ({file_size / 1024 / 1024:.2f} MB)")
-    
+
     return meta
 
 
-async def load_project_zip(project_id: str) -> Optional[str]:
+async def load_project_zip(project_id: str) -> str | None:
     """
     加载项目ZIP文件路径
-    
+
     Args:
         project_id: 项目ID
-        
+
     Returns:
         ZIP文件路径，如果不存在返回None
     """
     zip_path = get_project_zip_path(project_id)
-    
+
     if zip_path.exists():
         return str(zip_path)
-    
+
     return None
 
 
-async def get_project_zip_meta(project_id: str) -> Optional[dict]:
+async def get_project_zip_meta(project_id: str) -> dict | None:
     """
     获取项目ZIP文件元数据
-    
+
     Args:
         project_id: 项目ID
-        
+
     Returns:
         元数据字典，如果不存在返回None
     """
     meta_path = get_project_zip_meta_path(project_id)
-    
+
     if not meta_path.exists():
         return None
 
-    with open(meta_path, 'r') as f:
+    with open(meta_path) as f:
         return json.load(f)
 
 
 async def delete_project_zip(project_id: str) -> bool:
     """
     删除项目ZIP文件
-    
+
     Args:
         project_id: 项目ID
-        
+
     Returns:
         是否成功删除
     """
     zip_path = get_project_zip_path(project_id)
     meta_path = get_project_zip_meta_path(project_id)
-    
+
     deleted = False
-    
+
     if zip_path.exists():
         os.remove(zip_path)
         deleted = True
         print(f"✓ 已删除ZIP文件: {project_id}")
-    
+
     if meta_path.exists():
         os.remove(meta_path)
-    
+
     return deleted
 
 
 async def has_project_zip(project_id: str) -> bool:
     """
     检查项目是否有ZIP文件
-    
+
     Args:
         project_id: 项目ID
-        
+
     Returns:
         是否存在ZIP文件
     """

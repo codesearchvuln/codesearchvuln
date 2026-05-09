@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,7 +24,7 @@ from app.services.agent_task_log_export import (
 router = APIRouter()
 
 
-def _sanitize_download_filename_segment(value: Optional[str], fallback: str) -> str:
+def _sanitize_download_filename_segment(value: str | None, fallback: str) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
         return fallback

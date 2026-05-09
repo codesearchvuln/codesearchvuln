@@ -1,17 +1,19 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.orm.attributes import instance_state
 
-from app.api.v1.endpoints import agent_tasks_routes_tasks
-from app.api.v1.endpoints import static_tasks_bandit
-from app.api.v1.endpoints import static_tasks_gitleaks
-from app.api.v1.endpoints import static_tasks_opengrep
-from app.api.v1.endpoints import static_tasks_phpstan
-from app.api.v1.endpoints import static_tasks_shared
-from app.api.v1.endpoints import static_tasks_yasa
+from app.api.v1.endpoints import (
+    agent_tasks_routes_tasks,
+    static_tasks_bandit,
+    static_tasks_gitleaks,
+    static_tasks_opengrep,
+    static_tasks_phpstan,
+    static_tasks_shared,
+    static_tasks_yasa,
+)
 from app.api.v1.endpoints.agent_tasks_contracts import AgentTaskCreate
 from app.models.project import Project
 
@@ -49,7 +51,7 @@ class _CreateSession:
         self.added.append(obj)
         if getattr(obj, "id", None) in {None, ""}:
             obj.id = f"generated-{len(self.added)}"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if getattr(obj, "created_at", None) is None:
             obj.created_at = now
         if getattr(obj, "updated_at", None) is None:

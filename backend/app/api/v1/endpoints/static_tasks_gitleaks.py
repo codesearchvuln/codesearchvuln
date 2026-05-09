@@ -1,80 +1,33 @@
 import asyncio
-import hashlib
 import json
-import logging
 import os
 import re
 import shutil
-import subprocess
-import tempfile
-import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-import yaml
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.bandit import BanditFinding, BanditScanTask
-from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
-from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanScanTask
-from app.models.project import Project
-from app.models.user import User
-from app.runtime.db_contract import unsupported_database_contract_message
-from app.schemas.gitleaks_rules import (
-    GitleaksRuleBatchUpdateRequest,
-    GitleaksRuleCreateRequest,
-    GitleaksRuleResponse,
-    GitleaksRuleUpdateRequest,
-)
-from app.schemas.opengrep import (
-    OpengrepRuleCreateRequest,
-    OpengrepRulePatchResponse,
-    OpengrepRuleTextCreateRequest,
-    OpengrepRuleTextResponse,
-    OpengrepRuleUpdateRequest,
-)
-from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
-from app.services.project_metrics import project_metrics_refresher
-from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
-from app.services.opengrep_confidence import (
-    count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
-    extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
-    extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
-    normalize_confidence as shared_normalize_confidence,
-)
-from app.services.rule import get_rule_by_patch, validate_generic_rule
-from app.services.upload.upload_manager import UploadManager
-
 from app.api.v1.endpoints.static_tasks_shared import (
-    _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
-    copy_project_tree_to_scan_dir,
-    _dt_to_iso,
-    _ensure_opengrep_xdg_dirs,
     _get_project_root,
     _get_user_config,
     _is_scan_task_cancelled,
-    _is_test_like_directory,
     _launch_static_background_job,
     _pop_scan_container,
     _register_scan_container,
     _release_request_db_session,
-    _normalize_llm_config_error_message,
-    _record_scan_progress,
     _request_scan_task_cancel,
-    _run_subprocess_with_tracking,
     _sync_task_scan_duration,
-    _utc_now_iso,
-    _validate_user_llm_config,
     async_session_factory,
     cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
     deps,
     ensure_scan_logs_dir,
     ensure_scan_meta_dir,
@@ -89,6 +42,18 @@ from app.db.static_finding_paths import (
     normalize_static_scan_file_path,
     resolve_static_finding_location,
 )
+from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
+from app.models.project import Project
+from app.models.user import User
+from app.runtime.db_contract import unsupported_database_contract_message
+from app.schemas.gitleaks_rules import (
+    GitleaksRuleBatchUpdateRequest,
+    GitleaksRuleCreateRequest,
+    GitleaksRuleResponse,
+    GitleaksRuleUpdateRequest,
+)
+from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
+from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
@@ -97,7 +62,7 @@ class GitleaksScanTaskCreate(BaseModel):
     """创建 Gitleaks 扫描任务请求"""
 
     project_id: str = Field(..., description="项目ID")
-    name: Optional[str] = Field(None, description="任务名称")
+    name: str | None = Field(None, description="任务名称")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
     no_git: bool = Field(True, description="不使用 git history，仅扫描文件")
 
@@ -114,9 +79,9 @@ class GitleaksScanTaskResponse(BaseModel):
     total_findings: int
     scan_duration_ms: int
     files_scanned: int
-    error_message: Optional[str]
+    error_message: str | None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -127,19 +92,19 @@ class GitleaksFindingResponse(BaseModel):
     id: str
     scan_task_id: str
     rule_id: str
-    description: Optional[str]
+    description: str | None
     file_path: str
-    start_line: Optional[int]
-    end_line: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
-    secret: Optional[str]
-    match: Optional[str]
-    commit: Optional[str]
-    author: Optional[str]
-    email: Optional[str]
-    date: Optional[str]
-    fingerprint: Optional[str]
+    start_line: int | None
+    end_line: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
+    secret: str | None
+    match: str | None
+    commit: str | None
+    author: str | None
+    email: str | None
+    date: str | None
+    fingerprint: str | None
     status: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -157,18 +122,18 @@ def _build_gitleaks_scan_task_response(task: GitleaksScanTask) -> GitleaksScanTa
         scan_duration_ms=int(task.scan_duration_ms or 0),
         files_scanned=int(task.files_scanned or 0),
         error_message=task.error_message,
-        created_at=task.created_at or datetime.now(timezone.utc),
+        created_at=task.created_at or datetime.now(UTC),
         updated_at=task.updated_at,
     )
 
 
-def _to_clean_string_list(raw_value: Any) -> List[str]:
+def _to_clean_string_list(raw_value: Any) -> list[str]:
     if raw_value is None:
         return []
     if isinstance(raw_value, str):
         return [item.strip() for item in raw_value.split(",") if item.strip()]
     if isinstance(raw_value, list):
-        cleaned: List[str] = []
+        cleaned: list[str] = []
         for item in raw_value:
             text = str(item).strip()
             if text:
@@ -181,8 +146,8 @@ def _validate_gitleaks_rule_payload(
     *,
     regex_text: str,
     secret_group: int,
-    keywords: List[str],
-    tags: List[str],
+    keywords: list[str],
+    tags: list[str],
 ) -> None:
     if not str(regex_text or "").strip():
         raise HTTPException(status_code=400, detail="regex 不能为空")
@@ -209,12 +174,12 @@ def _toml_quote(value: str) -> str:
     return f"\"{_toml_escape_string(value)}\""
 
 
-def _toml_quote_list(values: List[str]) -> str:
+def _toml_quote_list(values: list[str]) -> str:
     return "[" + ", ".join(_toml_quote(v) for v in values) + "]"
 
 
-def _render_gitleaks_rules_toml(rules: List[GitleaksRule]) -> str:
-    lines: List[str] = [
+def _render_gitleaks_rules_toml(rules: list[GitleaksRule]) -> str:
+    lines: list[str] = [
         'title = "VulHunter managed gitleaks config"',
         "",
     ]
@@ -250,7 +215,7 @@ def _strip_custom_toml_rules_sections(custom_toml: str) -> str:
         return ""
 
     lines = custom_toml.splitlines()
-    output: List[str] = []
+    output: list[str] = []
     in_rules_block = False
 
     for line in lines:
@@ -288,7 +253,7 @@ def _normalize_bool_flag(value: Any, *, default: bool) -> bool:
     return default
 
 
-def _normalize_gitleaks_runtime_config(runtime_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _normalize_gitleaks_runtime_config(runtime_config: dict[str, Any] | None) -> dict[str, Any]:
     candidate = dict(runtime_config) if isinstance(runtime_config, dict) else {}
     report_format = str(candidate.get("reportFormat") or "json").strip().lower()
     if report_format not in {"json", "sarif"}:
@@ -318,13 +283,13 @@ def _raise_gitleaks_rules_migration_http_error(exc: ProgrammingError) -> None:
 
 
 async def _build_effective_gitleaks_config_toml(
-    db: AsyncSession, runtime_config: Dict[str, Any]
-) -> Optional[str]:
+    db: AsyncSession, runtime_config: dict[str, Any]
+) -> str | None:
     try:
         async with db.begin_nested():
             result = await db.execute(
                 select(GitleaksRule)
-                .where(GitleaksRule.is_active == True)
+                .where(GitleaksRule.is_active)
                 .order_by(GitleaksRule.created_at.asc())
             )
             active_rules = result.scalars().all()
@@ -348,7 +313,7 @@ async def _build_effective_gitleaks_config_toml(
     return None
 
 
-def _serialize_gitleaks_rule(rule: GitleaksRule) -> Dict[str, Any]:
+def _serialize_gitleaks_rule(rule: GitleaksRule) -> dict[str, Any]:
     return {
         "id": rule.id,
         "name": rule.name,
@@ -367,12 +332,12 @@ def _serialize_gitleaks_rule(rule: GitleaksRule) -> Dict[str, Any]:
     }
 
 
-def _parse_gitleaks_report_payload(payload: Any) -> List[Dict[str, Any]]:
+def _parse_gitleaks_report_payload(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
 
     if isinstance(payload, dict) and isinstance(payload.get("runs"), list):
-        findings: List[Dict[str, Any]] = []
+        findings: list[dict[str, Any]] = []
         for run in payload.get("runs") or []:
             if not isinstance(run, dict):
                 continue
@@ -435,8 +400,8 @@ def _build_gitleaks_command(
     report_format: str,
     no_git: bool,
     redact: bool,
-    config_file: Optional[str],
-) -> List[str]:
+    config_file: str | None,
+) -> list[str]:
     cmd = [
         "gitleaks",
         "detect",
@@ -465,12 +430,12 @@ def _mask_gitleaks_secret(secret: Any) -> str:
     return "*" * len(raw_secret)
 
 
-@router.get("/gitleaks/rules", response_model=List[GitleaksRuleResponse])
+@router.get("/gitleaks/rules", response_model=list[GitleaksRuleResponse])
 async def list_gitleaks_rules(
-    is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
-    source: Optional[str] = Query(None, description="按来源过滤"),
-    keyword: Optional[str] = Query(None, description="按名称/rule_id关键词过滤"),
-    tag: Optional[str] = Query(None, description="按标签过滤"),
+    is_active: bool | None = Query(None, description="按启用状态过滤"),
+    source: str | None = Query(None, description="按来源过滤"),
+    keyword: str | None = Query(None, description="按名称/rule_id关键词过滤"),
+    tag: str | None = Query(None, description="按标签过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(1000, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
@@ -701,7 +666,7 @@ async def _execute_gitleaks_scan(
     project_root: str,
     target_path: str,
     no_git: bool = True,
-    runtime_config: Optional[Dict[str, Any]] = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> None:
     """
     后台执行 Gitleaks 扫描
@@ -715,10 +680,10 @@ async def _execute_gitleaks_scan(
     async def _update_task_state(
         status: str,
         *,
-        error_message: Optional[str] = None,
-        findings: Optional[List[Dict[str, Any]]] = None,
+        error_message: str | None = None,
+        findings: list[dict[str, Any]] | None = None,
         files_scanned_count: int = 0,
-    ) -> Optional[GitleaksScanTask]:
+    ) -> GitleaksScanTask | None:
         async with async_session_factory() as db:
             result = await db.execute(select(GitleaksScanTask).where(GitleaksScanTask.id == task_id))
             task = result.scalar_one_or_none()
@@ -754,8 +719,8 @@ async def _execute_gitleaks_scan(
             await db.commit()
             return task
 
-    workspace_dir: Optional[Path] = None
-    active_container_id: Optional[str] = None
+    workspace_dir: Path | None = None
+    active_container_id: str | None = None
     try:
         async with async_session_factory() as db:
             result = await db.execute(select(GitleaksScanTask).where(GitleaksScanTask.id == task_id))
@@ -800,7 +765,7 @@ async def _execute_gitleaks_scan(
         report_suffix = ".sarif" if gcfg.get("reportFormat") == "sarif" else ".json"
         report_file = output_dir / f"report{report_suffix}"
 
-        config_file: Optional[str] = None
+        config_file: str | None = None
         if effective_toml:
             config_path = meta_dir / "gitleaks.toml"
             config_path.write_text(effective_toml, encoding="utf-8")
@@ -858,7 +823,7 @@ async def _execute_gitleaks_scan(
             logger.info(f"Gitleaks scan task {task_id} completed with no findings")
             return
 
-        with open(report_file, "r", encoding="utf-8", errors="ignore") as f:
+        with open(report_file, encoding="utf-8", errors="ignore") as f:
             content = f.read().strip()
             if not content:
                 raw_payload = []
@@ -871,7 +836,7 @@ async def _execute_gitleaks_scan(
                     return
 
         findings = _parse_gitleaks_report_payload(raw_payload)
-        normalized_findings: List[Dict[str, Any]] = []
+        normalized_findings: list[dict[str, Any]] = []
         files_scanned: set[str] = set()
         for finding in findings:
             normalized_file_path = normalize_static_scan_file_path(
@@ -966,7 +931,7 @@ async def create_gitleaks_scan(
     # 读取当前用户 gitleaks 配置（/config/me -> otherConfig.gitleaksConfig）
     user_cfg = await _get_user_config(db, current_user.id)
     other_cfg = (user_cfg or {}).get("otherConfig", {}) if isinstance(user_cfg, dict) else {}
-    gitleaks_cfg: Dict[str, Any] = {}
+    gitleaks_cfg: dict[str, Any] = {}
     if isinstance(other_cfg, dict):
         gitleaks_cfg = other_cfg.get("gitleaksConfig") or {}
 
@@ -992,10 +957,10 @@ async def create_gitleaks_scan(
     return response
 
 
-@router.get("/gitleaks/tasks", response_model=List[GitleaksScanTaskResponse])
+@router.get("/gitleaks/tasks", response_model=list[GitleaksScanTaskResponse])
 async def list_gitleaks_tasks(
-    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
-    status: Optional[str] = Query(None, description="按状态过滤"),
+    project_id: str | None = Query(None, description="按项目ID过滤"),
+    status: str | None = Query(None, description="按状态过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1083,10 +1048,10 @@ async def delete_gitleaks_task(
     return {"message": "任务已删除", "task_id": task_id}
 
 
-@router.get("/gitleaks/tasks/{task_id}/findings", response_model=List[GitleaksFindingResponse])
+@router.get("/gitleaks/tasks/{task_id}/findings", response_model=list[GitleaksFindingResponse])
 async def get_gitleaks_findings(
     task_id: str,
-    status: Optional[str] = Query(
+    status: str | None = Query(
         None, description="按状态过滤: open, verified, false_positive"
     ),
     skip: int = Query(0, ge=0),

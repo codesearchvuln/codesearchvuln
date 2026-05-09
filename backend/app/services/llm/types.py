@@ -2,9 +2,9 @@
 LLM服务类型定义
 """
 
-from enum import Enum
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 
 class LLMProvider(str, Enum):
@@ -28,14 +28,14 @@ class LLMConfig:
     provider: LLMProvider
     api_key: str
     model: str
-    base_url: Optional[str] = None
+    base_url: str | None = None
     timeout: int = 150
     temperature: float = 0.2
     max_tokens: int = 4096
     top_p: float = 1.0
     frequency_penalty: float = 0
     presence_penalty: float = 0
-    custom_headers: Dict[str, str] = field(default_factory=dict)
+    custom_headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -48,12 +48,12 @@ class LLMMessage:
 @dataclass
 class LLMRequest:
     """LLM请求参数"""
-    messages: List[LLMMessage]
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    top_p: Optional[float] = None
+    messages: list[LLMMessage]
+    temperature: float | None = None
+    max_tokens: int | None = None
+    top_p: float | None = None
     stream: bool = False
-    tools: Optional[List[Dict[str, Any]]] = None
+    tools: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -68,10 +68,10 @@ class LLMUsage:
 class LLMResponse:
     """LLM响应"""
     content: str
-    model: Optional[str] = None
-    usage: Optional[LLMUsage] = None
-    finish_reason: Optional[str] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
+    model: str | None = None
+    usage: LLMUsage | None = None
+    finish_reason: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 class LLMError(Exception):
@@ -79,10 +79,10 @@ class LLMError(Exception):
     def __init__(
         self,
         message: str,
-        provider: Optional[LLMProvider] = None,
-        status_code: Optional[int] = None,
-        original_error: Optional[Any] = None,
-        api_response: Optional[str] = None
+        provider: LLMProvider | None = None,
+        status_code: int | None = None,
+        original_error: Any | None = None,
+        api_response: str | None = None
     ):
         super().__init__(message)
         self.provider = provider
@@ -92,7 +92,7 @@ class LLMError(Exception):
 
 
 # 各平台默认模型 (2025年最新推荐)
-DEFAULT_MODELS: Dict[LLMProvider, str] = {
+DEFAULT_MODELS: dict[LLMProvider, str] = {
     LLMProvider.GEMINI: "gemini-3-pro",
     LLMProvider.OPENAI: "gpt-5",
     LLMProvider.CLAUDE: "claude-sonnet-4.5",
@@ -108,7 +108,7 @@ DEFAULT_MODELS: Dict[LLMProvider, str] = {
 
 
 # 各平台API端点
-DEFAULT_BASE_URLS: Dict[LLMProvider, str] = {
+DEFAULT_BASE_URLS: dict[LLMProvider, str] = {
     LLMProvider.OPENAI: "https://api.openai.com/v1",
     LLMProvider.QWEN: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     LLMProvider.DEEPSEEK: "https://api.deepseek.com",

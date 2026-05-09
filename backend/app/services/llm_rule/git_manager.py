@@ -1,12 +1,14 @@
-import git
+import logging
 import shutil
+import subprocess
 from pathlib import Path
+
+import git
+
+from app.services.git_mirror import get_mirror_candidates
+
 from .config import Config
 from .patch_processor import PatchInfo
-from typing import Optional
-import logging
-import subprocess
-from app.services.git_mirror import get_mirror_candidates
 
 
 class GitManager:
@@ -18,22 +20,22 @@ class GitManager:
         """Check if git is installed and accessible."""
         try:
             subprocess.run(
-                ["git", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                ["git", "--version"], capture_output=True, check=True
             )
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
             raise RuntimeError(
                 "Git command failed. Please ensure Git is installed and in your PATH."
-            )
-        except FileNotFoundError:
+            ) from exc
+        except FileNotFoundError as exc:
             raise RuntimeError(
                 "Git is not installed or not found in PATH. Please install Git first."
-            )
+            ) from exc
 
     def _sanitize_repo_path(self, owner: str, name: str) -> str:
         """Create a safe repository directory name."""
         return f"{owner}_{name}".replace("/", "_").replace("\\", "_")
 
-    def prepare_repo(self, patch_info: PatchInfo) -> Optional[Path]:
+    def prepare_repo(self, patch_info: PatchInfo) -> Path | None:
         """Clone or update repository and checkout the relevant commits."""
         safe_path = self._sanitize_repo_path(patch_info.repo_owner, patch_info.repo_name)
         repo_path = self.config.repos_cache_dir / safe_path

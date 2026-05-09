@@ -6,11 +6,10 @@ import json
 import logging
 import os
 import shutil
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -25,14 +24,6 @@ from app.models.agent_task import (
 )
 from app.models.project import Project
 from app.models.prompt_skill import PromptSkill
-from app.services.project_metrics import project_metrics_refresher
-from app.services.agent.write_scope import TaskWriteScopeGuard
-from app.services.agent.workflow.recon_executor import (
-    RECON_SUBAGENT_BLOCKED_TOOLS,
-)
-from app.services.agent.workflow.user_runtime_config import (
-    resolve_effective_agent_workflow_config,
-)
 from app.services.agent.skills.prompt_skills import (
     PROMPT_SKILL_AGENT_KEYS,
     PROMPT_SKILL_BUILTIN_STATE_CONFIG_KEY,
@@ -41,17 +32,24 @@ from app.services.agent.skills.prompt_skills import (
     build_prompt_skill_builtin_state,
     merge_prompt_skills_with_custom,
 )
+from app.services.agent.workflow.recon_executor import (
+    RECON_SUBAGENT_BLOCKED_TOOLS,
+)
+from app.services.agent.workflow.user_runtime_config import (
+    resolve_effective_agent_workflow_config,
+)
+from app.services.agent.write_scope import TaskWriteScopeGuard
 
 from .agent_tasks_bootstrap import *
 from .agent_tasks_contracts import *
 from .agent_tasks_findings import *
-from .agent_tasks_tool_runtime import *
 from .agent_tasks_runtime import *
+from .agent_tasks_tool_runtime import *
 
 logger = logging.getLogger(__name__)
 
 
-def _build_recon_subagent_tools(recon_tools: Dict[str, Any]) -> Dict[str, Any]:
+def _build_recon_subagent_tools(recon_tools: dict[str, Any]) -> dict[str, Any]:
     """Keep ReconSubAgent writeback tools while stripping recursive/runtime controls."""
     if not isinstance(recon_tools, dict):
         return {}
@@ -63,8 +61,8 @@ def _build_recon_subagent_tools(recon_tools: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _normalize_terminal_agent_findings(
-    findings: List[AgentFinding],
-) -> List[AgentFinding]:
+    findings: list[AgentFinding],
+) -> list[AgentFinding]:
     """Normalize automatically generated findings to pending review on task end."""
     for item in findings:
         item.status = FindingStatus.NEEDS_REVIEW
@@ -81,7 +79,7 @@ def _normalize_terminal_agent_findings(
     return findings
 
 
-def _build_workflow_config_from_user_config(user_config: Optional[Dict[str, Any]]):
+def _build_workflow_config_from_user_config(user_config: dict[str, Any] | None):
     from app.core.config import settings
     from app.services.agent.workflow.models import WorkflowConfig
 
@@ -104,22 +102,31 @@ def _build_workflow_config_from_user_config(user_config: Optional[Dict[str, Any]
 async def _execute_agent_task(task_id: str):
     """
     在后台执行 Agent 任务 - 使用动态 Agent 树架构
-    
+
     架构：OrchestratorAgent 作为大脑，动态调度子 Agent
     """
-    from app.services.agent.agents import OrchestratorAgent, ReconAgent, AnalysisAgent, VerificationAgent, ReportAgent, BusinessLogicReconAgent, BusinessLogicAnalysisAgent, ReconSubAgent
-    from app.services.agent.workflow import WorkflowOrchestratorAgent
-    from app.services.agent.event_manager import EventManager, AgentEventEmitter
-    from app.services.agent.core.context import set_task_id
-    from app.services.llm.service import LLMService, LLMConfigError
-    from app.services.agent.core import agent_registry
-    from app.services.agent.tools import SandboxManager
-    from app.core.config import settings
     import time
+
+    from app.core.config import settings
+    from app.services.agent.agents import (
+        AnalysisAgent,
+        BusinessLogicAnalysisAgent,
+        BusinessLogicReconAgent,
+        ReconAgent,
+        ReconSubAgent,
+        ReportAgent,
+        VerificationAgent,
+    )
+    from app.services.agent.core import agent_registry
+    from app.services.agent.core.context import set_task_id
+    from app.services.agent.event_manager import AgentEventEmitter, EventManager
+    from app.services.agent.tools import SandboxManager
+    from app.services.agent.workflow import WorkflowOrchestratorAgent
+    from app.services.llm.service import LLMConfigError, LLMService
 
     # Bind structured logging context for this async task and its child tasks.
     set_task_id(str(task_id or "").strip())
-    
+
     # 在任务最开始就初始化 Docker 沙箱管理器
     # 这样可以确保整个任务生命周期内使用同一个管理器，并且尽早发现 Docker 问题
     logger.info(f"Starting execution for task {task_id}")
@@ -128,7 +135,6 @@ async def _execute_agent_task(task_id: str):
     logger.info(f"🐳 Global Sandbox Manager initialized (Available: {sandbox_manager.is_available})")
 
     # 提前创建事件管理器，以便在克隆仓库和索引时发送实时日志
-    from app.services.agent.event_manager import EventManager, AgentEventEmitter
     event_manager = EventManager(db_session_factory=async_session_factory)
     event_manager.create_queue(task_id)
     event_emitter = AgentEventEmitter(task_id, event_manager)
@@ -136,9 +142,9 @@ async def _execute_agent_task(task_id: str):
 
     async with async_session_factory() as db:
         orchestrator = None
-        write_scope_guard: Optional[TaskWriteScopeGuard] = None
+        write_scope_guard: TaskWriteScopeGuard | None = None
         memory_store = None
-        markdown_memory: Dict[str, str] = {}
+        markdown_memory: dict[str, str] = {}
         start_time = time.time()
 
         async def _set_current_step(step: str) -> None:
@@ -163,7 +169,7 @@ async def _execute_agent_task(task_id: str):
 
             # 更新任务阶段为准备中
             task.status = AgentTaskStatus.RUNNING
-            task.started_at = datetime.now(timezone.utc)
+            task.started_at = datetime.now(UTC)
             task.current_phase = AgentTaskPhase.PLANNING  # preparation 对应 PLANNING
             await db.commit()
 
@@ -195,16 +201,16 @@ async def _execute_agent_task(task_id: str):
                     if not os.path.exists(os.path.join(project_root, tf)):
                         all_exist = False
                         break
-                
+
                 if not all_exist:
                     logger.info(f"Target files path mismatch detected in {project_root}")
                     # 尝试通过路径匹配来修复
                     # 获取当前根目录的名称
                     root_name = os.path.basename(project_root)
-                    
+
                     new_target_files = []
                     fixed_count = 0
-                    
+
                     for tf in task.target_files:
                         # 检查文件是否以 root_name 开头（例如 "PHP-Project/index.php" 而 root 是 ".../PHP-Project"）
                         if tf.startswith(root_name + "/"):
@@ -213,7 +219,7 @@ async def _execute_agent_task(task_id: str):
                                 new_target_files.append(fixed_path)
                                 fixed_count += 1
                                 continue
-                        
+
                         # 如果上面的没匹配，尝试暴力搜索（只针对未找到的文件）
                         # 这种情况比较少见，先保留原样或标记为丢失
                         if os.path.exists(os.path.join(project_root, tf)):
@@ -227,12 +233,12 @@ async def _execute_agent_task(task_id: str):
                             else:
                                 # 实在找不到，保留原样，让后续流程报错或忽略
                                 new_target_files.append(tf)
-                    
+
                     if fixed_count > 0:
                         logger.info(f"Auto-fixed {fixed_count} target file paths")
                         await event_emitter.emit_info(f"自动修正了 {fixed_count} 个目标文件的路径")
                         task.target_files = new_target_files
-                        
+
             # 重新验证修正后的文件
             valid_target_files = []
             if task.target_files:
@@ -241,7 +247,7 @@ async def _execute_agent_task(task_id: str):
                         valid_target_files.append(tf)
                     else:
                         logger.warning(f"Target file not found: {tf}")
-                
+
                 if not valid_target_files:
                     logger.warning("No valid target files found after adjustment!")
                     await event_emitter.emit_warning("警告：无法找到指定的目标文件，将扫描所有文件")
@@ -304,9 +310,9 @@ async def _execute_agent_task(task_id: str):
             await db.commit()
 
             # 创建漏洞队列服务
-            from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
-            from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
             from app.services.agent.business_logic_risk_queue import InMemoryBusinessLogicRiskQueue
+            from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
+            from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
             queue_service = InMemoryVulnerabilityQueue()
             recon_queue_service = InMemoryReconRiskQueue()
             bl_queue_service = InMemoryBusinessLogicRiskQueue()
@@ -507,13 +513,13 @@ async def _execute_agent_task(task_id: str):
 
             # 注册 Orchestrator 到 Agent Registry（使用其内置方法）
             orchestrator._register_to_registry(task="Root orchestrator for security audit")
-            
+
             await event_emitter.emit_info("动态 Agent 树架构启动")
             await event_emitter.emit_info(f"📁 项目路径: {project_root}")
-            
+
             # 收集项目信息 - 传递排除模式和目标文件
             project_info = await _collect_project_info(
-                project_root, 
+                project_root,
                 project.name,
                 exclude_patterns=task.exclude_patterns,
                 target_files=task.target_files,
@@ -528,8 +534,8 @@ async def _execute_agent_task(task_id: str):
             )
             await db.commit()
 
-            bootstrap_findings: List[Dict[str, Any]] = []
-            bootstrap_task_id: Optional[str] = None
+            bootstrap_findings: list[dict[str, Any]] = []
+            bootstrap_task_id: str | None = None
             bootstrap_source = "disabled"
 
             if static_bootstrap_config["mode"] == "embedded":
@@ -588,9 +594,9 @@ async def _execute_agent_task(task_id: str):
                 )
 
             # ============ Fixed-First: 生成种子候选（OpenGrep 优先，空则入口点回退） ============
-            seed_findings: List[Dict[str, Any]] = []
-            entry_points_payload: List[Dict[str, Any]] = []
-            entry_function_names: List[str] = []
+            seed_findings: list[dict[str, Any]] = []
+            entry_points_payload: list[dict[str, Any]] = []
+            entry_function_names: list[str] = []
 
             if bootstrap_findings:
                 seed_findings = _normalize_seed_from_opengrep(bootstrap_findings)
@@ -633,7 +639,7 @@ async def _execute_agent_task(task_id: str):
                 )
 
             if write_scope_guard:
-                seed_paths: List[str] = []
+                seed_paths: list[str] = []
                 for item in seed_findings:
                     if isinstance(item, dict):
                         file_path = item.get("file_path")
@@ -643,8 +649,8 @@ async def _execute_agent_task(task_id: str):
 
             # ============ Markdown 长期记忆（不依赖向量检索） ============
             try:
-                from app.services.agent.memory.markdown_memory import MarkdownMemoryStore
                 from app.core.config import settings
+                from app.services.agent.memory.markdown_memory import MarkdownMemoryStore
 
                 memory_store = MarkdownMemoryStore(project_id=str(project.id))
                 memory_store.ensure()
@@ -739,7 +745,7 @@ async def _execute_agent_task(task_id: str):
                         "custom_prompt_skill_count": 0,
                     },
                 )
-            
+
             # 构建输入数据
             input_data = {
                 "project_info": project_info,
@@ -772,8 +778,8 @@ async def _execute_agent_task(task_id: str):
 
             # Provide deterministic persistence callback for Orchestrator TODO mode.
             # The callback is idempotent per task run to avoid double inserts on retries.
-            finding_save_diagnostics: Dict[str, Any] = {}
-            persist_state: Dict[str, Any] = {
+            finding_save_diagnostics: dict[str, Any] = {}
+            persist_state: dict[str, Any] = {
                 "saved_count": 0,
                 "seen_payload_digests": set(),
             }
@@ -786,7 +792,7 @@ async def _execute_agent_task(task_id: str):
             async def _save_findings_isolated(
                 findings_payload: Any,
                 *,
-                save_diagnostics: Optional[Dict[str, Any]] = None,
+                save_diagnostics: dict[str, Any] | None = None,
             ) -> int:
                 findings_list = findings_payload if isinstance(findings_payload, list) else []
                 if not findings_list:
@@ -855,9 +861,9 @@ async def _execute_agent_task(task_id: str):
 
             async def _update_finding_callback(
                 finding_identity: str,
-                fields_to_update: Dict[str, Any],
+                fields_to_update: dict[str, Any],
                 update_reason: str,
-            ) -> Dict[str, Any]:
+            ) -> dict[str, Any]:
                 async with async_session_factory() as update_db:
                     finding_stmt = select(AgentFinding).where(
                         AgentFinding.task_id == task_id,
@@ -900,7 +906,7 @@ async def _execute_agent_task(task_id: str):
                             verification_result["reachability"] = normalized_reachability
 
                         confidence_value = verification_result.get("confidence", finding_row.confidence)
-                        normalized_confidence: Optional[float] = None
+                        normalized_confidence: float | None = None
                         if confidence_value is not None:
                             try:
                                 normalized_confidence = max(0.0, min(float(confidence_value), 1.0))
@@ -973,7 +979,7 @@ async def _execute_agent_task(task_id: str):
                         )
                         finding_row.is_verified = finding_row.status == FindingStatus.VERIFIED
                         finding_row.verified_at = (
-                            datetime.now(timezone.utc)
+                            datetime.now(UTC)
                             if finding_row.is_verified
                             else None
                         )
@@ -1047,7 +1053,7 @@ async def _execute_agent_task(task_id: str):
                 *,
                 force: bool = False,
                 reason: str = "workflow_runtime",
-            ) -> Dict[str, Any]:
+            ) -> dict[str, Any]:
                 return await _refresh_task_finding_counters(
                     task_id,
                     force=force,
@@ -1077,7 +1083,7 @@ async def _execute_agent_task(task_id: str):
                 _update_tool_instance._update_callback = _update_finding_callback
                 logger.info("[Task] Injected update_finding_callback into update_vulnerability_finding tool")
             if orchestrator is not None:
-                setattr(orchestrator, "_refresh_task_summary_callback", _refresh_task_summary_callback)
+                orchestrator._refresh_task_summary_callback = _refresh_task_summary_callback
 
             # 执行 Orchestrator
             await event_emitter.emit_phase_start("orchestration", "🎯 Orchestrator 开始编排审计流程")
@@ -1108,12 +1114,12 @@ async def _execute_agent_task(task_id: str):
                 event_emitter,
                 _run_orchestrator_once,
             )
-            
+
             # 处理结果
             duration_ms = int((time.time() - start_time) * 1000)
-            
+
             await db.refresh(task)
-            
+
             if result.success:
                 # CRITICAL FIX: Log and save findings with detailed debugging
                 findings = result.data.get("findings", [])
@@ -1139,8 +1145,8 @@ async def _execute_agent_task(task_id: str):
 
                 # Best-effort dedup to avoid double inserts when seeds overlap with agent findings.
                 # Key: (file_path, line_start, vulnerability_type)
-                deduped: List[Dict[str, Any]] = []
-                seen: Set[Tuple[str, int, str]] = set()
+                deduped: list[dict[str, Any]] = []
+                seen: set[tuple[str, int, str]] = set()
                 for f in findings:
                     if not isinstance(f, dict):
                         continue
@@ -1170,7 +1176,7 @@ async def _execute_agent_task(task_id: str):
                         logger.debug(f"[AgentTask] Finding {i+1}: {f.get('title', 'N/A')[:50]} - {f.get('severity', 'N/A')}")
 
                 # Smart audit policy: disable automatic flow enrichment / evidence generation.
-                flow_summary: Dict[str, Any] = {
+                flow_summary: dict[str, Any] = {
                     "enabled": False,
                     "blocked_reason": "disabled_by_policy",
                 }
@@ -1184,7 +1190,7 @@ async def _execute_agent_task(task_id: str):
                 await db.commit()
 
                 # 检查 save_verification_result 工具是否已由 Agent 主动持久化
-                _tool_saved_count: Optional[int] = None
+                _tool_saved_count: int | None = None
                 if (
                     _save_tool_instance is not None
                     and hasattr(_save_tool_instance, "is_saved")
@@ -1277,7 +1283,7 @@ async def _execute_agent_task(task_id: str):
                     else {}
                 )
                 false_positive_count = len(false_positive_findings)
-                agent_payloads: Dict[str, Any] = {}
+                agent_payloads: dict[str, Any] = {}
 
                 # ============ Markdown 长期记忆写入（shared + per-agent） ============
                 try:
@@ -1330,7 +1336,7 @@ async def _execute_agent_task(task_id: str):
 
                         # Per-agent: best-effort final answer summaries
                         if orchestrator and hasattr(orchestrator, "_agent_results"):
-                            agent_payloads = getattr(orchestrator, "_agent_results") or {}
+                            agent_payloads = orchestrator._agent_results or {}
 
                         # Orchestrator
                         memory_store.append_entry(
@@ -1374,9 +1380,9 @@ async def _execute_agent_task(task_id: str):
                 # 避免 "取消后后端继续运行并最终标记为完成" 的问题
                 verification_pending_gate_triggered = False
                 verification_pending_gate_message = ""
-                verification_pending_gate_metadata: Dict[str, Any] = {}
+                verification_pending_gate_metadata: dict[str, Any] = {}
 
-                verification_payload: Dict[str, Any] = {}
+                verification_payload: dict[str, Any] = {}
                 if orchestrator and hasattr(orchestrator, "_agent_results"):
                     agent_results = getattr(orchestrator, "_agent_results", {})
                     if isinstance(agent_results, dict):
@@ -1434,9 +1440,9 @@ async def _execute_agent_task(task_id: str):
                 workflow_state_summary = None
                 if isinstance(result.data, dict):
                     workflow_state_summary = result.data.get("workflow_state")
-                
+
                 runtime_snapshot = _snapshot_runtime_stats_to_task(task, orchestrator)
-                
+
                 # 设置迭代统计：使用 AgentResult 中的值（已由 Workflow Orchestrator 聚合）
                 task.total_iterations = int(result.iterations or 0) if result.iterations > 0 else int(runtime_snapshot["iterations"] or 0)
                 task.tool_calls_count = int(result.tool_calls or 0) if result.tool_calls > 0 else int(runtime_snapshot["tool_calls"] or 0)
@@ -1471,7 +1477,7 @@ async def _execute_agent_task(task_id: str):
                         task.low_count += 1
                     if finding_item.is_verified:
                         task.verified_count += 1
-                
+
                 # 保存 Workflow 编排元数据到 audit_plan（包含队列处理统计）
                 if workflow_state_summary and isinstance(workflow_state_summary, dict):
                     audit_plan_metadata = {
@@ -1518,14 +1524,14 @@ async def _execute_agent_task(task_id: str):
                         "[AgentTask] Project risk report persisted to task.report (length=%s)",
                         len(project_risk_report),
                     )
-                
+
                 # 计算安全评分
                 task.security_score = _calculate_security_score(
                     [{"severity": str(item.severity).lower()} for item in effective_findings]
                 )
                 # 注意: progress_percentage 是计算属性，不需要手动设置
                 # 当 status = COMPLETED 时会自动返回 100.0
-                
+
                 async def _commit_summary_once():
                     await db.commit()
 
@@ -1590,7 +1596,7 @@ async def _execute_agent_task(task_id: str):
                             "is_terminal": True,
                         },
                     )
-                
+
                 if bool(drain_result.get("timed_out")):
                     logger.error(
                         "[TaskDrain] Task %s failed due to tool drain timeout: pending=%s",
@@ -1658,7 +1664,7 @@ async def _execute_agent_task(task_id: str):
                     failure_message = terminal_result["failure_message"] or failure_message
                     failure_metadata = terminal_result["failure_metadata"]
                     logger.error(f"Task {task_id} failed: {result.error}")
-            
+
         except asyncio.CancelledError:
             logger.info(f"Task {task_id} cancelled")
             try:
@@ -1678,7 +1684,7 @@ async def _execute_agent_task(task_id: str):
                     )
             except Exception:
                 pass
-                
+
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}", exc_info=True)
             retry_diag = _classify_retry_error(e)
@@ -1777,11 +1783,11 @@ async def _execute_agent_task(task_id: str):
 
             logger.debug(f"Task {task_id} cleaned up")
 
-async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional[Dict[str, Any]]:
+async def _get_user_config(db: AsyncSession, user_id: str | None) -> dict[str, Any] | None:
     """获取用户配置"""
     if not user_id:
         return None
-    
+
     try:
         from app.api.v1.endpoints.config import _load_effective_user_config
 
@@ -1791,69 +1797,72 @@ async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional
         )
     except Exception as e:
         logger.warning(f"Failed to get user config: {e}")
-    
+
     return None
 
 
 async def _initialize_tools(
     project_root: str,
     llm_service,
-    user_config: Optional[Dict[str, Any]],
+    user_config: dict[str, Any] | None,
     sandbox_manager: Any, # 传递预初始化的 SandboxManager
     verification_level: str = "analysis_with_poc_plan",
-    exclude_patterns: Optional[List[str]] = None,
-    target_files: Optional[List[str]] = None,
-    project_id: Optional[str] = None,
-    event_emitter: Optional[Any] = None,  # 新增：用于发送实时日志
-    task_id: Optional[str] = None,  # 新增：用于取消检查
-    queue_service: Optional[Any] = None,  # 新增：漏洞队列服务
-    recon_queue_service: Optional[Any] = None,  # 新增：Recon 风险队列服务
-    bl_queue_service: Optional[Any] = None,  # 新增：业务逻辑风险队列服务
+    exclude_patterns: list[str] | None = None,
+    target_files: list[str] | None = None,
+    project_id: str | None = None,
+    event_emitter: Any | None = None,  # 新增：用于发送实时日志
+    task_id: str | None = None,  # 新增：用于取消检查
+    queue_service: Any | None = None,  # 新增：漏洞队列服务
+    recon_queue_service: Any | None = None,  # 新增：Recon 风险队列服务
+    bl_queue_service: Any | None = None,  # 新增：业务逻辑风险队列服务
     recon_subagent_max_workers: int = 3,
-    save_callback: Optional[Any] = None,  # 新增：验证结果持久化回调 async (findings) -> int
-) -> Dict[str, Dict[str, Any]]:
+    save_callback: Any | None = None,  # 新增：验证结果持久化回调 async (findings) -> int
+) -> dict[str, dict[str, Any]]:
     """初始化工具集。"""
     from app.services.agent.tools import (
+        BashShellTool,
         CodeWindowTool,
+        ControlFlowAnalysisLightTool,
+        CreateVulnerabilityReportTool,
+        DataFlowAnalysisTool,
         FileOutlineTool,
         FileSearchTool,
         FunctionSummaryTool,
         ListFilesTool,
         LocateEnclosingFunctionTool,
-        PatternMatchTool,
-        DataFlowAnalysisTool,
-        CreateVulnerabilityReportTool,
-        ControlFlowAnalysisLightTool,
         LogicAuthzAnalysisTool,
-        SandboxTool,
-        VulnerabilityVerifyTool,
-        RunCodeTool,
-        BashShellTool,
-        SmartScanTool,
+        PatternMatchTool,
         QuickAuditTool,
-        SymbolBodyTool,
+        RunCodeTool,
         RunReconSubAgentTool,
-    )
-    from app.services.agent.tools.queue_tools import (
-        GetQueueStatusTool, DequeueFindingTool, PushFindingToQueueTool, IsFindingInQueueTool
-    )
-    from app.services.agent.tools.recon_queue_tools import (
-        GetReconRiskQueueStatusTool,
-        PushRiskPointToQueueTool,
-        PushRiskPointsBatchToQueueTool,
-        DequeueReconRiskPointTool,
-        PeekReconRiskQueueTool,
-        ClearReconRiskQueueTool,
-        IsReconRiskPointInQueueTool,
+        SandboxTool,
+        SmartScanTool,
+        SymbolBodyTool,
+        VulnerabilityVerifyTool,
     )
     from app.services.agent.tools.business_logic_recon_queue_tools import (
-        PushBLRiskPointToQueueTool,
-        PushBLRiskPointsBatchToQueueTool,
-        GetBLRiskQueueStatusTool,
-        DequeueBLRiskPointTool,
-        PeekBLRiskQueueTool,
         ClearBLRiskQueueTool,
+        DequeueBLRiskPointTool,
+        GetBLRiskQueueStatusTool,
         IsBLRiskPointInQueueTool,
+        PeekBLRiskQueueTool,
+        PushBLRiskPointsBatchToQueueTool,
+        PushBLRiskPointToQueueTool,
+    )
+    from app.services.agent.tools.queue_tools import (
+        DequeueFindingTool,
+        GetQueueStatusTool,
+        IsFindingInQueueTool,
+        PushFindingToQueueTool,
+    )
+    from app.services.agent.tools.recon_queue_tools import (
+        ClearReconRiskQueueTool,
+        DequeueReconRiskPointTool,
+        GetReconRiskQueueStatusTool,
+        IsReconRiskPointInQueueTool,
+        PeekReconRiskQueueTool,
+        PushRiskPointsBatchToQueueTool,
+        PushRiskPointToQueueTool,
     )
 
     _ = verification_level
@@ -2068,7 +2077,7 @@ def _reset_task_workspace_sync(base_path: str) -> None:
 def _extract_zip_project_sync(
     zip_path: str,
     base_path: str,
-    check_cancelled: Optional[Callable[[], None]] = None,
+    check_cancelled: Callable[[], None] | None = None,
 ) -> None:
     import zipfile
 
@@ -2081,19 +2090,19 @@ def _extract_zip_project_sync(
 
 
 def _collect_project_info_sync(
-    project_root: str, 
+    project_root: str,
     project_name: str,
-    exclude_patterns: Optional[List[str]] = None,
-    target_files: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    exclude_patterns: list[str] | None = None,
+    target_files: list[str] | None = None,
+) -> dict[str, Any]:
     """收集项目信息
-    
+
     Args:
         project_root: 项目根目录
         project_name: 项目名称
         exclude_patterns: 排除模式列表
         target_files: 目标文件列表
-    
+
     重要：当指定了 target_files 时，返回的项目结构应该只包含目标文件相关的信息，
     以确保 Orchestrator 和子 Agent 看到的是一致的、过滤后的视图。
     """
@@ -2106,7 +2115,7 @@ def _collect_project_info_sync(
         "file_count": 0,
         "structure": {},
     }
-    
+
     try:
         # 目标文件集合
         target_files_set = (
@@ -2114,17 +2123,17 @@ def _collect_project_info_sync(
             if target_files
             else None
         )
-        
+
         lang_map = {
             ".py": "Python", ".js": "JavaScript", ".ts": "TypeScript",
             ".java": "Java", ".go": "Go", ".php": "PHP",
             ".rb": "Ruby", ".rs": "Rust", ".c": "C", ".cpp": "C++",
         }
-        
+
         # 收集过滤后的文件列表
         filtered_files = []
         filtered_dirs = set()
-        
+
         for root, dirs, files in os.walk(project_root):
             rel_dir = os.path.relpath(root, project_root).replace("\\", "/")
             if rel_dir == ".":
@@ -2137,20 +2146,20 @@ def _collect_project_info_sync(
                     effective_exclude_patterns,
                 )
             ]
-            
+
             for f in files:
                 relative_path = os.path.relpath(os.path.join(root, f), project_root)
                 relative_path = relative_path.replace("\\", "/")
-                
+
                 # 检查是否在目标文件列表中
                 if target_files_set and _normalize_scan_path(relative_path) not in target_files_set:
                     continue
                 if _is_core_ignored_path(relative_path, effective_exclude_patterns):
                     continue
-                
+
                 info["file_count"] += 1
                 filtered_files.append(relative_path)
-                
+
                 # 收集文件所在的目录
                 dir_path = os.path.dirname(relative_path)
                 if dir_path:
@@ -2158,16 +2167,16 @@ def _collect_project_info_sync(
                     parts = dir_path.split(os.sep)
                     for i in range(len(parts)):
                         filtered_dirs.add(os.sep.join(parts[:i+1]))
-                
+
                 ext = os.path.splitext(f)[1].lower()
                 if ext in lang_map and lang_map[ext] not in info["languages"]:
                     info["languages"].append(lang_map[ext])
-        
+
         # 根据是否有目标文件限制，生成不同的结构信息
         if target_files_set:
             # 当指定了目标文件时，只显示目标文件和相关目录
             info["structure"] = {
-                "directories": sorted(list(filtered_dirs))[:20],
+                "directories": sorted(filtered_dirs)[:20],
                 "files": filtered_files[:30],
                 "scope_limited": True,  # 标记这是限定范围的视图
                 "scope_message": f"审计范围限定为 {len(filtered_files)} 个指定文件",
@@ -2193,19 +2202,19 @@ def _collect_project_info_sync(
                 }
             except Exception:
                 pass
-            
+
     except Exception as e:
         logger.warning(f"Failed to collect project info: {e}")
-    
+
     return info
 
 
 async def _collect_project_info(
-    project_root: str, 
+    project_root: str,
     project_name: str,
-    exclude_patterns: Optional[List[str]] = None,
-    target_files: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    exclude_patterns: list[str] | None = None,
+    target_files: list[str] | None = None,
+) -> dict[str, Any]:
     return await asyncio.to_thread(
         _collect_project_info_sync,
         project_root,
@@ -2217,7 +2226,7 @@ async def _collect_project_info(
 async def _get_project_root(
     project: Project,
     task_id: str,
-    event_emitter: Optional[Any] = None,
+    event_emitter: Any | None = None,
 ) -> str:
     """
     为 ZIP 项目准备临时工作目录。
@@ -2280,7 +2289,7 @@ async def _get_project_root(
         except Exception as exc:
             logger.error("Failed to extract ZIP %s: %s", zip_path, exc)
             await emit(f"解压失败: {exc}", "error")
-            raise RuntimeError(f"无法解压项目文件: {exc}")
+            raise RuntimeError(f"无法解压项目文件: {exc}") from exc
     else:
         logger.warning("ZIP file not found for project %s", project.id)
         await emit("ZIP 文件不存在", "error")
@@ -2288,7 +2297,7 @@ async def _get_project_root(
 
     # 验证目录不为空
     if not os.listdir(base_path):
-        await emit(f"项目目录为空", "error")
+        await emit("项目目录为空", "error")
         raise RuntimeError(f"项目目录为空，可能是克隆/解压失败: {base_path}")
 
     # 智能检测：如果解压后只有一个子目录（常见于 ZIP 文件），
@@ -2297,7 +2306,7 @@ async def _get_project_root(
     items = os.listdir(base_path)
     # 过滤掉 macOS 产生的 __MACOSX 目录和隐藏文件
     real_items = [item for item in items if not item.startswith('__') and not item.startswith('.')]
-    
+
     if len(real_items) == 1:
         single_item_path = os.path.join(base_path, real_items[0])
         if os.path.isdir(single_item_path):

@@ -1032,7 +1032,7 @@ function firstMeaningfulLine(text: string): string {
   );
 }
 
-function synthesizeReadFileEvidence(
+export function synthesizeReadFileEvidence(
   toolOutput: unknown,
   toolInput: unknown,
   toolMetadata?: unknown,
@@ -1093,7 +1093,7 @@ function synthesizeReadFileEvidence(
   };
 }
 
-function synthesizeSearchCodeEvidence(
+export function synthesizeSearchCodeEvidence(
   toolOutput: unknown,
   toolMetadata?: unknown,
   logContent?: unknown,
@@ -1139,7 +1139,7 @@ function synthesizeSearchCodeEvidence(
   };
 }
 
-function synthesizeExtractFunctionEvidence(
+export function synthesizeExtractFunctionEvidence(
   toolOutput: unknown,
   toolInput: unknown,
   toolMetadata?: unknown,
@@ -1272,7 +1272,7 @@ function extractPrimaryRecord(value: unknown): Record<string, unknown> | null {
   return asRecord(direct.data) || direct;
 }
 
-function synthesizeFileListEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
+export function synthesizeFileListEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
   const source = asRecord(toolMetadata) || extractPrimaryRecord(toolOutput);
   if (!source) return null;
   const directory = toStringValue(source.directory).trim();
@@ -1299,7 +1299,7 @@ function synthesizeFileListEvidence(toolOutput: unknown, toolMetadata?: unknown)
   };
 }
 
-function synthesizeLocatorEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
+export function synthesizeLocatorEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
   const source = extractPrimaryRecord(toolOutput) || asRecord(toolMetadata);
   const symbol = asRecord(source?.symbol);
   const resolution = asRecord(source?.resolution);
@@ -1335,7 +1335,7 @@ function synthesizeLocatorEvidence(toolOutput: unknown, toolMetadata?: unknown):
   };
 }
 
-function synthesizeAnalysisSummaryEvidence(
+export function synthesizeAnalysisSummaryEvidence(
   toolName: string,
   toolOutput: unknown,
   toolMetadata?: unknown,
@@ -1397,7 +1397,7 @@ function synthesizeAnalysisSummaryEvidence(
   };
 }
 
-function synthesizeFlowAnalysisEvidence(
+export function synthesizeFlowAnalysisEvidence(
   toolName: string,
   toolOutput: unknown,
   toolMetadata?: unknown,
@@ -1453,7 +1453,7 @@ function synthesizeFlowAnalysisEvidence(
   };
 }
 
-function synthesizeVerificationSummaryEvidence(
+export function synthesizeVerificationSummaryEvidence(
   toolOutput: unknown,
   toolMetadata?: unknown,
   toolInput?: unknown,
@@ -1486,7 +1486,7 @@ function synthesizeVerificationSummaryEvidence(
   };
 }
 
-function synthesizeReportSummaryEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
+export function synthesizeReportSummaryEvidence(toolOutput: unknown, toolMetadata?: unknown): ToolEvidencePayload | null {
   const source = extractPrimaryRecord(toolOutput) || asRecord(toolMetadata);
   if (!source) return null;
   const reportId = toStringValue(source.report_id || source.id).trim();

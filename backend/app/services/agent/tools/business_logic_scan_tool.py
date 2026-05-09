@@ -10,12 +10,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base import AgentTool, ToolResult
 from app.services.agent.agents.business_logic_scan import BusinessLogicScanAgent
+
+from .base import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +25,17 @@ class BusinessLogicScanInput(BaseModel):
     """业务逻辑扫描输入"""
 
     target: str = Field(default=".", description="扫描目标目录")
-    framework_hint: Optional[str] = Field(
+    framework_hint: str | None = Field(
         default=None,
         description="框架提示：django, fastapi, express, flask, 等",
     )
-    entry_points_hint: Optional[List[str]] = Field(
+    entry_points_hint: list[str] | None = Field(
         default=None,
         description="已知入口点提示（如函数名、类名）",
     )
     quick_mode: bool = Field(default=False, description="快速模式：重点扫描高风险区域")
     max_iterations: int = Field(default=8, ge=1, le=30, description="子 Agent 最大迭代次数")
-    focus_areas: Optional[List[str]] = Field(
+    focus_areas: list[str] | None = Field(
         default=None,
         description="兼容字段：关注区域列表（authentication/authorization/payment 等）",
     )
@@ -46,9 +47,9 @@ class BusinessLogicScanTool(AgentTool):
     def __init__(
         self,
         project_root: str,
-        llm_service: Optional[Any] = None,
-        tools_registry: Optional[Dict[str, Any]] = None,
-        event_emitter: Optional[Any] = None,
+        llm_service: Any | None = None,
+        tools_registry: dict[str, Any] | None = None,
+        event_emitter: Any | None = None,
     ):
         super().__init__()
         self.project_root = project_root
@@ -77,17 +78,17 @@ class BusinessLogicScanTool(AgentTool):
 """
 
     @property
-    def args_schema(self) -> Optional[type]:
+    def args_schema(self) -> type | None:
         return BusinessLogicScanInput
 
     async def _execute(
         self,
         target: str = ".",
-        framework_hint: Optional[str] = None,
-        entry_points_hint: Optional[List[str]] = None,
+        framework_hint: str | None = None,
+        entry_points_hint: list[str] | None = None,
         quick_mode: bool = False,
         max_iterations: int = 8,
-        focus_areas: Optional[List[str]] = None,
+        focus_areas: list[str] | None = None,
         **kwargs,
     ) -> ToolResult:
         try:

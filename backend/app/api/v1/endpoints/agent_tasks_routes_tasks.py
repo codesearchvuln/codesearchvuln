@@ -3,9 +3,9 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,9 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api import deps
-from app.db.session import async_session_factory, get_db
 from app.api.v1.endpoints.static_tasks_shared import _release_request_db_session
-from app.models.agent_task import AgentEvent, AgentFinding, AgentTask, AgentTaskPhase, AgentTaskStatus
+from app.db.session import async_session_factory, get_db
+from app.models.agent_task import (
+    AgentEvent,
+    AgentFinding,
+    AgentTask,
+    AgentTaskPhase,
+    AgentTaskStatus,
+)
 from app.models.project import Project
 from app.models.user import User
 from app.services.project_metrics import project_metrics_refresher
@@ -34,8 +40,8 @@ logger = logging.getLogger(__name__)
 
 async def _load_verified_severity_counts(
     db: AsyncSession,
-    task_ids: List[str],
-) -> Dict[str, Dict[str, int]]:
+    task_ids: list[str],
+) -> dict[str, dict[str, int]]:
     if not task_ids:
         return {}
 
@@ -58,7 +64,7 @@ async def _load_verified_severity_counts(
         .group_by(AgentFinding.task_id)
     )
 
-    counts_by_task: Dict[str, Dict[str, int]] = {}
+    counts_by_task: dict[str, dict[str, int]] = {}
     for task_id, critical, high, medium, low in rows.fetchall():
         counts_by_task[str(task_id)] = {
             "critical": int(critical or 0),
@@ -71,8 +77,8 @@ async def _load_verified_severity_counts(
 
 async def _load_defect_summaries(
     db: AsyncSession,
-    task_ids: List[str],
-) -> Dict[str, Dict[str, Any]]:
+    task_ids: list[str],
+) -> dict[str, dict[str, Any]]:
     if not task_ids:
         return {}
 
@@ -105,7 +111,7 @@ async def _load_defect_summaries(
         .group_by(AgentFinding.task_id)
     )
 
-    summaries: Dict[str, Dict[str, Any]] = {}
+    summaries: dict[str, dict[str, Any]] = {}
     for (
         task_id,
         total_count,
@@ -172,7 +178,7 @@ async def _cancel_agent_task_internal(
     _snapshot_runtime_stats_to_task(task, orchestrator)
 
     task.status = AgentTaskStatus.CANCELLED
-    task.completed_at = datetime.now(timezone.utc)
+    task.completed_at = datetime.now(UTC)
     await db.flush()
 
 
@@ -208,7 +214,7 @@ async def create_agent_task(
             SimpleNamespace(audit_scope=normalized_audit_scope),
             source_mode,
         )
-    
+
     # 创建任务
     task = AgentTask(
         id=str(uuid4()),
@@ -231,7 +237,7 @@ async def create_agent_task(
         timeout_seconds=request.timeout_seconds or 1800,
         created_by=current_user.id,
     )
-    
+
     db.add(task)
     await db.commit()
     response = build_agent_task_response(task)
@@ -244,16 +250,16 @@ async def create_agent_task(
         name=f"agent_task:{task_id}",
     )
     _running_asyncio_tasks[task_id] = asyncio_task
-    
+
     logger.info(f"Created agent task {task_id} for project {project.name}")
-    
+
     return response
 
 
-@router.get("/", response_model=List[AgentTaskResponse])
+@router.get("/", response_model=list[AgentTaskResponse])
 async def list_agent_tasks(
-    project_id: Optional[str] = None,
-    status: Optional[str] = None,
+    project_id: str | None = None,
+    status: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -267,24 +273,24 @@ async def list_agent_tasks(
         select(Project.id).where(Project.owner_id == current_user.id)
     )
     user_project_ids = [p[0] for p in projects_result.fetchall()]
-    
+
     if not user_project_ids:
         return []
-    
+
     # 构建查询
     query = select(AgentTask).where(AgentTask.project_id.in_(user_project_ids))
-    
+
     if project_id:
         query = query.where(AgentTask.project_id == project_id)
-    
+
     if status:
         normalized_status = str(status).strip().lower()
         if normalized_status in _VALID_TASK_STATUS_VALUES:
             query = query.where(AgentTask.status == normalized_status)
-    
+
     query = query.order_by(AgentTask.created_at.desc())
     query = query.offset(skip).limit(limit)
-    
+
     result = await db.execute(query)
     tasks = result.scalars().all()
 
@@ -321,7 +327,7 @@ async def get_agent_task(
     task = await db.get(AgentTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     # 检查权限
     project = await db.get(Project, task.project_id)
     if not project:
@@ -338,7 +344,7 @@ async def get_agent_task(
         )
     except Exception as e:
         logger.error(f"Error serializing task {task_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"序列化任务数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"序列化任务数据失败: {str(e)}") from e
 
 
 @router.post("/{task_id}/cancel")
@@ -416,19 +422,19 @@ async def stream_agent_events(
     task = await db.get(AgentTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     project = await db.get(Project, task.project_id)
     if not project:
         raise HTTPException(status_code=403, detail="无权访问此任务")
     await _release_request_db_session(db)
-    
+
     async def event_generator():
         """生成 SSE 事件流"""
         last_sequence = after_sequence
         poll_interval = 0.5
         max_idle = 300  # 5 分钟无事件后关闭
         idle_time = 0
-        
+
         while True:
             # 查询新事件
             async with async_session_factory() as session:
@@ -440,11 +446,11 @@ async def stream_agent_events(
                     .limit(50)
                 )
                 events = result.scalars().all()
-                
+
                 # 获取任务状态
                 current_task = await session.get(AgentTask, task_id)
                 task_status = current_task.status if current_task else None
-            
+
             if events:
                 idle_time = 0
                 for event in events:
@@ -452,7 +458,7 @@ async def stream_agent_events(
                     # event_type 已经是字符串，不需要 .value
                     event_type_str = str(event.event_type)
                     phase_str = str(event.phase) if event.phase else None
-                    
+
                     data = {
                         "id": event.id,
                         "type": event_type_str,
@@ -466,7 +472,7 @@ async def stream_agent_events(
                     yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
             else:
                 idle_time += poll_interval
-            
+
             # 检查任务是否结束
             if task_status:
                 # task_status 可能是字符串或枚举，统一转换为字符串
@@ -474,14 +480,14 @@ async def stream_agent_events(
                 if status_str in ["completed", "failed", "cancelled", "interrupted"]:
                     yield f"data: {json.dumps({'type': 'task_end', 'status': status_str})}\n\n"
                     break
-            
+
             # 检查空闲超时
             if idle_time >= max_idle:
                 yield f"data: {json.dumps({'type': 'timeout'})}\n\n"
                 break
-            
+
             await asyncio.sleep(poll_interval)
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
@@ -504,41 +510,41 @@ async def stream_agent_with_thinking(
 ):
     """
     增强版事件流 (SSE)
-    
+
     支持:
     - LLM 思考过程的 Token 级流式输出 (仅运行时)
     - 工具调用的详细输入/输出
     - 节点执行状态
     - 发现事件
-    
+
     优先使用内存中的事件队列 (支持 thinking_token)，
     如果任务未在运行，则回退到数据库轮询 (不支持 thinking_token 复盘)。
     """
     task = await db.get(AgentTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     project = await db.get(Project, task.project_id)
     if not project:
         raise HTTPException(status_code=403, detail="无权访问此任务")
     await _release_request_db_session(db)
-    
+
     # 定义 SSE 格式化函数
-    def format_sse_event(event_data: Dict[str, Any]) -> str:
+    def format_sse_event(event_data: dict[str, Any]) -> str:
         """格式化为 SSE 事件"""
         event_type = event_data.get("event_type") or event_data.get("type")
-        
+
         # 统一字段
         if "type" not in event_data:
             event_data["type"] = event_type
-            
+
         return f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
 
     async def enhanced_event_generator():
         """生成增强版 SSE 事件流"""
         # 1. 检查任务是否在运行中 (内存)
         event_manager = _running_event_managers.get(task_id)
-        
+
         if event_manager:
             logger.debug(f"Stream {task_id}: Using in-memory event manager")
             try:
@@ -549,32 +555,32 @@ async def stream_agent_with_thinking(
                     skip_types.update(["thinking_start", "thinking_token", "thinking_end"])
                 if not include_tool_calls:
                     skip_types.update(["tool_call_start", "tool_call_input", "tool_call_output", "tool_call_end"])
-                
+
                 async for event in event_manager.stream_events(task_id, after_sequence=after_sequence):
                     event_type = event.get("event_type")
-                    
+
                     if event_type in skip_types:
                         continue
-                    
+
                     #  Debug: 记录 thinking_token 事件
                     if event_type == "thinking_token":
                         token = event.get("metadata", {}).get("token", "")[:20]
                         logger.debug(f"Stream {task_id}: Sending thinking_token: '{token}...'")
-                        
+
                     # 格式化并 yield
                     yield format_sse_event(event)
-                    
+
                     #  CRITICAL: 为 thinking_token 添加微小延迟
                     # 确保事件在不同的 TCP 包中发送，让前端能够逐个处理
                     # 没有这个延迟，所有 token 会在一次 read() 中被接收，导致 React 批量更新
                     if event_type == "thinking_token":
                         await asyncio.sleep(0.01)  # 10ms 延迟
-                    
+
             except Exception as e:
                 logger.error(f"In-memory stream error: {e}")
                 err_data = {"type": "error", "message": str(e)}
                 yield format_sse_event(err_data)
-                
+
         else:
             logger.debug(f"Stream {task_id}: Task not running, falling back to DB polling")
             # 2. 回退到数据库轮询 (无法获取 thinking_token)
@@ -584,11 +590,11 @@ async def stream_agent_with_thinking(
             max_idle = 60  # 1分钟无事件关闭
             idle_time = 0
             last_heartbeat = 0
-            
+
             skip_types = set()
             if not include_thinking:
                 skip_types.update(["thinking_start", "thinking_token", "thinking_end"])
-            
+
             while True:
                 try:
                     async with async_session_factory() as session:
@@ -601,20 +607,20 @@ async def stream_agent_with_thinking(
                             .limit(100)
                         )
                         events = result.scalars().all()
-                        
+
                         # 获取任务状态
                         current_task = await session.get(AgentTask, task_id)
                         task_status = current_task.status if current_task else None
-                    
+
                     if events:
                         idle_time = 0
                         for event in events:
                             last_sequence = event.sequence
                             event_type = str(event.event_type)
-                            
+
                             if event_type in skip_types:
                                 continue
-                            
+
                             # 构建数据
                             data = {
                                 "id": event.id,
@@ -624,7 +630,7 @@ async def stream_agent_with_thinking(
                                 "sequence": event.sequence,
                                 "timestamp": event.created_at.isoformat() if event.created_at else None,
                             }
-                            
+
                             # 添加详情
                             if include_tool_calls and event.tool_name:
                                 data["tool"] = {
@@ -633,17 +639,17 @@ async def stream_agent_with_thinking(
                                     "output": event.tool_output,
                                     "duration_ms": event.tool_duration_ms,
                                 }
-                                
+
                             if event.event_metadata:
                                 data["metadata"] = event.event_metadata
-                                
+
                             if event.tokens_used:
                                 data["tokens_used"] = event.tokens_used
-                            
+
                             yield format_sse_event(data)
                     else:
                         idle_time += poll_interval
-                        
+
                         # 检查是否应该结束
                         if task_status:
                             status_str = str(task_status)
@@ -656,24 +662,24 @@ async def stream_agent_with_thinking(
                                 }
                                 yield format_sse_event(end_data)
                                 break
-                    
+
                     # 心跳
                     last_heartbeat += poll_interval
                     if last_heartbeat >= heartbeat_interval:
                         last_heartbeat = 0
-                        yield format_sse_event({"type": "heartbeat", "timestamp": datetime.now(timezone.utc).isoformat()})
-                    
+                        yield format_sse_event({"type": "heartbeat", "timestamp": datetime.now(UTC).isoformat()})
+
                     # 超时
                     if idle_time >= max_idle:
                         break
-                    
+
                     await asyncio.sleep(poll_interval)
-                    
+
                 except Exception as e:
                     logger.error(f"DB poll stream error: {e}")
                     yield format_sse_event({"type": "error", "message": str(e)})
                     break
-    
+
     return StreamingResponse(
         enhanced_event_generator(),
         media_type="text/event-stream",
@@ -686,7 +692,7 @@ async def stream_agent_with_thinking(
     )
 
 
-@router.get("/{task_id}/events/list", response_model=List[AgentEventResponse])
+@router.get("/{task_id}/events/list", response_model=list[AgentEventResponse])
 async def list_agent_events(
     task_id: str,
     after_sequence: int = Query(0, ge=0),

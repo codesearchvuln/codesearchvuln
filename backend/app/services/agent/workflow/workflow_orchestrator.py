@@ -9,15 +9,14 @@ WorkflowOrchestratorAgent - 基于确定性 Workflow 的编排 Agent
   均完整继承。
 """
 
-import json
 import logging
-import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from ..agents.orchestrator import OrchestratorAgent
 from ..agents.base import AgentResult
+from ..agents.orchestrator import OrchestratorAgent
 from .engine import AuditWorkflowEngine
-from .models import WorkflowPhase, WorkflowState, WorkflowConfig
+from .models import WorkflowConfig, WorkflowPhase, WorkflowState
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +46,14 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
     def __init__(
         self,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
-        sub_agents: Optional[Dict] = None,
+        sub_agents: dict | None = None,
         tracer=None,
-        recon_queue_service: Optional[Any] = None,
-        vuln_queue_service: Optional[Any] = None,
-        workflow_config: Optional[WorkflowConfig] = None,
-        business_logic_queue_service: Optional[Any] = None,
+        recon_queue_service: Any | None = None,
+        vuln_queue_service: Any | None = None,
+        workflow_config: WorkflowConfig | None = None,
+        business_logic_queue_service: Any | None = None,
     ) -> None:
         """
         Args:
@@ -83,18 +82,16 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
         self._vuln_queue_service = vuln_queue_service
         self._workflow_config = workflow_config or WorkflowConfig()
         self._business_logic_queue_service = business_logic_queue_service
-        self._current_workflow_phase: Optional[str] = None
-        self._workflow_phase_callback: Optional[
-            Callable[[str], Awaitable[None]]
-        ] = None
+        self._current_workflow_phase: str | None = None
+        self._workflow_phase_callback: Callable[[str], Awaitable[None]] | None = None
 
     def set_workflow_phase_callback(
         self,
-        callback: Optional[Callable[[str], Awaitable[None]]],
+        callback: Callable[[str], Awaitable[None]] | None,
     ) -> None:
         self._workflow_phase_callback = callback
 
-    def get_current_workflow_phase(self) -> Optional[str]:
+    def get_current_workflow_phase(self) -> str | None:
         phase = str(self._current_workflow_phase or "").strip().lower()
         return phase or None
 
@@ -112,7 +109,7 @@ class WorkflowOrchestratorAgent(OrchestratorAgent):
     # 核心入口：覆盖父类 run()
     # ------------------------------------------------------------------
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         以 Workflow 模式执行编排任务。
 

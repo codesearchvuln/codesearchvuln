@@ -1,7 +1,7 @@
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
 import sys
 import types
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -14,8 +14,8 @@ if "docker" not in sys.modules:
     docker_stub.from_env = lambda: None
     sys.modules["docker"] = docker_stub
 
-from app.api.v1.endpoints.agent_tasks_reporting import generate_audit_report
 from app.api.v1.endpoints import agent_tasks_routes_results as results_module
+from app.api.v1.endpoints.agent_tasks_reporting import generate_audit_report
 from app.api.v1.endpoints.agent_tasks_routes_results import update_finding_status
 from app.models.agent_task import AgentFinding, AgentTask, FindingStatus, VulnerabilitySeverity
 from app.models.project import Project

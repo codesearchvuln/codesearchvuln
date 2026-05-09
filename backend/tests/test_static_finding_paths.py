@@ -1,5 +1,4 @@
 import app.db.static_finding_paths as static_finding_paths
-
 from app.db.static_finding_paths import (
     build_legacy_static_finding_path_candidates,
     normalize_static_scan_file_path,

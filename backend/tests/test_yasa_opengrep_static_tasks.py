@@ -1,13 +1,10 @@
 import json
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.api.v1.endpoints import static_tasks_opengrep
-from app.api.v1.endpoints import static_tasks_yasa
-from app.api.v1.endpoints import static_tasks
+from app.api.v1.endpoints import static_tasks, static_tasks_opengrep, static_tasks_yasa
 from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
 from app.models.yasa import YasaFinding, YasaScanTask
 
@@ -211,30 +208,29 @@ async def test_execute_yasa_scan_uses_short_lived_sessions_and_persists_findings
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
             """
-            {
+            {{
               "runs": [
-                {
+                {{
                   "results": [
-                    {
+                    {{
                       "ruleId": "demo.rule",
-                      "message": {"text": "demo finding"},
+                      "message": {{"text": "demo finding"}},
                       "level": "warning",
                       "locations": [
-                        {
-                          "physicalLocation": {
-                            "artifactLocation": {"uri": "%s"},
-                            "region": {"startLine": 7, "endLine": 7}
-                          }
-                        }
+                        {{
+                          "physicalLocation": {{
+                            "artifactLocation": {{"uri": "{}"}},
+                            "region": {{"startLine": 7, "endLine": 7}}
+                          }}
+                        }}
                       ]
-                    }
+                    }}
                   ],
-                  "tool": {"driver": {"rules": [{"id": "demo.rule", "name": "Demo Rule"}]}}
-                }
+                  "tool": {{"driver": {{"rules": [{{"id": "demo.rule", "name": "Demo Rule"}}]}}}}
+                }}
               ]
-            }
-            """
-            % str(tmp_path / "src" / "main.ts"),
+            }}
+            """.format(str(tmp_path / "src" / "main.ts")),
             encoding="utf-8",
         )
         return SimpleNamespace(

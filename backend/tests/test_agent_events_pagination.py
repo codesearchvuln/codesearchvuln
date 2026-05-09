@@ -1,15 +1,15 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.api.v1.endpoints.agent_tasks_routes_tasks import get_agent_task
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.api.v1.endpoints.agent_tasks import list_agent_events
+from app.api.v1.endpoints.agent_tasks_routes_tasks import get_agent_task
 from app.models.agent_task import AgentTask
 from app.models.project import Project
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
 
 
 class _ScalarListResult:
@@ -38,7 +38,7 @@ async def test_agent_events_pagination_fetches_all_without_duplicates():
             phase=None,
             message=f"event-{idx}",
             sequence=idx,
-            created_at=datetime(2026, 2, 12, 8, 0, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 2, 12, 8, 0, 0, tzinfo=UTC),
             tool_name="demo_tool" if idx == 1 else None,
             tool_input=None,
             tool_output={
@@ -152,7 +152,7 @@ async def test_get_agent_task_detail_includes_tool_evidence_protocol(monkeypatch
         quality_score=0.0,
         security_score=0.0,
         progress_percentage=100.0,
-        created_at=datetime(2026, 2, 12, 8, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 2, 12, 8, 0, 0, tzinfo=UTC),
         started_at=None,
         completed_at=None,
         error_message=None,

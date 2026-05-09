@@ -4,7 +4,8 @@ import json
 import re
 import uuid
 import zipfile
-from typing import Any, AsyncGenerator, Optional, Sequence
+from collections.abc import AsyncGenerator, Sequence
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +60,7 @@ class Chat2RuleService:
     def __init__(
         self,
         *,
-        user_config: Optional[dict[str, Any]] = None,
+        user_config: dict[str, Any] | None = None,
         engine_type: str = "opengrep",
     ):
         normalized_engine_type = str(engine_type or "").strip().lower() or "opengrep"
@@ -84,7 +85,7 @@ class Chat2RuleService:
         project_id: str,
         messages: Sequence[dict[str, str]],
         selections: Sequence[dict[str, Any]],
-        draft_rule_text: Optional[str] = None,
+        draft_rule_text: str | None = None,
     ) -> dict[str, Any]:
         llm_messages = await self._prepare_generation_context(
             project_id=project_id,
@@ -108,7 +109,7 @@ class Chat2RuleService:
         project_id: str,
         messages: Sequence[dict[str, str]],
         selections: Sequence[dict[str, Any]],
-        draft_rule_text: Optional[str] = None,
+        draft_rule_text: str | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         llm_messages = await self._prepare_generation_context(
             project_id=project_id,
@@ -182,8 +183,8 @@ class Chat2RuleService:
         *,
         db: AsyncSession,
         rule_text: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         if not self.save_supported:
             raise ValueError(f"当前引擎 {self.engine_type} 不支持直接保存自定义规则")
@@ -232,7 +233,7 @@ class Chat2RuleService:
         project_id: str,
         messages: Sequence[dict[str, str]],
         selections: Sequence[dict[str, Any]],
-        draft_rule_text: Optional[str] = None,
+        draft_rule_text: str | None = None,
     ) -> dict[str, Any]:
         return await self.generate_draft(
             project_id=project_id,
@@ -247,7 +248,7 @@ class Chat2RuleService:
         project_id: str,
         messages: Sequence[dict[str, str]],
         selections: Sequence[dict[str, Any]],
-        draft_rule_text: Optional[str] = None,
+        draft_rule_text: str | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         async for event in self.stream_draft(
             project_id=project_id,
@@ -262,8 +263,8 @@ class Chat2RuleService:
         *,
         db: AsyncSession,
         rule_text: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         return await self._save_opengrep_rule(
             db=db,
@@ -277,8 +278,8 @@ class Chat2RuleService:
         *,
         db: AsyncSession,
         rule_text: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         validation = await validate_generic_rule(rule_text)
         validation_status = validation.get("validation") or {}
@@ -341,8 +342,8 @@ class Chat2RuleService:
         *,
         db: AsyncSession,
         rule_text: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         parsed = self._parse_json_rule_text(rule_text)
         validation_message, normalized = self._validate_gitleaks_rule(parsed)
@@ -386,8 +387,8 @@ class Chat2RuleService:
         *,
         db: AsyncSession,
         rule_text: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         try:
             parsed_payload = parse_pmd_ruleset_xml(rule_text)
@@ -430,8 +431,8 @@ class Chat2RuleService:
         *,
         db: AsyncSession,
         rule_text: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         payload = self._parse_json_rule_text(rule_text)
         checker_ids = self._parse_yasa_checker_ids(payload)
@@ -488,7 +489,7 @@ class Chat2RuleService:
         project_id: str,
         messages: Sequence[dict[str, str]],
         selections: Sequence[dict[str, Any]],
-        draft_rule_text: Optional[str],
+        draft_rule_text: str | None,
     ) -> list[dict[str, str]]:
         normalized_messages = self._normalize_messages(messages)
         if not normalized_messages:
@@ -839,7 +840,7 @@ class Chat2RuleService:
             suffix = file_path[file_path.rfind(".") :].lower()
         return _LANGUAGE_BY_EXTENSION.get(suffix, "generic")
 
-    def _extract_cwe(self, rule: dict[str, Any]) -> Optional[list[str]]:
+    def _extract_cwe(self, rule: dict[str, Any]) -> list[str] | None:
         metadata = rule.get("metadata")
         if not isinstance(metadata, dict):
             return None
@@ -951,7 +952,7 @@ class Chat2RuleService:
             normalized.append(item)
         return normalized
 
-    def _to_optional_float(self, value: Any) -> Optional[float]:
+    def _to_optional_float(self, value: Any) -> float | None:
         if value is None:
             return None
         text = str(value).strip()

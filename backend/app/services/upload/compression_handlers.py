@@ -1,14 +1,15 @@
 import asyncio
-import zipfile
 import tarfile
-from typing import List, Dict, Any, Optional
+import zipfile
+from typing import Any
+
 from .compression_strategy import CompressionStrategy
 
 
 def _preserve_tarinfo(
     tarinfo: tarfile.TarInfo,
     path: str,
-) -> Optional[tarfile.TarInfo]:
+) -> tarfile.TarInfo | None:
     """
     Tar extraction filter.
 
@@ -26,13 +27,13 @@ class ZipCompressionStrategy(CompressionStrategy):
     """ZIP 格式处理器"""
 
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return [".zip", ".ZIP"]
 
-    async def extract(self, file_path: str, extract_to: str) -> List[str]:
+    async def extract(self, file_path: str, extract_to: str) -> list[str]:
         return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
 
-    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
+    def _extract_sync(self, file_path: str, extract_to: str) -> list[str]:
         """解压 ZIP 文件"""
         extracted_files = []
         try:
@@ -60,7 +61,7 @@ class ZipCompressionStrategy(CompressionStrategy):
         except Exception:
             return False
 
-    def get_file_list(self, file_path: str) -> List[Dict[str, Any]]:
+    def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 ZIP 内文件列表"""
         files = []
         try:
@@ -75,7 +76,7 @@ class ZipCompressionStrategy(CompressionStrategy):
                             }
                         )
         except Exception as e:
-            raise ValueError(f"读取 ZIP 文件失败: {str(e)}")
+            raise ValueError(f"读取 ZIP 文件失败: {str(e)}") from e
         return files
 
 
@@ -83,13 +84,13 @@ class TarCompressionStrategy(CompressionStrategy):
     """TAR 格式处理器"""
 
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return [".tar"]
 
-    async def extract(self, file_path: str, extract_to: str) -> List[str]:
+    async def extract(self, file_path: str, extract_to: str) -> list[str]:
         return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
 
-    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
+    def _extract_sync(self, file_path: str, extract_to: str) -> list[str]:
         """解压 TAR 文件"""
         extracted_files = []
         try:
@@ -110,7 +111,7 @@ class TarCompressionStrategy(CompressionStrategy):
         except Exception:
             return False
 
-    def get_file_list(self, file_path: str) -> List[Dict[str, Any]]:
+    def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 TAR 内文件列表"""
         files = []
         try:
@@ -119,7 +120,7 @@ class TarCompressionStrategy(CompressionStrategy):
                     if not member.isdir():
                         files.append({"path": member.name, "size": member.size})
         except Exception as e:
-            raise ValueError(f"读取 TAR 文件失败: {str(e)}")
+            raise ValueError(f"读取 TAR 文件失败: {str(e)}") from e
         return files
 
 
@@ -127,13 +128,13 @@ class TarGzCompressionStrategy(CompressionStrategy):
     """TAR.GZ 格式处理器"""
 
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return [".tar.gz", ".tgz", ".tar.gzip"]
 
-    async def extract(self, file_path: str, extract_to: str) -> List[str]:
+    async def extract(self, file_path: str, extract_to: str) -> list[str]:
         return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
 
-    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
+    def _extract_sync(self, file_path: str, extract_to: str) -> list[str]:
         """解压 TAR.GZ 文件"""
         extracted_files = []
         try:
@@ -154,7 +155,7 @@ class TarGzCompressionStrategy(CompressionStrategy):
         except Exception:
             return False
 
-    def get_file_list(self, file_path: str) -> List[Dict[str, Any]]:
+    def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 TAR.GZ 内文件列表"""
         files = []
         try:
@@ -163,7 +164,7 @@ class TarGzCompressionStrategy(CompressionStrategy):
                     if not member.isdir():
                         files.append({"path": member.name, "size": member.size})
         except Exception as e:
-            raise ValueError(f"读取 TAR.GZ 文件失败: {str(e)}")
+            raise ValueError(f"读取 TAR.GZ 文件失败: {str(e)}") from e
         return files
 
 
@@ -171,13 +172,13 @@ class TarBz2CompressionStrategy(CompressionStrategy):
     """TAR.BZ2 格式处理器"""
 
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return [".tar.bz2", ".tbz", ".tbz2"]
 
-    async def extract(self, file_path: str, extract_to: str) -> List[str]:
+    async def extract(self, file_path: str, extract_to: str) -> list[str]:
         return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
 
-    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
+    def _extract_sync(self, file_path: str, extract_to: str) -> list[str]:
         """解压 TAR.BZ2 文件"""
         extracted_files = []
         try:
@@ -198,7 +199,7 @@ class TarBz2CompressionStrategy(CompressionStrategy):
         except Exception:
             return False
 
-    def get_file_list(self, file_path: str) -> List[Dict[str, Any]]:
+    def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 TAR.BZ2 内文件列表"""
         files = []
         try:
@@ -207,7 +208,7 @@ class TarBz2CompressionStrategy(CompressionStrategy):
                     if not member.isdir():
                         files.append({"path": member.name, "size": member.size})
         except Exception as e:
-            raise ValueError(f"读取 TAR.BZ2 文件失败: {str(e)}")
+            raise ValueError(f"读取 TAR.BZ2 文件失败: {str(e)}") from e
         return files
 
 
@@ -215,19 +216,19 @@ class SevenZCompressionStrategy(CompressionStrategy):
     """7Z 格式处理器"""
 
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return [".7z"]
 
-    async def extract(self, file_path: str, extract_to: str) -> List[str]:
+    async def extract(self, file_path: str, extract_to: str) -> list[str]:
         return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
 
-    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
+    def _extract_sync(self, file_path: str, extract_to: str) -> list[str]:
         """解压 7Z 文件"""
         # 需要安装 py7zr 包: pip install py7zr
         try:
             import py7zr
-        except ImportError:
-            raise ImportError("需要安装 py7zr 包来支持 7Z 格式")
+        except ImportError as exc:
+            raise ImportError("需要安装 py7zr 包来支持 7Z 格式") from exc
 
         extracted_files = []
         try:
@@ -253,12 +254,12 @@ class SevenZCompressionStrategy(CompressionStrategy):
         except Exception:
             return False
 
-    def get_file_list(self, file_path: str) -> List[Dict[str, Any]]:
+    def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 7Z 内文件列表"""
         try:
             import py7zr
-        except ImportError:
-            raise ImportError("需要安装 py7zr 包来支持 7Z 格式")
+        except ImportError as exc:
+            raise ImportError("需要安装 py7zr 包来支持 7Z 格式") from exc
 
         files = []
         try:
@@ -267,7 +268,7 @@ class SevenZCompressionStrategy(CompressionStrategy):
                     if not info.is_directory:
                         files.append({"path": name, "size": info.uncompressed})
         except Exception as e:
-            raise ValueError(f"读取 7Z 文件失败: {str(e)}")
+            raise ValueError(f"读取 7Z 文件失败: {str(e)}") from e
         return files
 
 
@@ -275,19 +276,19 @@ class RarCompressionStrategy(CompressionStrategy):
     """RAR 格式处理器"""
 
     @property
-    def supported_extensions(self) -> List[str]:
+    def supported_extensions(self) -> list[str]:
         return [".rar"]
 
-    async def extract(self, file_path: str, extract_to: str) -> List[str]:
+    async def extract(self, file_path: str, extract_to: str) -> list[str]:
         return await asyncio.to_thread(self._extract_sync, file_path, extract_to)
 
-    def _extract_sync(self, file_path: str, extract_to: str) -> List[str]:
+    def _extract_sync(self, file_path: str, extract_to: str) -> list[str]:
         """解压 RAR 文件"""
         # 需要安装 rarfile 包: pip install rarfile
         try:
             import rarfile
-        except ImportError:
-            raise ImportError("需要安装 rarfile 包来支持 RAR 格式")
+        except ImportError as exc:
+            raise ImportError("需要安装 rarfile 包来支持 RAR 格式") from exc
 
         extracted_files = []
         try:
@@ -311,12 +312,12 @@ class RarCompressionStrategy(CompressionStrategy):
         except Exception:
             return False
 
-    def get_file_list(self, file_path: str) -> List[Dict[str, Any]]:
+    def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 RAR 内文件列表"""
         try:
             import rarfile
-        except ImportError:
-            raise ImportError("需要安装 rarfile 包来支持 RAR 格式")
+        except ImportError as exc:
+            raise ImportError("需要安装 rarfile 包来支持 RAR 格式") from exc
 
         files = []
         try:
@@ -325,5 +326,5 @@ class RarCompressionStrategy(CompressionStrategy):
                     if not info.is_dir():
                         files.append({"path": info.filename, "size": info.file_size})
         except Exception as e:
-            raise ValueError(f"读取 RAR 文件失败: {str(e)}")
+            raise ValueError(f"读取 RAR 文件失败: {str(e)}") from e
         return files

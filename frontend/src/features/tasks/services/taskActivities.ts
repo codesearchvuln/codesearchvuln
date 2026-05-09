@@ -780,54 +780,60 @@ export async function deleteTaskActivity(activity: TaskActivityItem): Promise<vo
 	if (activity.kind === "rule_scan") {
 		const operations: Array<() => Promise<void>> = [];
 		if (activity.opengrepTaskId) {
+			const taskId = activity.opengrepTaskId;
 			operations.push(() =>
 				interruptAndDeleteStaticTask(
-					activity.opengrepTaskId,
+					taskId,
 					interruptOpengrepScanTask,
 					deleteOpengrepScanTask,
 				),
 			);
 		}
 		if (activity.gitleaksTaskId) {
+			const taskId = activity.gitleaksTaskId;
 			operations.push(() =>
 				interruptAndDeleteStaticTask(
-					activity.gitleaksTaskId,
+					taskId,
 					interruptGitleaksScanTask,
 					deleteGitleaksScanTask,
 				),
 			);
 		}
 		if (activity.banditTaskId) {
+			const taskId = activity.banditTaskId;
 			operations.push(() =>
 				interruptAndDeleteStaticTask(
-					activity.banditTaskId,
+					taskId,
 					interruptBanditScanTask,
 					deleteBanditScanTask,
 				),
 			);
 		}
 		if (activity.phpstanTaskId) {
+			const taskId = activity.phpstanTaskId;
 			operations.push(() =>
 				interruptAndDeleteStaticTask(
-					activity.phpstanTaskId,
+					taskId,
 					interruptPhpstanScanTask,
 					deletePhpstanScanTask,
 				),
 			);
 		}
 		if (activity.pmdTaskId) {
+			const taskId = activity.pmdTaskId;
 			operations.push(() =>
 				interruptAndDeleteStaticTask(
-					activity.pmdTaskId,
+					taskId,
 					interruptPmdScanTask,
 					deletePmdScanTask,
 				),
 			);
 		}
 		if (activity.yasaTaskId) {
+			const taskId = activity.yasaTaskId;
 			operations.push(() =>
 				interruptAndDeleteStaticTask(
-					activity.yasaTaskId,
+					taskId,
 					interruptYasaScanTask,
 					deleteYasaScanTask,
 				),

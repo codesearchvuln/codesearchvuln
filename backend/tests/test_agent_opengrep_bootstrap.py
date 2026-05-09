@@ -1,14 +1,13 @@
 import asyncio
-import sys
-import types
 import json
 import logging
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
 
 docker_stub = types.ModuleType("docker")
 docker_stub.from_env = lambda: None
@@ -19,17 +18,17 @@ docker_stub.errors = types.SimpleNamespace(
 )
 sys.modules.setdefault("docker", docker_stub)
 
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.api.v1.endpoints.agent_tasks import (
     _filter_bootstrap_findings,
     _prepare_embedded_bootstrap_findings,
     _resolve_bandit_bootstrap_rule_ids,
     _resolve_bandit_effective_rule_ids_for_bootstrap,
-    _run_bootstrap_gitleaks_scan,
     _resolve_static_bootstrap_config,
+    _run_bootstrap_gitleaks_scan,
     _run_embedded_bootstrap_with_heartbeat,
 )
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
 from app.models.yasa import YasaRuleConfig
 
 

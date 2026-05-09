@@ -1,10 +1,11 @@
+import asyncio
 from app.api.v1.endpoints.projects_shared import *
 from app.api.v1.endpoints.projects_shared import (
-    _calculate_zip_file_hash,
-    _raise_if_project_hidden,
     _build_file_tree_from_zip,
-    _validate_zip_file_path,
+    _calculate_zip_file_hash,
     _is_binary_file,
+    _raise_if_project_hidden,
+    _validate_zip_file_path,
 )
 
 router = APIRouter()
@@ -59,7 +60,7 @@ async def get_project_files(
                         files.append({"path": name, "size": file_info.file_size})
         except Exception as e:
             print(f"Error reading zip file: {e}")
-            raise HTTPException(status_code=500, detail="无法读取项目文件")
+            raise HTTPException(status_code=500, detail="无法读取项目文件") from e
 
     return files
 
@@ -100,10 +101,9 @@ async def get_project_files_tree(
     # Check permissions
 
     # 解析排除模式
-    parsed_exclude_patterns = []
     if exclude_patterns:
         try:
-            parsed_exclude_patterns = json.loads(exclude_patterns)
+            json.loads(exclude_patterns)
         except json.JSONDecodeError:
             pass
 
@@ -119,7 +119,7 @@ async def get_project_files_tree(
             return FileTreeResponse(root=root_node)
         except Exception as e:
             logger.error(f"构建ZIP文件树失败: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"无法构建文件树: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"无法构建文件树: {str(e)}") from e
 
     else:
         raise HTTPException(status_code=400, detail="仅支持ZIP类型项目")
@@ -220,7 +220,7 @@ async def get_project_file_content(
                 try:
                     info = zf.getinfo(resolved_zip_path)
                 except KeyError:
-                    raise HTTPException(status_code=404, detail=f"文件不存在: {resolved_zip_path}")
+                    raise HTTPException(status_code=404, detail=f"文件不存在: {resolved_zip_path}") from None
 
                 # 8. 检查文件大小
                 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
@@ -338,7 +338,7 @@ async def get_project_file_content(
         raise
     except Exception as e:
         logger.error(f"读取文件 {resolved_zip_path} 失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"无法读取项目文件: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"无法读取项目文件: {str(e)}") from e
 
 
 @router.get("/cache/stats")

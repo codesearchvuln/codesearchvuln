@@ -8,7 +8,6 @@ import json
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-
 _ROOT_ENDPOINT_SUFFIXES = (
     "/chat/completions",
     "/completions",

@@ -12,7 +12,8 @@ import json
 import logging
 import os
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,32 +36,32 @@ router = APIRouter()
 class ReconTestRequest(BaseModel):
     project_path: str = Field(..., description="项目绝对路径")
     project_name: str = Field("test-project", description="项目名称")
-    framework_hint: Optional[str] = Field(None, description="框架提示（如 django/fastapi/express）")
+    framework_hint: str | None = Field(None, description="框架提示（如 django/fastapi/express）")
     max_iterations: int = Field(6, ge=1, le=200)
 
 
 class AnalysisTestRequest(BaseModel):
     project_path: str = Field(..., description="项目绝对路径")
     project_name: str = Field("test-project", description="项目名称")
-    high_risk_areas: List[str] = Field(default_factory=list, description="高风险区域列表")
-    entry_points: List[str] = Field(default_factory=list, description="入口点列表")
+    high_risk_areas: list[str] = Field(default_factory=list, description="高风险区域列表")
+    entry_points: list[str] = Field(default_factory=list, description="入口点列表")
     task_description: str = Field("", description="审计任务描述")
     max_iterations: int = Field(8, ge=1, le=200)
 
 
 class VerificationTestRequest(BaseModel):
     project_path: str = Field(..., description="项目绝对路径")
-    findings: List[Dict[str, Any]] = Field(..., description="待验证的漏洞列表")
+    findings: list[dict[str, Any]] = Field(..., description="待验证的漏洞列表")
     max_iterations: int = Field(6, ge=1, le=200)
 
 
 class BusinessLogicTestRequest(BaseModel):
     project_path: str = Field(..., description="项目绝对路径")
-    entry_points_hint: List[str] = Field(
+    entry_points_hint: list[str] = Field(
         default_factory=list,
         description="入口点提示，格式如 ['app/api/user.py:update_profile']",
     )
-    framework_hint: Optional[str] = Field(None, description="框架提示")
+    framework_hint: str | None = Field(None, description="框架提示")
     max_iterations: int = Field(8, ge=1, le=200)
     quick_mode: bool = Field(False)
 
@@ -68,13 +69,13 @@ class BusinessLogicTestRequest(BaseModel):
 class BusinessLogicReconTestRequest(BaseModel):
     project_path: str = Field(..., description="项目绝对路径")
     project_name: str = Field("test-project", description="项目名称")
-    framework_hint: Optional[str] = Field(None, description="框架提示（如 django/fastapi/express）")
+    framework_hint: str | None = Field(None, description="框架提示（如 django/fastapi/express）")
     max_iterations: int = Field(10, ge=1, le=200)
 
 
 class BusinessLogicAnalysisTestRequest(BaseModel):
     project_path: str = Field(..., description="项目绝对路径")
-    risk_point: Dict[str, Any] = Field(
+    risk_point: dict[str, Any] = Field(
         ...,
         description="单个业务逻辑风险点（来自 BL Recon 阶段），需包含 file_path、line_start、description、vulnerability_type",
     )
@@ -128,7 +129,7 @@ class QueueEventEmitter:
         """
         if hasattr(event_data, "event_type"):
             # 标准 AgentEventData 对象
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "type": event_data.event_type,
                 "message": event_data.message or "",
                 "ts": time.time(),
@@ -157,7 +158,7 @@ class QueueEventEmitter:
 
     async def _emit_queue_snapshot(self) -> None:
         """采集当前队列状态并推入 SSE 流。"""
-        queues: Dict[str, Any] = {}
+        queues: dict[str, Any] = {}
 
         if self._vuln_queue and self._vuln_task_id:
             try:
@@ -231,7 +232,7 @@ class QueueEventEmitter:
             await self._queue.put({"type": "queue_snapshot", "queues": queues, "ts": time.time()})
 
     # ── 便捷方法：BaseAgent 子方法有时直接调用 ───────────────────
-    async def emit_event(self, event_type: str, message: str, metadata: Optional[Dict] = None):
+    async def emit_event(self, event_type: str, message: str, metadata: dict | None = None):
         await self._queue.put({
             "type": event_type,
             "message": message,
@@ -239,40 +240,41 @@ class QueueEventEmitter:
             "ts": time.time(),
         })
 
-    async def emit_info(self, message: str, metadata: Optional[Dict] = None):
+    async def emit_info(self, message: str, metadata: dict | None = None):
         await self.emit_event("info", message, metadata)
 
-    async def emit_error(self, message: str, metadata: Optional[Dict] = None):
+    async def emit_error(self, message: str, metadata: dict | None = None):
         await self.emit_event("error", message, metadata)
 
-    async def emit_warning(self, message: str, metadata: Optional[Dict] = None):
+    async def emit_warning(self, message: str, metadata: dict | None = None):
         await self.emit_event("warning", message, metadata)
 
-    async def emit_thinking(self, message: str, metadata: Optional[Dict] = None):
+    async def emit_thinking(self, message: str, metadata: dict | None = None):
         await self.emit_event("thinking", message, metadata)
 
-    async def emit_phase_start(self, phase: str, message: Optional[str] = None):
+    async def emit_phase_start(self, phase: str, message: str | None = None):
         await self.emit_event("phase_start", message or f"开始 {phase} 阶段")
 
-    async def emit_phase_complete(self, phase: str, message: Optional[str] = None):
+    async def emit_phase_complete(self, phase: str, message: str | None = None):
         await self.emit_event("phase_complete", message or f"{phase} 阶段完成")
 
 
 # ─────────────────────────── Tool Initialization ────────────────────────
 
 
-async def _init_llm_service(user_config: Optional[Dict]) -> Any:
-    from app.services.llm.service import LLMService, LLMConfigError
+async def _init_llm_service(user_config: dict | None) -> Any:
+    from app.services.llm.service import LLMConfigError, LLMService
     svc = LLMService(user_config=user_config)
     try:
         _ = svc.config
     except LLMConfigError as e:
-        raise HTTPException(status_code=400, detail=f"LLM 配置错误: {e}")
+        raise HTTPException(status_code=400, detail=f"LLM 配置错误: {e}") from e
     return svc
 
 
-def _build_base_tools(project_root: str) -> Dict[str, Any]:
+def _build_base_tools(project_root: str) -> dict[str, Any]:
     from app.services.agent.tools import (
+        BashShellTool,
         CodeWindowTool,
         FileOutlineTool,
         FileSearchTool,
@@ -280,7 +282,6 @@ def _build_base_tools(project_root: str) -> Dict[str, Any]:
         ListFilesTool,
         LocateEnclosingFunctionTool,
         SymbolBodyTool,
-        BashShellTool,
     )
     return {
         "list_files": ListFilesTool(project_root),
@@ -298,10 +299,10 @@ def _build_recon_tools(
     project_root: str,
     task_id: str,
     recon_queue: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from app.services.agent.tools.recon_queue_tools import (
-        PushRiskPointToQueueTool,
         PushRiskPointsBatchToQueueTool,
+        PushRiskPointToQueueTool,
     )
     tools = _build_base_tools(project_root)
     tools["push_risk_point_to_queue"] = PushRiskPointToQueueTool(
@@ -320,11 +321,14 @@ def _build_analysis_tools(
     llm_service: Any,
     task_id: str = "",
     vuln_queue: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from app.services.agent.tools import (
-        PatternMatchTool, DataFlowAnalysisTool,
-        ControlFlowAnalysisLightTool, LogicAuthzAnalysisTool,
-        SmartScanTool, QuickAuditTool,
+        ControlFlowAnalysisLightTool,
+        DataFlowAnalysisTool,
+        LogicAuthzAnalysisTool,
+        PatternMatchTool,
+        QuickAuditTool,
+        SmartScanTool,
     )
     tools = {
         **_build_base_tools(project_root),
@@ -336,13 +340,16 @@ def _build_analysis_tools(
         "logic_authz_analysis": LogicAuthzAnalysisTool(project_root=project_root),
     }
     if vuln_queue and task_id:
-        from app.services.agent.tools.queue_tools import PushFindingToQueueTool, IsFindingInQueueTool
+        from app.services.agent.tools.queue_tools import (
+            IsFindingInQueueTool,
+            PushFindingToQueueTool,
+        )
         tools["push_finding_to_queue"] = PushFindingToQueueTool(vuln_queue, task_id)
         tools["is_finding_in_queue"] = IsFindingInQueueTool(vuln_queue, task_id)
     return tools
 
 
-def _build_verification_tools(project_root: str) -> Dict[str, Any]:
+def _build_verification_tools(project_root: str) -> dict[str, Any]:
     from app.services.agent.tools import (
         CreateVulnerabilityReportTool,
     )
@@ -357,12 +364,12 @@ def _build_bl_recon_tools(
     project_root: str,
     task_id: str,
     bl_queue: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from app.services.agent.tools.business_logic_recon_queue_tools import (
-        PushBLRiskPointToQueueTool,
-        PushBLRiskPointsBatchToQueueTool,
         GetBLRiskQueueStatusTool,
         IsBLRiskPointInQueueTool,
+        PushBLRiskPointsBatchToQueueTool,
+        PushBLRiskPointToQueueTool,
     )
     tools = _build_base_tools(project_root)
     tools["push_bl_risk_point_to_queue"] = PushBLRiskPointToQueueTool(
@@ -389,10 +396,11 @@ def _build_bl_analysis_tools(
     llm_service: Any,
     task_id: str = "",
     vuln_queue: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from app.services.agent.tools import (
-        PatternMatchTool, DataFlowAnalysisTool,
         ControlFlowAnalysisLightTool,
+        DataFlowAnalysisTool,
+        PatternMatchTool,
     )
     tools = {
         **_build_base_tools(project_root),
@@ -401,7 +409,10 @@ def _build_bl_analysis_tools(
         "controlflow_analysis_light": ControlFlowAnalysisLightTool(project_root=project_root),
     }
     if vuln_queue and task_id:
-        from app.services.agent.tools.queue_tools import PushFindingToQueueTool, IsFindingInQueueTool
+        from app.services.agent.tools.queue_tools import (
+            IsFindingInQueueTool,
+            PushFindingToQueueTool,
+        )
         tools["push_finding_to_queue"] = PushFindingToQueueTool(vuln_queue, task_id)
         tools["is_finding_in_queue"] = IsFindingInQueueTool(vuln_queue, task_id)
     return tools
@@ -410,7 +421,7 @@ def _build_bl_analysis_tools(
 # ─────────────────────────── SSE Generator ──────────────────────────────
 
 
-def _sse(data: Dict) -> str:
+def _sse(data: dict) -> str:
     def _default(obj: Any) -> Any:
         if hasattr(obj, "to_dict"):
             return obj.to_dict()
@@ -449,7 +460,7 @@ async def _run_agent_streaming(
             if item is _DONE:
                 break
             yield _sse(item)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         yield _sse({"type": "error", "message": "Agent 执行超时（120s）"})
     finally:
         task.cancel()
@@ -468,7 +479,7 @@ def _validate_project_path(path: str) -> str:
     return norm
 
 
-async def _get_user_config(db: AsyncSession, user_id: str) -> Optional[Dict]:
+async def _get_user_config(db: AsyncSession, user_id: str) -> dict | None:
     try:
         from app.api.v1.endpoints.config import _load_effective_user_config
 

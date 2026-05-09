@@ -1,19 +1,18 @@
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class GitleaksRuleBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     rule_id: str = Field(..., min_length=1, max_length=255)
     secret_group: int = Field(0, ge=0)
     regex: str = Field(..., min_length=1)
-    keywords: List[str] = Field(default_factory=list)
-    path: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
-    entropy: Optional[float] = Field(None, ge=0)
+    keywords: list[str] = Field(default_factory=list)
+    path: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    entropy: float | None = Field(None, ge=0)
     is_active: bool = True
     source: str = Field(default="custom", min_length=1, max_length=64)
 
@@ -27,8 +26,8 @@ class GitleaksRuleBase(BaseModel):
 
     @field_validator("keywords", "tags")
     @classmethod
-    def _clean_string_list(cls, value: List[str]) -> List[str]:
-        cleaned: List[str] = []
+    def _clean_string_list(cls, value: list[str]) -> list[str]:
+        cleaned: list[str] = []
         for item in value:
             item_text = str(item).strip()
             if item_text:
@@ -41,30 +40,30 @@ class GitleaksRuleCreateRequest(GitleaksRuleBase):
 
 
 class GitleaksRuleUpdateRequest(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
-    rule_id: Optional[str] = Field(None, min_length=1, max_length=255)
-    secret_group: Optional[int] = Field(None, ge=0)
-    regex: Optional[str] = Field(None, min_length=1)
-    keywords: Optional[List[str]] = None
-    path: Optional[str] = None
-    tags: Optional[List[str]] = None
-    entropy: Optional[float] = Field(None, ge=0)
-    is_active: Optional[bool] = None
-    source: Optional[str] = Field(None, min_length=1, max_length=64)
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = None
+    rule_id: str | None = Field(None, min_length=1, max_length=255)
+    secret_group: int | None = Field(None, ge=0)
+    regex: str | None = Field(None, min_length=1)
+    keywords: list[str] | None = None
+    path: str | None = None
+    tags: list[str] | None = None
+    entropy: float | None = Field(None, ge=0)
+    is_active: bool | None = None
+    source: str | None = Field(None, min_length=1, max_length=64)
 
 
 class GitleaksRuleBatchUpdateRequest(BaseModel):
-    rule_ids: Optional[List[str]] = None
-    source: Optional[str] = None
-    keyword: Optional[str] = None
-    current_is_active: Optional[bool] = None
+    rule_ids: list[str] | None = None
+    source: str | None = None
+    keyword: str | None = None
+    current_is_active: bool | None = None
     is_active: bool
 
 
 class GitleaksRuleResponse(GitleaksRuleBase):
     id: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

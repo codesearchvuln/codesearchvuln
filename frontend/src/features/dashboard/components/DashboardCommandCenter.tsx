@@ -357,17 +357,6 @@ function formatTrendDate(value: string) {
 	return value;
 }
 
-function formatCreatedAt(value: string) {
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) {
-		return value || "-";
-	}
-	const month = `${date.getMonth() + 1}`.padStart(2, "0");
-	const day = `${date.getDate()}`.padStart(2, "0");
-	const hour = `${date.getHours()}`.padStart(2, "0");
-	const minute = `${date.getMinutes()}`.padStart(2, "0");
-	return `${month}-${day} ${hour}:${minute}`;
-}
 
 export function formatCumulativeDuration(
 	durationMs: number | null | undefined,
@@ -692,16 +681,6 @@ export function getRecentTaskProjectTitle(task: DashboardRecentTaskItem): string
 	return segments[segments.length - 1]?.trim() || title;
 }
 
-function getRecentTaskTypeBadgeClassName(taskType: string | null | undefined): string {
-	const normalized = String(taskType || "").trim();
-	if (normalized.includes("混合")) {
-		return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
-	}
-	if (normalized.includes("智能")) {
-		return "border-sky-500/30 bg-sky-500/10 text-sky-300";
-	}
-	return "border-amber-500/30 bg-amber-500/10 text-amber-300";
-}
 
 export function paginateRecentTasks(
 	tasks: DashboardRecentTaskItem[],
@@ -1031,23 +1010,6 @@ function TrendPanel({ snapshot }: { snapshot: DashboardSnapshotResponse }) {
 	const trendRows = useMemo(
 		() => buildTrendRows(snapshot.daily_activity),
 		[snapshot.daily_activity],
-	);
-	const peakItem = trendRows.reduce(
-		(result, item) =>
-			item.totalNewFindings > result.totalNewFindings ? item : result,
-		{
-			date: "-",
-			totalNewFindings: 0,
-			staticFindings: 0,
-			intelligentVerifiedFindings: 0,
-			hybridVerifiedFindings: 0,
-			staticShare: 0,
-			intelligentShare: 0,
-			hybridShare: 0,
-			staticLabel: 0,
-			intelligentLabel: 0,
-			hybridLabel: 0,
-		},
 	);
 	const latestItem = trendRows[trendRows.length - 1];
 

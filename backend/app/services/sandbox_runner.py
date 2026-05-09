@@ -10,16 +10,14 @@ Sandbox Runner - 底层容器执行抽象
 
 from __future__ import annotations
 
-import time
 import json
-from dataclasses import asdict, dataclass, field
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 import docker
-
-from app.core.config import settings
-
 
 MAX_RETAINED_LOG_CHARS = 12000
 DOCKER_EXCEPTION = getattr(getattr(docker, "errors", None), "DockerException", Exception)
@@ -32,7 +30,7 @@ class SandboxRunSpec:
 
     # 基础执行参数
     image: str
-    command: List[str]
+    command: list[str]
     workspace_dir: str
     working_dir: str = "/workspace"
 
@@ -45,16 +43,16 @@ class SandboxRunSpec:
     user: str = "1000:1000"
 
     # Docker 安全选项 (默认最严格)
-    cap_drop: List[str] = field(default_factory=lambda: ["ALL"])
-    security_opt: List[str] = field(default_factory=lambda: ["no-new-privileges:true"])
+    cap_drop: list[str] = field(default_factory=lambda: ["ALL"])
+    security_opt: list[str] = field(default_factory=lambda: ["no-new-privileges:true"])
 
     # 挂载与环境
-    env: Dict[str, str] = field(default_factory=dict)
-    volumes: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    tmpfs: Dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    volumes: dict[str, dict[str, str]] = field(default_factory=dict)
+    tmpfs: dict[str, str] = field(default_factory=dict)
 
     # 执行策略
-    expected_exit_codes: Set[int] = field(default_factory=lambda: {0})
+    expected_exit_codes: set[int] = field(default_factory=lambda: {0})
     auto_remove: bool = False  # 设为 False,便于调试和日志收集
     detach: bool = True  # 默认分离模式
 
@@ -79,7 +77,7 @@ class SandboxRunResult:
     # 执行状态
     success: bool
     exit_code: int
-    error: Optional[str] = None
+    error: str | None = None
 
     # 输出 (内存态,保持工具兼容)
     stdout: str = ""
@@ -87,23 +85,23 @@ class SandboxRunResult:
 
     # 镜像信息 (保持现有工具输出兼容)
     image: str = ""
-    image_candidates: List[str] = field(default_factory=list)
+    image_candidates: list[str] = field(default_factory=list)
 
     # 持久化路径
-    stdout_path: Optional[Path] = None
-    stderr_path: Optional[Path] = None
-    runner_meta_path: Optional[Path] = None
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+    runner_meta_path: Path | None = None
 
     # 元数据
     duration_seconds: float = 0.0
-    container_id: Optional[str] = None
-    workspace_dir: Optional[Path] = None
+    container_id: str | None = None
+    workspace_dir: Path | None = None
 
     @property
     def has_output(self) -> bool:
         return bool(self.stdout or self.stderr)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典,用于 JSON 序列化"""
         return {
             "success": self.success,
@@ -184,7 +182,7 @@ def run_sandbox_container(
     meta_path = meta_dir / "runner.json"
 
     container = None
-    container_id: Optional[str] = None
+    container_id: str | None = None
     expected_exit_codes = {int(code) for code in (spec.expected_exit_codes or {0})}
 
     try:

@@ -1,14 +1,14 @@
 """PHPStan 静态扫描后端单元测试。"""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import json
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.v1.endpoints import static_tasks
-from app.models.phpstan import PhpstanScanTask, PhpstanFinding
+from app.models.phpstan import PhpstanFinding, PhpstanScanTask
 
 
 class _ScalarOneOrNoneResult:

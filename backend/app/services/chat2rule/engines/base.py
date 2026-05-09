@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Sequence
 
 from app.services.chat2rule.types import Chat2RuleSnippet
 
@@ -13,7 +13,7 @@ class Chat2RuleFewShotExample:
     user_request: str
     snippets: Sequence[Chat2RuleSnippet]
     response_payload: dict[str, str]
-    draft_rule_text: Optional[str] = None
+    draft_rule_text: str | None = None
 
 
 class Chat2RulePromptEngine(ABC):
@@ -31,7 +31,7 @@ class Chat2RulePromptEngine(ABC):
         *,
         snippets: Sequence[Chat2RuleSnippet],
         messages: Sequence[dict[str, str]],
-        draft_rule_text: Optional[str],
+        draft_rule_text: str | None,
     ) -> list[dict[str, str]]:
         llm_messages: list[dict[str, str]] = [
             {"role": "system", "content": self.build_system_prompt()},
@@ -75,7 +75,7 @@ class Chat2RulePromptEngine(ABC):
         self,
         *,
         snippets: Sequence[Chat2RuleSnippet],
-        draft_rule_text: Optional[str],
+        draft_rule_text: str | None,
     ) -> str:
         return (
             "你将基于以下代码片段与对话继续生成或修订规则。\n\n"
@@ -96,7 +96,7 @@ class Chat2RulePromptEngine(ABC):
         self,
         snippets: Sequence[Chat2RuleSnippet],
         *,
-        draft_rule_text: Optional[str],
+        draft_rule_text: str | None,
     ) -> str:
         selection_summary = []
         snippet_blocks = []

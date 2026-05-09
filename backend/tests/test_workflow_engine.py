@@ -15,15 +15,15 @@ Test suite for AuditWorkflowEngine and WorkflowOrchestratorAgent.
 import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.agent.agents.base import AgentResult
 from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
-from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
 from app.services.agent.tools.verification_result_tools import SaveVerificationResultTool
+from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
 from app.services.agent.workflow import (
     AuditWorkflowEngine,
     WorkflowOrchestratorAgent,
@@ -33,7 +33,6 @@ from app.services.agent.workflow import (
 )
 from app.services.agent.workflow.models import WorkflowConfig
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # 通用假对象
 # ──────────────────────────────────────────────────────────────────────────────
@@ -41,13 +40,13 @@ from app.services.agent.workflow.models import WorkflowConfig
 @dataclass
 class _FakeEvent:
     event_type: str
-    message: Optional[str]
-    metadata: Optional[Dict[str, Any]] = None
+    message: str | None
+    metadata: dict[str, Any] | None = None
 
 
 class _FakeEventEmitter:
     def __init__(self) -> None:
-        self.events: List[_FakeEvent] = []
+        self.events: list[_FakeEvent] = []
 
     async def emit(self, event_data: Any) -> None:
         self.events.append(
@@ -59,7 +58,7 @@ class _FakeEventEmitter:
         )
 
 
-def _make_finding(title: str, file_path: str = "app.py", line_start: int = 10) -> Dict[str, Any]:
+def _make_finding(title: str, file_path: str = "app.py", line_start: int = 10) -> dict[str, Any]:
     return {
         "title": title,
         "file_path": file_path,
@@ -70,7 +69,7 @@ def _make_finding(title: str, file_path: str = "app.py", line_start: int = 10) -
     }
 
 
-def _make_risk_point(file_path: str = "app.py", line_start: int = 10) -> Dict[str, Any]:
+def _make_risk_point(file_path: str = "app.py", line_start: int = 10) -> dict[str, Any]:
     return {
         "file_path": file_path,
         "line_start": line_start,
@@ -82,7 +81,7 @@ class _StructuredReconHost:
     def __init__(self) -> None:
         self._reset_calls = 0
 
-    def build_project_recon_model(self, input_data: Dict[str, Any]):
+    def build_project_recon_model(self, input_data: dict[str, Any]):
         from app.services.agent.workflow.recon_models import (
             ProjectReconModel,
             ReconModuleDescriptor,
@@ -133,7 +132,7 @@ class _StructuredReconHost:
             project_info=project_info,
         )
 
-    def _create_recon_handoff(self, final_result: Dict[str, Any]):
+    def _create_recon_handoff(self, final_result: dict[str, Any]):
         from app.services.agent.agents.base import TaskHandoff
 
         return TaskHandoff(
@@ -173,7 +172,7 @@ class _StructuredReconSubAgent:
     def reset_session_memory(self):
         return None
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         type(self).active_runs += 1
         type(self).max_seen = max(type(self).max_seen, type(self).active_runs)
         try:
@@ -214,7 +213,7 @@ class _StructuredReconSubAgent:
 def _build_orchestrator(
     recon_queue: InMemoryReconRiskQueue,
     vuln_queue: InMemoryVulnerabilityQueue,
-    event_emitter: Optional[_FakeEventEmitter] = None,
+    event_emitter: _FakeEventEmitter | None = None,
 ) -> WorkflowOrchestratorAgent:
     """构建 WorkflowOrchestratorAgent，使用假 LLM 服务。"""
     llm_service = MagicMock()
@@ -296,17 +295,17 @@ def orchestrator_with_queues(fresh_queues):
 
 # ───── 辅助：装配 _dispatch_agent mock ─────
 
-def _install_dispatch_mock(orch, vuln_queue, findings_to_push: Optional[List] = None):
+def _install_dispatch_mock(orch, vuln_queue, findings_to_push: list | None = None):
     """
     替换 _dispatch_agent，模拟各子 Agent 行为：
     - recon: 向 recon_queue push 风险点（调用者在测试前预置）
     - analysis: 向 vuln_queue push findings，设置 _agent_results["analysis"]
     - verification: 设置 _agent_results["verification"]，追加 _all_findings
     """
-    calls: List[Dict] = []
+    calls: list[dict] = []
     dispatched_for_analysis = [0]
 
-    async def mock_dispatch(params: Dict) -> str:
+    async def mock_dispatch(params: dict) -> str:
         agent_name = str(params.get("agent", "")).lower()
         calls.append(params)
 
@@ -369,7 +368,7 @@ class TestAuditWorkflowEnginePhases:
         self, orchestrator_with_queues
     ):
         orch, recon_q, vuln_q = orchestrator_with_queues
-        calls: List[Dict[str, Any]] = []
+        calls: list[dict[str, Any]] = []
         module_results = [
             {
                 "module_id": "auth",
@@ -383,7 +382,7 @@ class TestAuditWorkflowEnginePhases:
             },
         ]
 
-        async def mock_dispatch(params: Dict[str, Any]) -> str:
+        async def mock_dispatch(params: dict[str, Any]) -> str:
             calls.append(dict(params))
             agent_name = str(params.get("agent", "")).lower()
 
@@ -542,10 +541,10 @@ class TestAuditWorkflowEnginePhases:
     ):
         """静态 seed 与 Recon 产出应汇总后进入 Analysis 阶段。"""
         orch, recon_q, vuln_q = orchestrator_with_queues
-        calls: List[Dict[str, Any]] = []
-        analyzed_risk_points: List[Dict[str, Any]] = []
+        calls: list[dict[str, Any]] = []
+        analyzed_risk_points: list[dict[str, Any]] = []
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             calls.append(dict(params))
             agent_name = str(params.get("agent", "")).lower()
 
@@ -628,10 +627,10 @@ class TestAuditWorkflowEnginePhases:
     async def test_recon_retries_until_queue_receives_risk_point(self, orchestrator_with_queues):
         """首轮 Recon 未产出风险点时，应继续 Recon，直到队列有结果。"""
         orch, recon_q, vuln_q = orchestrator_with_queues
-        calls: List[Dict[str, Any]] = []
+        calls: list[dict[str, Any]] = []
         recon_attempts = [0]
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             calls.append(dict(params))
             agent_name = str(params.get("agent", "")).lower()
 
@@ -737,9 +736,9 @@ class TestAuditWorkflowEnginePhases:
     async def test_recon_stops_retrying_after_max_empty_attempts(self, orchestrator_with_queues):
         """Recon 连续空队列时，应在上限后停止重试，避免死循环。"""
         orch, recon_q, vuln_q = orchestrator_with_queues
-        calls: List[Dict[str, Any]] = []
+        calls: list[dict[str, Any]] = []
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             calls.append(dict(params))
             agent_name = str(params.get("agent", "")).lower()
 
@@ -826,7 +825,7 @@ class TestAuditWorkflowEnginePhases:
         """verification 阶段结束后，漏洞队列为空"""
         orch, recon_q, vuln_q = orchestrator_with_queues
         recon_q.enqueue(TASK_ID, _make_risk_point())
-        calls = _install_dispatch_mock(orch, vuln_q, [_make_finding("F1")])
+        _install_dispatch_mock(orch, vuln_q, [_make_finding("F1")])
 
         engine = AuditWorkflowEngine(recon_q, vuln_q, TASK_ID, orch)
         await engine.run({}, {}, "/tmp", TASK_ID)
@@ -912,9 +911,9 @@ class TestVerificationPersistenceSync:
         orchestrator_with_queues,
     ):
         orch, recon_q, vuln_q = orchestrator_with_queues
-        persisted_batches: List[List[Dict[str, Any]]] = []
+        persisted_batches: list[list[dict[str, Any]]] = []
 
-        async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+        async def _save_callback(findings: list[dict[str, Any]]) -> int:
             persisted_batches.append([dict(item) for item in findings])
             return len(findings)
 
@@ -986,9 +985,9 @@ class TestCancellation:
         """Recon 完成后如果取消，不应进入 Analysis 阶段"""
         orch, recon_q, vuln_q = orchestrator_with_queues
         recon_q.enqueue(TASK_ID, _make_risk_point())
-        calls: List[Dict] = []
+        calls: list[dict] = []
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             calls.append(params)
             if params.get("agent") == "recon":
                 orch._agent_results["recon"] = {"_run_success": True}
@@ -1011,10 +1010,10 @@ class TestCancellation:
         orch, recon_q, vuln_q = orchestrator_with_queues
         for i in range(3):
             recon_q.enqueue(TASK_ID, _make_risk_point(f"f{i}.py", i))
-        calls: List[Dict] = []
+        calls: list[dict] = []
         analysis_count = [0]
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             calls.append(params)
             agent = params.get("agent", "")
             if agent == "recon":
@@ -1084,7 +1083,7 @@ class TestReportCorrectionFlow:
             },
         )
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             if params.get("agent") == "verification":
                 finding_from_params = dict(params.get("finding") or {})
                 finding_from_params.update(
@@ -1103,7 +1102,7 @@ class TestReportCorrectionFlow:
             return "ok"
 
         class _FakeReportAgent:
-            async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+            async def run(self, input_data: dict[str, Any]) -> AgentResult:
                 finding = dict(input_data.get("finding") or {})
                 finding.update(
                     {
@@ -1157,7 +1156,7 @@ class TestReportCorrectionFlow:
             },
         )
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             if params.get("agent") == "verification":
                 finding_from_params = dict(params.get("finding") or {})
                 finding_from_params.update(
@@ -1178,7 +1177,7 @@ class TestReportCorrectionFlow:
         class _ProjectAwareReportAgent:
             supports_project_risk_report = True
 
-            async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+            async def run(self, input_data: dict[str, Any]) -> AgentResult:
                 if str(input_data.get("report_mode") or "").strip().lower() == "project":
                     return AgentResult(
                         success=True,
@@ -1301,7 +1300,7 @@ class TestWorkflowOrchestratorAgent:
         with patch.object(
             agent.__class__.__bases__[0], "run", new=_fake_parent_run
         ):
-            result = await agent.run({"project_info": {}, "config": {}, "task_id": "test"})
+            await agent.run({"project_info": {}, "config": {}, "task_id": "test"})
 
         assert parent_run_called[0] is True
 
@@ -1310,7 +1309,7 @@ class TestWorkflowOrchestratorAgent:
         """调用 cancel() 后 run() 应返回 success=False"""
         orch, recon_q, vuln_q = orchestrator_with_queues
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             orch.cancel()
             orch._agent_results["recon"] = {"_run_success": True}
             return "cancelled"
@@ -1336,7 +1335,7 @@ class TestWorkflowOrchestratorAgent:
         recon_q.enqueue(TASK_ID, _make_risk_point())
         analysis_finding = _make_finding("SQL注入", "db.py", 20)
 
-        async def mock_dispatch(params: Dict) -> str:
+        async def mock_dispatch(params: dict) -> str:
             agent = params.get("agent", "")
             if agent == "recon":
                 orch._agent_results["recon"] = {"_run_success": True}

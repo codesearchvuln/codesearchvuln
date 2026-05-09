@@ -1,12 +1,13 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app.services.yasa_language import (
     collect_yasa_language_counts_from_source_tree,
     is_yasa_blocked_project_language,
     normalize_yasa_language,
-    resolve_yasa_language_from_source_tree,
     resolve_yasa_language_from_programming_languages,
+    resolve_yasa_language_from_source_tree,
     resolve_yasa_language_with_preference,
 )
 

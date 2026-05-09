@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 fastmcp_stub = types.ModuleType("fastmcp")
 fastmcp_stub.Client = object
 fastmcp_stub.FastMCP = object
@@ -34,7 +33,13 @@ alembic_script_stub.ScriptDirectory = type(
     {"from_config": staticmethod(lambda *_args, **_kwargs: SimpleNamespace(get_current_head=lambda: "head"))},
 )
 def _install_stub_if_missing(module_name: str, module: types.ModuleType) -> None:
-    if importlib.util.find_spec(module_name) is None:
+    if module_name in sys.modules:
+        return
+    try:
+        found = importlib.util.find_spec(module_name) is not None
+    except ValueError:
+        found = False
+    if not found:
         sys.modules.setdefault(module_name, module)
 
 
@@ -47,7 +52,7 @@ _install_stub_if_missing("alembic.config", alembic_config_stub)
 _install_stub_if_missing("alembic.script", alembic_script_stub)
 
 
-from app.services import runner_preflight
+from app.services import runner_preflight  # noqa: E402
 
 
 def _clear_file_handlers() -> None:

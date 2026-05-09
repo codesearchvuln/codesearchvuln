@@ -19,8 +19,10 @@ class Base:
 
 
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Index
+
+from sqlalchemy import Boolean, Column, DateTime, Index, String
 from sqlalchemy.sql import func
+
 
 class User(Base):
     __tablename__ = "users"
@@ -31,14 +33,14 @@ class User(Base):
     full_name = Column(String, index=True)
     is_active = Column(Boolean(), default=True)
     is_superuser = Column(Boolean(), default=False)
-    
+
     # Profile fields
     phone = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
     role = Column(String, default="member")
     github_username = Column(String, nullable=True)
     gitlab_username = Column(String, nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -55,10 +57,9 @@ class User(Base):
 用户配置模型 - 存储用户的LLM和其他配置
 """
 
-import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey
-from sqlalchemy.sql import func
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 
 class UserConfig(Base):
@@ -67,23 +68,33 @@ class UserConfig(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True)
-    
+
     # LLM配置（JSON格式存储）
     llm_config = Column(Text, default="{}")
-    
+
     # 其他配置（JSON格式存储）
     other_config = Column(Text, default="{}")
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
     user = relationship("User", backref="config")
 
-import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index, UniqueConstraint, text
-from sqlalchemy.sql import func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -91,20 +102,20 @@ class Project(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, index=True, nullable=False)
     description = Column(Text, nullable=True)
-    
+
     # 项目来源类型: 'repository' (远程仓库) 或 'zip' (ZIP上传)
     source_type = Column(String(20), default="repository", nullable=False)
-    
+
     # 仓库相关字段 (仅 source_type='repository' 时使用)
     repository_url = Column(String, nullable=True)
     repository_type = Column(String, default="other")  # github, gitlab, gitea, other
     default_branch = Column(String, default="main")
-    
+
     programming_languages = Column(Text, default="[]")  # Stored as JSON string
-    
+
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
     is_active = Column(Boolean(), default=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -152,7 +163,7 @@ class ProjectMember(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
     role = Column(String, default="member")
     permissions = Column(Text, default="{}")
-    
+
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -166,10 +177,19 @@ class ProjectMember(Base):
     project = relationship("Project", back_populates="members")
     user = relationship("User", backref="project_memberships")
 
-from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, JSON, Index, UniqueConstraint
+
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-import uuid
 from sqlalchemy.sql import func
 
 
@@ -191,10 +211,9 @@ class ProjectInfo(Base):
     # Relationships
     project = relationship("Project", back_populates="infos")
 
-import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Float, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 
 class AuditTask(Base):
@@ -203,21 +222,21 @@ class AuditTask(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     created_by = Column(String, ForeignKey("users.id"), nullable=False)
-    
+
     task_type = Column(String, nullable=False)
     status = Column(String, default="pending", index=True)
     branch_name = Column(String, nullable=True)
-    
+
     exclude_patterns = Column(Text, default="[]")
     scan_config = Column(Text, default="{}")
-    
+
     # Stats
     total_files = Column(Integer, default=0)
     scanned_files = Column(Integer, default=0)
     total_lines = Column(Integer, default=0)
     issues_count = Column(Integer, default=0)
     quality_score = Column(Float, default=0.0)
-    
+
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -243,13 +262,13 @@ class AuditIssue(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id = Column(String, ForeignKey("audit_tasks.id"), nullable=False)
-    
+
     file_path = Column(String, nullable=False)
     line_number = Column(Integer, nullable=True)
     column_number = Column(Integer, nullable=True)
     issue_type = Column(String, nullable=False)
     severity = Column(String, nullable=False)  # critical, high, medium, low
-    
+
     # 问题信息
     title = Column(String, nullable=True)  # 问题标题
     message = Column(Text, nullable=True)  # 兼容旧字段，同title
@@ -257,11 +276,11 @@ class AuditIssue(Base):
     suggestion = Column(Text, nullable=True)  # 修复建议
     code_snippet = Column(Text, nullable=True)  # 问题代码片段
     ai_explanation = Column(Text, nullable=True)  # AI解释（JSON格式的xai字段）
-    
+
     status = Column(String, default="open")  # open, resolved, false_positive
     resolved_by = Column(String, ForeignKey("users.id"), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -273,24 +292,24 @@ class AuditIssue(Base):
     task = relationship("AuditTask", back_populates="issues")
     resolver = relationship("User", foreign_keys=[resolved_by])
 
-import uuid
-from sqlalchemy import Column, String, Integer, DateTime, Float, Text, ForeignKey, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 
 class InstantAnalysis(Base):
     __tablename__ = "instant_analyses"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.id"), nullable=True) # Can be anonymous? Logic says usually logged in, but localDB allowed check.
-    
+
     language = Column(String, nullable=False)
-    code_content = Column(Text, default="") 
+    code_content = Column(Text, default="")
     analysis_result = Column(Text, default="{}")
     issues_count = Column(Integer, default=0)
     quality_score = Column(Float, default=0.0)
     analysis_time = Column(Float, default=0.0)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -304,10 +323,9 @@ class InstantAnalysis(Base):
 提示词模板模型 - 存储自定义审计提示词
 """
 
-import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, Index, text
-from sqlalchemy.sql import func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 
 class PromptTemplate(Base):
@@ -317,28 +335,28 @@ class PromptTemplate(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(100), nullable=False)  # 模板名称
     description = Column(Text, nullable=True)  # 模板描述
-    
+
     # 模板类型: system(系统提示词), user(用户提示词), analysis(分析提示词)
     template_type = Column(String(50), default="system")
-    
+
     # 提示词内容（支持中英文）
     content_zh = Column(Text, nullable=True)  # 中文提示词
     content_en = Column(Text, nullable=True)  # 英文提示词
-    
+
     # 模板变量说明（JSON格式）
     variables = Column(Text, default="{}")  # {"language": "编程语言", "code": "代码内容"}
-    
+
     # 状态标记
     is_default = Column(Boolean, default=False)  # 是否默认模板
     is_system = Column(Boolean, default=False)  # 是否系统内置（不可删除）
     is_active = Column(Boolean, default=True)  # 是否启用
-    
+
     # 排序权重
     sort_order = Column(Integer, default=0)
-    
+
     # 创建者（系统模板为空）
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -358,21 +376,20 @@ class PromptTemplate(Base):
 审计规则模型 - 存储自定义审计规范
 """
 
-import uuid
 from sqlalchemy import (
+    Boolean,
     Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
     String,
     Text,
-    DateTime,
-    ForeignKey,
-    Boolean,
-    Integer,
-    Float,
-    Index,
     UniqueConstraint,
 )
-from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 
 class AuditRuleSet(Base):
@@ -382,28 +399,28 @@ class AuditRuleSet(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(100), nullable=False)  # 规则集名称
     description = Column(Text, nullable=True)  # 规则集描述
-    
+
     # 适用语言: all, python, javascript, java, go, etc.
     language = Column(String(50), default="all")
-    
+
     # 规则集类型: security(安全), quality(质量), performance(性能), custom(自定义)
     rule_type = Column(String(50), default="custom")
-    
+
     # 严重程度权重配置（JSON格式）
     # {"critical": 10, "high": 5, "medium": 2, "low": 1}
     severity_weights = Column(Text, default='{"critical": 10, "high": 5, "medium": 2, "low": 1}')
-    
+
     # 状态标记
     is_default = Column(Boolean, default=False)  # 是否默认规则集
     is_system = Column(Boolean, default=False)  # 是否系统内置
     is_active = Column(Boolean, default=True)  # 是否启用
-    
+
     # 排序权重
     sort_order = Column(Integer, default=0)
-    
+
     # 创建者
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -427,37 +444,37 @@ class AuditRule(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     rule_set_id = Column(String, ForeignKey("audit_rule_sets.id"), nullable=False)
-    
+
     # 规则标识（唯一标识符，如 SEC001, PERF002）
     rule_code = Column(String(50), nullable=False)
-    
+
     # 规则名称
     name = Column(String(200), nullable=False)
-    
+
     # 规则描述
     description = Column(Text, nullable=True)
-    
+
     # 规则类别: security, bug, performance, style, maintainability
     category = Column(String(50), nullable=False)
-    
+
     # 默认严重程度: critical, high, medium, low
     severity = Column(String(20), default="medium")
-    
+
     # 自定义检测提示词（可选，用于增强LLM检测）
     custom_prompt = Column(Text, nullable=True)
-    
+
     # 修复建议模板
     fix_suggestion = Column(Text, nullable=True)
-    
+
     # 参考链接（如CWE、OWASP链接）
     reference_url = Column(String(500), nullable=True)
-    
+
     # 是否启用
     enabled = Column(Boolean, default=True)
-    
+
     # 排序权重
     sort_order = Column(Integer, default=0)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -474,19 +491,26 @@ Agent 审计任务模型
 支持 AI Agent 自主漏洞挖掘和验证
 """
 
-import uuid
-from datetime import datetime
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
+
 from sqlalchemy import (
-    Column, String, Integer, Float, Text, Boolean, 
-    DateTime, ForeignKey, Enum as SQLEnum, JSON, Index, text
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-
 if TYPE_CHECKING:
-    from .project import Project
+    pass
 
 
 class AgentTaskStatus:
@@ -519,80 +543,80 @@ class AgentTaskPhase:
 class AgentTask(Base):
     """Agent 审计任务"""
     __tablename__ = "agent_tasks"
-    
+
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    
+
     # 任务基本信息
     name = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
     task_type = Column(String(50), default="agent_audit")
-    
+
     # 任务配置
     audit_scope = Column(JSON, nullable=True)  # 审计范围配置
     target_vulnerabilities = Column(JSON, nullable=True)  # 目标漏洞类型
     verification_level = Column(String(50), default="analysis_with_poc_plan")  # unified mode: analysis + PoC plan
-    
+
     # 分支信息（仓库项目）
     branch_name = Column(String(255), nullable=True)
-    
+
     # 排除模式
     exclude_patterns = Column(JSON, nullable=True)
-    
+
     # 文件范围
     target_files = Column(JSON, nullable=True)  # 指定扫描的文件列表
-    
+
     # LLM 配置
     llm_config = Column(JSON, nullable=True)  # LLM 配置
-    
+
     # Agent 配置
     agent_config = Column(JSON, nullable=True)  # Agent 特定配置
     max_iterations = Column(Integer, default=50)  # 最大迭代次数
     token_budget = Column(Integer, default=100000)  # Token 预算
     timeout_seconds = Column(Integer, default=1800)  # 超时时间（秒）
-    
+
     # 状态
     status = Column(String(20), default=AgentTaskStatus.PENDING)
     current_phase = Column(String(50), nullable=True)
     current_step = Column(String(255), nullable=True)  # 当前执行步骤描述
     error_message = Column(Text, nullable=True)
-    
+
     # 进度统计
     total_files = Column(Integer, default=0)
     indexed_files = Column(Integer, default=0)
     analyzed_files = Column(Integer, default=0)  # 实际扫描过的文件数
     files_with_findings = Column(Integer, default=0)  # 有漏洞发现的文件数
     total_chunks = Column(Integer, default=0)  # 代码块总数
-    
+
     # Agent 统计
     total_iterations = Column(Integer, default=0)  # Agent 迭代次数
     tool_calls_count = Column(Integer, default=0)  # 工具调用次数
     tokens_used = Column(Integer, default=0)  # 已使用 Token 数
-    
+
     # 发现统计
     findings_count = Column(Integer, default=0)  # 发现总数
     verified_count = Column(Integer, default=0)  # 已验证数
     false_positive_count = Column(Integer, default=0)  # 误报数
-    
+
     # 严重程度统计
     critical_count = Column(Integer, default=0)
     high_count = Column(Integer, default=0)
     medium_count = Column(Integer, default=0)
     low_count = Column(Integer, default=0)
-    
+
     # 质量评分
     quality_score = Column(Float, default=0.0)
     security_score = Column(Float, default=0.0)
-    
+
     # 审计计划
     audit_plan = Column(JSON, nullable=True)  # Agent 生成的审计计划
-    
+
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    
+
     # 创建者
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
 
@@ -605,21 +629,21 @@ class AgentTask(Base):
         ),
         Index("ix_agent_tasks_created_by_created", "created_by", created_at.desc()),
     )
-    
+
     # 关联关系
     project = relationship("Project", back_populates="agent_tasks")
     events = relationship("AgentEvent", back_populates="task", cascade="all, delete-orphan", order_by="AgentEvent.created_at")
     findings = relationship("AgentFinding", back_populates="task", cascade="all, delete-orphan")
-    
+
     def __repr__(self):
         return f"<AgentTask {self.id} - {self.status}>"
-    
+
     @property
     def progress_percentage(self) -> float:
         """计算进度百分比"""
         if self.status == AgentTaskStatus.COMPLETED:
             return 100.0
-        
+
         phase_weights = {
             AgentTaskPhase.PLANNING: 5,
             AgentTaskPhase.INDEXING: 15,
@@ -628,10 +652,10 @@ class AgentTask(Base):
             AgentTaskPhase.VERIFICATION: 15,
             AgentTaskPhase.REPORTING: 5,
         }
-        
+
         completed_weight = 0
         current_found = False
-        
+
         for phase, weight in phase_weights.items():
             if phase == self.current_phase:
                 current_found = True
@@ -645,7 +669,7 @@ class AgentTask(Base):
                 break
             elif not current_found:
                 completed_weight += weight
-        
+
         return min(completed_weight, 99.0)
 
 
@@ -656,16 +680,16 @@ class AgentEventType:
     TASK_COMPLETE = "task_complete"
     TASK_ERROR = "task_error"
     TASK_CANCEL = "task_cancel"
-    
+
     # 阶段事件
     PHASE_START = "phase_start"
     PHASE_COMPLETE = "phase_complete"
-    
+
     # Agent 思考
     THINKING = "thinking"
     PLANNING = "planning"
     DECISION = "decision"
-    
+
     # 工具调用
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -676,16 +700,16 @@ class AgentEventType:
     FINDING_UPDATE = "finding_update"
     FINDING_VERIFIED = "finding_verified"
     FINDING_FALSE_POSITIVE = "finding_false_positive"
-    
+
     # 沙箱相关
     SANDBOX_START = "sandbox_start"
     SANDBOX_EXEC = "sandbox_exec"
     SANDBOX_RESULT = "sandbox_result"
     SANDBOX_ERROR = "sandbox_error"
-    
+
     # 进度
     PROGRESS = "progress"
-    
+
     # 日志
     INFO = "info"
     WARNING = "warning"
@@ -696,35 +720,35 @@ class AgentEventType:
 class AgentEvent(Base):
     """Agent 执行事件（用于实时日志和回放）"""
     __tablename__ = "agent_events"
-    
+
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    
+
     # 事件信息
     event_type = Column(String(50), nullable=False, index=True)
     phase = Column(String(50), nullable=True)
-    
+
     # 事件内容
     message = Column(Text, nullable=True)
-    
+
     # 工具调用相关
     tool_name = Column(String(100), nullable=True)
     tool_input = Column(JSON, nullable=True)
     tool_output = Column(JSON, nullable=True)
     tool_duration_ms = Column(Integer, nullable=True)  # 工具执行时长（毫秒）
-    
+
     # 关联的发现
     finding_id = Column(String(36), nullable=True)
-    
+
     # Token 消耗
     tokens_used = Column(Integer, default=0)
-    
+
     # 元数据
     event_metadata = Column(JSON, nullable=True)
-    
+
     # 序号（用于排序）
     sequence = Column(Integer, default=0, index=True)
-    
+
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
@@ -733,13 +757,13 @@ class AgentEvent(Base):
         Index("ix_agent_events_task_created_at", "task_id", created_at.desc()),
         Index("ix_agent_events_task_type_sequence", "task_id", "event_type", "sequence"),
     )
-    
+
     # 关联关系
     task = relationship("AgentTask", back_populates="events")
-    
+
     def __repr__(self):
         return f"<AgentEvent {self.event_type} - {self.message[:50] if self.message else ''}>"
-    
+
     def to_sse_dict(self) -> dict:
         """转换为 SSE 事件格式"""
         return {
@@ -807,16 +831,16 @@ class FindingStatus:
 class AgentFinding(Base):
     """Agent 发现的漏洞"""
     __tablename__ = "agent_findings"
-    
+
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    
+
     # 漏洞基本信息
     vulnerability_type = Column(String(100), nullable=False, index=True)
     severity = Column(String(20), nullable=False, index=True)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
-    
+
     # 位置信息
     file_path = Column(Text, nullable=True, index=True)
     line_start = Column(Integer, nullable=True)
@@ -825,67 +849,67 @@ class AgentFinding(Base):
     column_end = Column(Integer, nullable=True)
     function_name = Column(String(255), nullable=True)
     class_name = Column(String(255), nullable=True)
-    
+
     # 代码片段
     code_snippet = Column(Text, nullable=True)
     code_context = Column(Text, nullable=True)  # 更多上下文
-    
+
     # 数据流信息
     source = Column(Text, nullable=True)  # 污点源
     sink = Column(Text, nullable=True)    # 危险函数
     dataflow_path = Column(JSON, nullable=True)  # 数据流路径
-    
+
     # 验证信息
     status = Column(String(30), default=FindingStatus.NEW, index=True)
     is_verified = Column(Boolean, default=False)
     verification_method = Column(Text, nullable=True)
     verification_result = Column(JSON, nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)
-    
+
     # PoC
     has_poc = Column(Boolean, default=False)
     poc_code = Column(Text, nullable=True)
     poc_description = Column(Text, nullable=True)
     poc_steps = Column(JSON, nullable=True)  # 复现步骤
-    
+
     # 修复建议
     suggestion = Column(Text, nullable=True)
     fix_code = Column(Text, nullable=True)
     fix_description = Column(Text, nullable=True)
     references = Column(JSON, nullable=True)  # 参考链接 CWE, OWASP 等
-    
+
     # AI 解释
     ai_explanation = Column(Text, nullable=True)
     ai_confidence = Column(Float, nullable=True)  # AI 置信度 0-1
     report = Column(Text, nullable=True)  # ReportAgent 生成的漏洞详情报告（Markdown）
-    
+
     # 验证 Agent 的标准化结果（与 VerificationResultModel 对应）
     verdict = Column(String(20), nullable=True, index=True)  # confirmed|likely|uncertain|false_positive
     confidence = Column(Float, nullable=True)  # 验证置信度 [0.0-1.0]
     reachability = Column(String(30), nullable=True)  # reachable|likely_reachable|unknown|unreachable
     verification_evidence = Column(Text, nullable=True)  # 验证证据
-    
+
     # XAI (可解释AI)
     xai_what = Column(Text, nullable=True)
     xai_why = Column(Text, nullable=True)
     xai_how = Column(Text, nullable=True)
     xai_impact = Column(Text, nullable=True)
-    
+
     # 关联规则
     matched_rule_code = Column(String(100), nullable=True)
     matched_pattern = Column(Text, nullable=True)
-    
+
     # CVSS 评分（可选）
     cvss_score = Column(Float, nullable=True)
     cvss_vector = Column(String(100), nullable=True)
-    
+
     # 元数据
     finding_metadata = Column(JSON, nullable=True)
     tags = Column(JSON, nullable=True)
-    
+
     # 去重标识
     fingerprint = Column(String(64), nullable=True, index=True)  # 用于去重的指纹
-    
+
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -906,13 +930,13 @@ class AgentFinding(Base):
             postgresql_where=text("status <> 'false_positive'"),
         ),
     )
-    
+
     # 关联关系
     task = relationship("AgentTask", back_populates="findings")
-    
+
     def __repr__(self):
         return f"<AgentFinding {self.vulnerability_type} - {self.severity} - {self.file_path}>"
-    
+
     def generate_fingerprint(self) -> str:
         """生成去重指纹"""
         import hashlib
@@ -925,7 +949,7 @@ class AgentFinding(Base):
         ]
         content = "|".join(components)
         return hashlib.sha256(content.encode()).hexdigest()[:16]
-    
+
     def to_dict(self) -> dict:
         """转换为字典"""
         return {
@@ -955,42 +979,42 @@ class AgentFinding(Base):
 class AgentCheckpoint(Base):
     """
     Agent 检查点
-    
+
     用于持久化 Agent 状态，支持：
     - 任务恢复
     - 状态回滚
     - 执行历史追踪
     """
     __tablename__ = "agent_checkpoints"
-    
+
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    
+
     # Agent 信息
     agent_id = Column(String(50), nullable=False, index=True)
     agent_name = Column(String(255), nullable=False)
     agent_type = Column(String(50), nullable=False)
     parent_agent_id = Column(String(50), nullable=True)
-    
+
     # 状态数据（JSON 序列化的 AgentState）
     state_data = Column(Text, nullable=False)
-    
+
     # 执行状态
     iteration = Column(Integer, default=0)
     status = Column(String(30), nullable=False)
-    
+
     # 统计信息
     total_tokens = Column(Integer, default=0)
     tool_calls = Column(Integer, default=0)
     findings_count = Column(Integer, default=0)
-    
+
     # 检查点类型
     checkpoint_type = Column(String(30), default="auto")  # auto, manual, error, final
     checkpoint_name = Column(String(255), nullable=True)
-    
+
     # 元数据
     checkpoint_metadata = Column(JSON, nullable=True)
-    
+
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
@@ -1003,10 +1027,10 @@ class AgentCheckpoint(Base):
             created_at.desc(),
         ),
     )
-    
+
     def __repr__(self):
         return f"<AgentCheckpoint {self.agent_id} - iter {self.iteration}>"
-    
+
     def to_dict(self) -> dict:
         """转换为字典"""
         return {
@@ -1030,43 +1054,43 @@ class AgentCheckpoint(Base):
 class AgentTreeNode(Base):
     """
     Agent 树节点
-    
+
     记录动态 Agent 树的结构，用于：
     - 可视化 Agent 树
     - 追踪 Agent 间关系
     - 分析执行流程
     """
     __tablename__ = "agent_tree_nodes"
-    
+
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
-    
+
     # Agent 信息
     agent_id = Column(String(50), nullable=False, unique=True, index=True)
     agent_name = Column(String(255), nullable=False)
     agent_type = Column(String(50), nullable=False)
-    
+
     # 树结构
     parent_agent_id = Column(String(50), nullable=True, index=True)
     depth = Column(Integer, default=0)  # 树深度
-    
+
     # 任务信息
     task_description = Column(Text, nullable=True)
     knowledge_modules = Column(JSON, nullable=True)
-    
+
     # 执行状态
     status = Column(String(30), default="created")
-    
+
     # 执行结果
     result_summary = Column(Text, nullable=True)
     findings_count = Column(Integer, default=0)
-    
+
     # 统计
     iterations = Column(Integer, default=0)
     tokens_used = Column(Integer, default=0)
     tool_calls = Column(Integer, default=0)
     duration_ms = Column(Integer, nullable=True)
-    
+
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -1075,10 +1099,10 @@ class AgentTreeNode(Base):
     __table_args__ = (
         Index("ix_agent_tree_nodes_task_depth_created", "task_id", "depth", "created_at"),
     )
-    
+
     def __repr__(self):
         return f"<AgentTreeNode {self.agent_name} ({self.agent_id})>"
-    
+
     def to_dict(self) -> dict:
         """转换为字典"""
         return {
@@ -1108,25 +1132,21 @@ Gitleaks 密钥泄露检测模型 - 数据库表定义
 包括扫描任务和发现的密钥泄露结果
 """
 
-import uuid
-from datetime import datetime
-from typing import Optional, List
 from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    Float,
-    Boolean,
-    Text,
-    DateTime,
-    ForeignKey,
     JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
     Index,
+    Integer,
+    String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 
 
 class GitleaksScanTask(Base):
@@ -1237,27 +1257,22 @@ Opengrep 静态分析模型 - 数据库表定义
 包括扫描任务、发现结果、规则管理、规则集、Patch分析等
 """
 
-import uuid
-from datetime import datetime
-from typing import Optional, List, Any
 from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    Float,
-    Text,
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Enum as SQLEnum,
     JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
     Index,
+    Integer,
+    String,
+    Text,
     UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 
 
 class OpengrepScanTask(Base):
@@ -1368,11 +1383,9 @@ Bandit 静态扫描模型
 - 持久化 Bandit 扫描发现明细（bandit_findings）
 """
 
-import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
-
+from sqlalchemy.sql import func
 
 
 class BanditScanTask(Base):
@@ -1468,11 +1481,9 @@ PHPStan 静态扫描模型
 - 持久化 PHPStan 扫描发现明细（phpstan_findings）
 """
 
-import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Index
-from sqlalchemy.sql import func
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
-
+from sqlalchemy.sql import func
 
 
 class PhpstanScanTask(Base):

@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 _SOURCE_FILE_EXTENSIONS = (
     ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh",
@@ -62,9 +61,9 @@ def detect_language(path_value: str) -> str:
     return _LANGUAGE_BY_EXTENSION.get(ext, "text")
 
 
-def unique_command_chain(commands: List[str]) -> List[str]:
+def unique_command_chain(commands: list[str]) -> list[str]:
     seen: set[str] = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for item in commands:
         normalized = str(item or "").strip()
         if not normalized or normalized in seen:
@@ -74,19 +73,19 @@ def unique_command_chain(commands: List[str]) -> List[str]:
     return ordered
 
 
-def build_display_command(command_chain: List[str]) -> str:
+def build_display_command(command_chain: list[str]) -> str:
     normalized = unique_command_chain(command_chain)
     return " -> ".join(normalized) if normalized else "python"
 
 
 def build_structured_lines(
-    selected_lines: List[str],
+    selected_lines: list[str],
     start_line: int,
     focus_start_line: int,
     focus_end_line: int,
     focus_kind: str,
-) -> List[Dict[str, Any]]:
-    structured: List[Dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    structured: list[dict[str, Any]] = []
     for index, raw_line in enumerate(selected_lines):
         line_number = start_line + index
         kind = focus_kind if focus_start_line <= line_number <= focus_end_line else "context"
@@ -100,15 +99,15 @@ def build_structured_lines(
     return structured
 
 
-def format_structured_lines_for_code_block(lines: List[Dict[str, Any]]) -> str:
+def format_structured_lines_for_code_block(lines: list[dict[str, Any]]) -> str:
     return "\n".join(
         f"{int(item['line_number']):4d}| {str(item.get('text') or '')}"
         for item in lines
     )
 
 
-def format_structured_lines_for_search(lines: List[Dict[str, Any]]) -> str:
-    rows: List[str] = []
+def format_structured_lines_for_search(lines: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
     for item in lines:
         line_number = int(item["line_number"])
         prefix = ">" if item.get("kind") == "match" else " "
@@ -116,7 +115,7 @@ def format_structured_lines_for_search(lines: List[Dict[str, Any]]) -> str:
     return "\n".join(rows)
 
 
-def build_inline_code_lines(code: str, *, language: str, focus_line: int = 1) -> Dict[str, Any]:
+def build_inline_code_lines(code: str, *, language: str, focus_line: int = 1) -> dict[str, Any]:
     text = str(code or "")
     rows = text.splitlines() or [text]
     return {
@@ -125,7 +124,7 @@ def build_inline_code_lines(code: str, *, language: str, focus_line: int = 1) ->
     }
 
 
-def build_execution_status(*, success: bool, error: Optional[str], exit_code: Optional[int]) -> str:
+def build_execution_status(*, success: bool, error: str | None, exit_code: int | None) -> str:
     if success:
         return "passed"
     if isinstance(exit_code, int) and exit_code not in {0, -1}:
@@ -138,9 +137,9 @@ def build_execution_status(*, success: bool, error: Optional[str], exit_code: Op
 def validate_evidence_metadata(
     *,
     render_type: str,
-    command_chain: List[str],
+    command_chain: list[str],
     display_command: str,
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
 ) -> None:
     if render_type not in _RENDER_TYPES:
         raise ValueError(f"unsupported render_type: {render_type}")
@@ -217,7 +216,7 @@ def validate_evidence_metadata(
                 raise ValueError("entry.end_line is required")
 
 
-def _validate_lines(lines: List[Dict[str, Any]]) -> None:
+def _validate_lines(lines: list[dict[str, Any]]) -> None:
     for line in lines:
         if not isinstance(line, dict):
             raise ValueError("line must be an object")
@@ -229,7 +228,7 @@ def _validate_lines(lines: List[Dict[str, Any]]) -> None:
             raise ValueError("line.kind is invalid")
 
 
-def _validate_execution_entry(entry: Dict[str, Any]) -> None:
+def _validate_execution_entry(entry: dict[str, Any]) -> None:
     if not isinstance(entry.get("exit_code"), int):
         raise ValueError("entry.exit_code is required")
     if str(entry.get("status") or "").strip() not in _EXECUTION_STATUSES:
@@ -264,7 +263,7 @@ def _validate_execution_entry(entry: Dict[str, Any]) -> None:
         _validate_lines(lines)
 
 
-def _validate_file_list_entry(entry: Dict[str, Any]) -> None:
+def _validate_file_list_entry(entry: dict[str, Any]) -> None:
     if not str(entry.get("directory") or "").strip():
         raise ValueError("entry.directory is required")
     if not isinstance(entry.get("recursive"), bool):
@@ -279,7 +278,7 @@ def _validate_file_list_entry(entry: Dict[str, Any]) -> None:
         raise ValueError("entry.truncated is required")
 
 
-def _validate_locator_entry(entry: Dict[str, Any]) -> None:
+def _validate_locator_entry(entry: dict[str, Any]) -> None:
     if not str(entry.get("file_path") or "").strip():
         raise ValueError("entry.file_path is required")
     for field in ("line", "start_line", "end_line"):
@@ -297,7 +296,7 @@ def _validate_locator_entry(entry: Dict[str, Any]) -> None:
         raise ValueError("entry.degraded is required")
 
 
-def _validate_analysis_summary_entry(entry: Dict[str, Any]) -> None:
+def _validate_analysis_summary_entry(entry: dict[str, Any]) -> None:
     for field in ("title", "summary"):
         if not str(entry.get(field) or "").strip():
             raise ValueError(f"entry.{field} is required")
@@ -310,7 +309,7 @@ def _validate_analysis_summary_entry(entry: Dict[str, Any]) -> None:
             raise ValueError(f"entry.{field} is required")
 
 
-def _validate_flow_analysis_entry(entry: Dict[str, Any]) -> None:
+def _validate_flow_analysis_entry(entry: dict[str, Any]) -> None:
     for field in (
         "source_nodes",
         "sink_nodes",
@@ -333,13 +332,13 @@ def _validate_flow_analysis_entry(entry: Dict[str, Any]) -> None:
         raise ValueError("entry.reachability is required")
 
 
-def _validate_verification_summary_entry(entry: Dict[str, Any]) -> None:
+def _validate_verification_summary_entry(entry: dict[str, Any]) -> None:
     for field in ("vulnerability_type", "target", "payload", "verdict", "evidence"):
         if field not in entry:
             raise ValueError(f"entry.{field} is required")
 
 
-def _validate_report_summary_entry(entry: Dict[str, Any]) -> None:
+def _validate_report_summary_entry(entry: dict[str, Any]) -> None:
     for field in ("report_id", "title", "severity", "vulnerability_type", "location", "recommendation"):
         if field not in entry:
             raise ValueError(f"entry.{field} is required")

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.services.agent.flow.pipeline import FlowEvidencePipeline
 from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
+from app.services.agent.flow.pipeline import FlowEvidencePipeline
+
 from .base import AgentTool, ToolResult
 from .evidence_protocol import (
     build_display_command,
@@ -16,26 +17,26 @@ from .evidence_protocol import (
 
 class ControlFlowAnalysisLightInput(BaseModel):
     file_path: str = Field(description="目标文件路径")
-    line_start: Optional[int] = Field(default=None, description="目标起始行")
-    line_end: Optional[int] = Field(default=None, description="目标结束行")
-    severity: Optional[str] = Field(default=None, description="漏洞严重度")
-    confidence: Optional[float] = Field(default=None, description="漏洞置信度 0-1")
-    entry_points: Optional[List[str]] = Field(default=None, description="候选入口函数")
-    function_name: Optional[str] = Field(default=None, description="目标函数名（缺少 line_start 时可选）")
-    vulnerability_type: Optional[str] = Field(default=None, description="漏洞类型")
-    call_chain_hint: Optional[List[str]] = Field(default=None, description="已知调用链提示")
-    control_conditions_hint: Optional[List[str]] = Field(default=None, description="已知控制条件提示")
-    entry_points_hint: Optional[List[str]] = Field(default=None, description="入口函数提示")
+    line_start: int | None = Field(default=None, description="目标起始行")
+    line_end: int | None = Field(default=None, description="目标结束行")
+    severity: str | None = Field(default=None, description="漏洞严重度")
+    confidence: float | None = Field(default=None, description="漏洞置信度 0-1")
+    entry_points: list[str] | None = Field(default=None, description="候选入口函数")
+    function_name: str | None = Field(default=None, description="目标函数名（缺少 line_start 时可选）")
+    vulnerability_type: str | None = Field(default=None, description="漏洞类型")
+    call_chain_hint: list[str] | None = Field(default=None, description="已知调用链提示")
+    control_conditions_hint: list[str] | None = Field(default=None, description="已知控制条件提示")
+    entry_points_hint: list[str] | None = Field(default=None, description="入口函数提示")
 
 
 class ControlFlowAnalysisLightTool(AgentTool):
     """Lightweight control/data-flow analysis based on tree-sitter + code2flow."""
 
-    def __init__(self, project_root: str, target_files: Optional[List[str]] = None):
+    def __init__(self, project_root: str, target_files: list[str] | None = None):
         super().__init__()
         self.project_root = project_root
         self.target_files = target_files or []
-        self._ast_index: Optional[ASTCallIndex] = None
+        self._ast_index: ASTCallIndex | None = None
         self.pipeline = FlowEvidencePipeline(
             project_root=project_root,
             target_files=target_files,
@@ -75,16 +76,16 @@ class ControlFlowAnalysisLightTool(AgentTool):
     async def _execute(
         self,
         file_path: str,
-        line_start: Optional[int] = None,
-        line_end: Optional[int] = None,
-        severity: Optional[str] = None,
-        confidence: Optional[float] = None,
-        entry_points: Optional[List[str]] = None,
-        function_name: Optional[str] = None,
-        vulnerability_type: Optional[str] = None,
-        call_chain_hint: Optional[List[str]] = None,
-        control_conditions_hint: Optional[List[str]] = None,
-        entry_points_hint: Optional[List[str]] = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
+        severity: str | None = None,
+        confidence: float | None = None,
+        entry_points: list[str] | None = None,
+        function_name: str | None = None,
+        vulnerability_type: str | None = None,
+        call_chain_hint: list[str] | None = None,
+        control_conditions_hint: list[str] | None = None,
+        entry_points_hint: list[str] | None = None,
         **kwargs,
     ) -> ToolResult:
         normalized_file_path, embedded_line = self._parse_file_path_line(file_path)
@@ -112,7 +113,7 @@ class ControlFlowAnalysisLightTool(AgentTool):
             [str(item).strip() for item in (entry_points or []) if str(item).strip()]
             or [str(item).strip() for item in (entry_points_hint or []) if str(item).strip()]
         )
-        finding: Dict[str, Any] = {
+        finding: dict[str, Any] = {
             "file_path": normalized_file_path,
             "line_start": resolved_line_start,
             "line_end": resolved_line_end,
@@ -175,7 +176,7 @@ class ControlFlowAnalysisLightTool(AgentTool):
         )
 
     @staticmethod
-    def _coerce_positive_int(value: Any) -> Optional[int]:
+    def _coerce_positive_int(value: Any) -> int | None:
         try:
             parsed = int(value)
         except Exception:
@@ -190,7 +191,7 @@ class ControlFlowAnalysisLightTool(AgentTool):
             return float(default)
 
     @staticmethod
-    def _parse_file_path_line(file_path: str) -> tuple[str, Optional[int]]:
+    def _parse_file_path_line(file_path: str) -> tuple[str, int | None]:
         text = str(file_path or "").strip()
         if not text:
             return "", None
@@ -199,7 +200,7 @@ class ControlFlowAnalysisLightTool(AgentTool):
             return parts[0].strip(), int(parts[1])
         return text, None
 
-    def _resolve_line_start_by_function(self, file_path: str, function_name: str) -> Optional[int]:
+    def _resolve_line_start_by_function(self, file_path: str, function_name: str) -> int | None:
         name = str(function_name or "").strip()
         path = str(file_path or "").strip()
         if not name or not path:
@@ -241,7 +242,7 @@ class ControlFlowAnalysisLightTool(AgentTool):
         return summary
 
     @staticmethod
-    def _build_next_actions(path_found: bool, blocked_reasons: List[str]) -> List[str]:
+    def _build_next_actions(path_found: bool, blocked_reasons: list[str]) -> list[str]:
         if path_found:
             return ["结合 read_file 复核完整调用链上的控制条件。"]
         if "code2flow_not_installed" in blocked_reasons:

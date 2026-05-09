@@ -35,6 +35,7 @@ import type { StreamErrorContext } from "@/shared/api/agentStream";
 import {
 	type AgentEvent,
 	type AgentFinding,
+	type AgentTask,
 	type AgentTaskProgressResponse,
 	cancelAgentTask,
 	downloadAgentLogs,
@@ -796,7 +797,7 @@ function AgentAuditPageContent() {
 		useState<RealtimeQueueSnapshot>(DEFAULT_REALTIME_QUEUE_SNAPSHOT);
 
 	// Realtime panels state
-	const [realtimeFindings, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
+	const [, setRealtimeFindings] = useState<RealtimeMergedFindingItem[]>([]);
 	const [findingStatusUpdatingKey, setFindingStatusUpdatingKey] = useState<
 		string | null
 	>(null);
@@ -3552,9 +3553,6 @@ function AgentAuditPageContent() {
 		initialBootstrapTaskIdRef.current = taskId;
 		setShowSplash(false);
 		const cachedSnapshot = cachedTaskDetailSnapshot;
-		const cachedTaskStatus = String(cachedSnapshot?.data.task?.status || "")
-			.trim()
-			.toLowerCase();
 		const shouldSkipInitialReload = false;
 		const shouldReuseSnapshot = Boolean(
 			cachedSnapshot &&

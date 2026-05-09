@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -220,7 +220,7 @@ def _build_cwe_distribution_side_effect(now: datetime):
 
 @pytest.mark.asyncio
 async def test_dashboard_snapshot_includes_bandit_in_static_metrics(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=_build_bandit_snapshot_side_effect(now))
 
@@ -274,7 +274,7 @@ async def test_dashboard_snapshot_includes_bandit_in_static_metrics(monkeypatch)
 async def test_dashboard_snapshot_includes_rule_confidence_and_cwe_distribution(
     monkeypatch,
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=_build_cwe_distribution_side_effect(now))
 

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNER_SERVICE_NAMES = (
     "yasa-runner",

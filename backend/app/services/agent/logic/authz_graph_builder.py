@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from app.services.agent.flow.lightweight.ast_index import ASTCallIndex, FunctionSymbol
 
@@ -77,7 +76,7 @@ class AuthzNode:
     has_object_scope_check: bool
     has_id_reference: bool
 
-    def proof_nodes(self) -> List[str]:
+    def proof_nodes(self) -> list[str]:
         return [
             f"route:{self.file_path}:{self.start_line}",
             f"handler:{self.name}",
@@ -88,11 +87,11 @@ class AuthzNode:
 class AuthzGraphBuilder:
     """AST-based graph builder for auth/authz logic vulnerabilities."""
 
-    def __init__(self, project_root: str, target_files: Optional[List[str]] = None):
+    def __init__(self, project_root: str, target_files: list[str] | None = None):
         self.index = ASTCallIndex(project_root=project_root, target_files=target_files)
-        self._nodes_cache: Optional[List[AuthzNode]] = None
+        self._nodes_cache: list[AuthzNode] | None = None
 
-    def _match_any(self, content: str, patterns: List[str]) -> bool:
+    def _match_any(self, content: str, patterns: list[str]) -> bool:
         return any(re.search(pattern, content, flags=re.IGNORECASE) for pattern in patterns)
 
     def _build_node(self, symbol: FunctionSymbol) -> AuthzNode:
@@ -115,12 +114,12 @@ class AuthzGraphBuilder:
             has_id_reference=self._match_any(body, IDOR_HINT_PATTERNS),
         )
 
-    def build_nodes(self) -> List[AuthzNode]:
+    def build_nodes(self) -> list[AuthzNode]:
         if self._nodes_cache is not None:
             return self._nodes_cache
 
         self.index.build()
-        nodes: List[AuthzNode] = []
+        nodes: list[AuthzNode] = []
         for symbol in self.index.symbols_by_id.values():
             try:
                 node = self._build_node(symbol)
@@ -132,7 +131,7 @@ class AuthzGraphBuilder:
         self._nodes_cache = nodes
         return nodes
 
-    def find_node_by_location(self, file_path: str, line_start: int) -> Optional[AuthzNode]:
+    def find_node_by_location(self, file_path: str, line_start: int) -> AuthzNode | None:
         normalized = str(file_path).replace("\\", "/").lstrip("./")
         for node in self.build_nodes():
             if node.file_path != normalized:
@@ -141,7 +140,7 @@ class AuthzGraphBuilder:
                 return node
         return None
 
-    def summarize(self) -> Dict[str, int]:
+    def summarize(self) -> dict[str, int]:
         nodes = self.build_nodes()
         return {
             "total_nodes": len(nodes),

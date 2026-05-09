@@ -7,7 +7,7 @@ import re
 import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pygount import SourceAnalysis
 from pygount.analysis import SourceState
@@ -138,7 +138,7 @@ def _count_file_lines(file_path: Path) -> int:
 
 
 def _build_suffix_fallback_payload(project_dir: str) -> str:
-    language_stats: Dict[str, Dict[str, int]] = defaultdict(
+    language_stats: dict[str, dict[str, int]] = defaultdict(
         lambda: {"loc_number": 0, "files_count": 0}
     )
 
@@ -165,7 +165,7 @@ def _build_suffix_fallback_payload(project_dir: str) -> str:
     total_lines = sum(item["loc_number"] for item in language_stats.values())
     total_files = sum(item["files_count"] for item in language_stats.values())
 
-    languages: Dict[str, Dict[str, float | int]] = {}
+    languages: dict[str, dict[str, float | int]] = {}
     for language, stats in sorted(
         language_stats.items(),
         key=lambda pair: pair[1]["loc_number"],
@@ -207,7 +207,7 @@ def _is_non_empty_language_payload(payload: str) -> bool:
 def _run_pygount_sync(project_dir: str) -> str:
     """同步执行 pygount 统计（用于在线程池中运行）。"""
     try:
-        language_stats: Dict[str, Dict[str, int]] = defaultdict(
+        language_stats: dict[str, dict[str, int]] = defaultdict(
             lambda: {"loc_number": 0, "files_count": 0}
         )
 
@@ -234,7 +234,7 @@ def _run_pygount_sync(project_dir: str) -> str:
 
         total_lines = sum(item["loc_number"] for item in language_stats.values())
         total_files = sum(item["files_count"] for item in language_stats.values())
-        languages: Dict[str, Dict[str, float | int]] = {}
+        languages: dict[str, dict[str, float | int]] = {}
         for language, stats in sorted(
             language_stats.items(),
             key=lambda pair: pair[1]["loc_number"],
@@ -262,7 +262,7 @@ def _run_pygount_sync(project_dir: str) -> str:
         return "{}"
 
 
-async def _run_pygount_on_directory(project_dir: str, extracted_files: Optional[List[str]] = None) -> str:
+async def _run_pygount_on_directory(project_dir: str, extracted_files: list[str] | None = None) -> str:
     """异步执行 pygount，在线程池中运行避免阻塞事件循环。"""
     loop = asyncio.get_running_loop()
     try:
@@ -287,7 +287,7 @@ async def _run_pygount_on_directory(project_dir: str, extracted_files: Optional[
 
 
 async def get_pygount_stats_from_extracted_dir(
-    extracted_dir: str, extracted_files: Optional[List[str]] = None
+    extracted_dir: str, extracted_files: list[str] | None = None
 ) -> str:
     stats_payload = await _run_pygount_on_directory(extracted_dir, extracted_files=extracted_files)
     if _is_non_empty_language_payload(stats_payload):
@@ -320,7 +320,7 @@ async def get_pygount_stats(project_info: ProjectInfo) -> str:
     return await get_pygount_stats_from_archive(zip_path)
 
 
-def build_static_project_description(language_info_json: str, project_name: Optional[str] = None) -> str:
+def build_static_project_description(language_info_json: str, project_name: str | None = None) -> str:
     """基于静态统计结果生成项目描述（不依赖 LLM）。"""
     try:
         payload = json.loads(language_info_json) if language_info_json else {}
@@ -354,17 +354,17 @@ def build_static_project_description(language_info_json: str, project_name: Opti
 
 
 async def generate_project_description(
-    project_info: ProjectInfo, user_config: Optional[dict] = None
-) -> Dict[str, Any]:
+    project_info: ProjectInfo, user_config: dict | None = None
+) -> dict[str, Any]:
     zip_path = get_project_zip_path(project_info.project_id)
     return await generate_project_description_from_archive(zip_path, user_config=user_config)
 
 
 async def generate_project_description_from_extracted_dir(
     extracted_dir: str,
-    user_config: Optional[dict] = None,
-    project_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    user_config: dict | None = None,
+    project_name: str | None = None,
+) -> dict[str, Any]:
     analyzer = ProjectDescriptionAnalyzer(user_config=user_config)
     try:
         return await analyzer.analyze_project(
@@ -378,9 +378,9 @@ async def generate_project_description_from_extracted_dir(
 
 async def generate_project_description_from_archive(
     archive_path: str,
-    user_config: Optional[dict] = None,
-    project_name: Optional[str] = None,
-) -> Dict[str, Any]:
+    user_config: dict | None = None,
+    project_name: str | None = None,
+) -> dict[str, Any]:
     if not os.path.exists(archive_path):
         logger.error(f"项目ZIP文件不存在: {archive_path}")
         return {"error": "项目ZIP文件不存在"}
@@ -405,7 +405,7 @@ async def generate_project_description_from_archive(
 class ProjectDescriptionAnalyzer:
     """项目统计和分析器"""
 
-    def __init__(self, user_config: Optional[dict] = None):
+    def __init__(self, user_config: dict | None = None):
         self.llm_service = LLMService(user_config=user_config)
 
     # 需要排除的目录
@@ -506,8 +506,8 @@ class ProjectDescriptionAnalyzer:
         self,
         project_dir: str,
         max_files: int = 60,
-        project_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        project_name: str | None = None,
+    ) -> dict[str, Any]:
         """构建项目静态画像后只调用一次 LLM 生成 1-2 句用途描述。"""
         profile = await asyncio.to_thread(
             self._build_project_profile,
@@ -543,14 +543,14 @@ class ProjectDescriptionAnalyzer:
         self,
         project_dir: str,
         max_files: int = 60,
-        project_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        top_level_dirs: List[str] = []
-        manifest_files: List[str] = []
-        entry_files: List[str] = []
-        representative_files: List[str] = []
-        framework_hints: List[str] = []
-        language_counts: Dict[str, int] = defaultdict(int)
+        project_name: str | None = None,
+    ) -> dict[str, Any]:
+        top_level_dirs: list[str] = []
+        manifest_files: list[str] = []
+        entry_files: list[str] = []
+        representative_files: list[str] = []
+        framework_hints: list[str] = []
+        language_counts: dict[str, int] = defaultdict(int)
         source_file_count = 0
 
         seen_frameworks: set[str] = set()
@@ -640,10 +640,10 @@ class ProjectDescriptionAnalyzer:
         )
         return any(candidate in normalized for candidate in entry_candidates)
 
-    def _extract_framework_hints(self, filename: str, fpath: str) -> List[str]:
+    def _extract_framework_hints(self, filename: str, fpath: str) -> list[str]:
         text = self._read_file_text(fpath) or ""
         normalized = text.lower()
-        hints: List[str] = []
+        hints: list[str] = []
 
         framework_patterns = {
             "package.json": {
@@ -698,7 +698,7 @@ class ProjectDescriptionAnalyzer:
 
         return hints
 
-    def _build_usage_summary_prompt(self, profile: Dict[str, Any]) -> str:
+    def _build_usage_summary_prompt(self, profile: dict[str, Any]) -> str:
         project_name = profile.get("project_name") or "未命名项目"
         languages = "、".join(profile.get("primary_languages") or []) or "未知"
         frameworks = "、".join(profile.get("framework_hints") or []) or "暂无明显框架线索"
@@ -752,7 +752,7 @@ class ProjectDescriptionAnalyzer:
         except Exception:
             return ""
 
-    def _extract_functions_by_regex(self, text: str, language: str) -> List[Dict[str, Any]]:
+    def _extract_functions_by_regex(self, text: str, language: str) -> list[dict[str, Any]]:
         """
         使用正则提取函数和类定义，并保留上下各两行作为 snippet
         """
@@ -796,7 +796,7 @@ class ProjectDescriptionAnalyzer:
             ],
         }
 
-        res: List[Dict[str, Any]] = []
+        res: list[dict[str, Any]] = []
         lines = text.splitlines()
         pats = patterns.get(language, [])
 
@@ -822,7 +822,7 @@ class ProjectDescriptionAnalyzer:
 
         return res
 
-    def _get_line_context(self, lines: List[str], lineno: int, context_lines: int = 2) -> str:
+    def _get_line_context(self, lines: list[str], lineno: int, context_lines: int = 2) -> str:
         """
         根据行号提取上下文（上下各 context_lines 行）
         lineno 从 1 开始
@@ -842,7 +842,7 @@ class ProjectDescriptionAnalyzer:
         end = min(len(lines), line_no + context_lines + 3)
         return "\n".join(lines[start:end])
 
-    def _read_file_text(self, fpath: str) -> Optional[str]:
+    def _read_file_text(self, fpath: str) -> str | None:
         try:
             with open(fpath, "rb") as fh:
                 raw = fh.read()
@@ -856,7 +856,7 @@ class ProjectDescriptionAnalyzer:
         except Exception:
             return None
 
-    async def _process_file(self, fpath: str, rel_path: str) -> Dict[str, Any]:
+    async def _process_file(self, fpath: str, rel_path: str) -> dict[str, Any]:
         """并发处理单个文件：读取、提取函数、调用LLM并返回摘要字典"""
         try:
             text = await asyncio.to_thread(self._read_file_text, fpath)
@@ -891,7 +891,7 @@ class ProjectDescriptionAnalyzer:
             return {"error": str(e)}
 
     def _build_file_prompt(
-        self, rel_path: str, language: str, functions: List[Dict[str, Any]], full_text: str
+        self, rel_path: str, language: str, functions: list[dict[str, Any]], full_text: str
     ) -> str:
         # MVP prompt：简洁说明需要输出语言为中文，描述文件的主要作用、关键函数和简要改进建议
         funcs_summary = []
@@ -903,7 +903,7 @@ class ProjectDescriptionAnalyzer:
         prompt = f"请用简体中文简短分析文件: {rel_path}\\n语言: {language}\\n关键函数/方法:\\n{chr(10).join(funcs_summary)}\\n\\n请回答: 这个文件的主要作用。不要输出其他多余内容。"
         return prompt
 
-    def _build_project_summary_prompt(self, summaries: Dict[str, Any]) -> str:
+    def _build_project_summary_prompt(self, summaries: dict[str, Any]) -> str:
         # 将每个文件的简要结果拼接并请求LLM生成项目级描述
         parts = [
             f"文件: {p}\\n语言: {s.get('language')}\\n分析摘要: { (s.get('analysis') or '')[:1000]}"

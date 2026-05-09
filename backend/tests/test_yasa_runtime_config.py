@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -59,7 +59,7 @@ async def test_load_global_yasa_runtime_config_prefers_saved_config():
             ensure_ascii=False,
         ),
     )
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = datetime.now(UTC)
     db = _FakeDb(items=[row])
 
     loaded = await yasa_runtime_config.load_global_yasa_runtime_config(db)  # type: ignore[arg-type]

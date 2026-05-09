@@ -1,7 +1,6 @@
 """ZIP 项目文件筛选共享工具。"""
 
 from pathlib import PurePosixPath
-from typing import List
 
 TEXT_EXTENSIONS = [
     ".js",
@@ -59,7 +58,7 @@ def is_text_file(path: str) -> bool:
     return any(path.lower().endswith(ext) for ext in TEXT_EXTENSIONS)
 
 
-def should_exclude(path: str, exclude_patterns: List[str] | None = None) -> bool:
+def should_exclude(path: str, exclude_patterns: list[str] | None = None) -> bool:
     normalized_path = (path or "").replace("\\", "/")
     path_segments = [seg.lower() for seg in PurePosixPath(normalized_path).parts]
     if any("test" in segment for segment in path_segments[:-1]):

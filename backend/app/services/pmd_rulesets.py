@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-import re
 from typing import Any
 from xml.etree import ElementTree
-
 
 PMD_RULESET_ALIASES = {
     "security": "category/java/security.xml,category/java/errorprone.xml,category/apex/security.xml",

@@ -9,7 +9,6 @@ import docker
 
 from app.core.config import settings
 
-
 logger = logging.getLogger(__name__)
 DOCKER_EXCEPTION = getattr(getattr(docker, "errors", None), "DockerException", Exception)
 DOCKER_NOT_FOUND = getattr(getattr(docker, "errors", None), "ImageNotFound", Exception)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -13,16 +13,16 @@ class StaticBootstrapFinding:
     title: str
     description: str
     file_path: str
-    line_start: Optional[int]
-    line_end: Optional[int]
-    code_snippet: Optional[str]
+    line_start: int | None
+    line_end: int | None
+    code_snippet: str | None
     severity: str
-    confidence: Optional[str]
+    confidence: str | None
     vulnerability_type: str
     source: str
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         extra_payload = payload.pop("extra", {}) or {}
         if isinstance(extra_payload, dict):
@@ -37,8 +37,8 @@ class StaticBootstrapScanResult:
     scanner_name: str
     source: str
     total_findings: int
-    findings: List[StaticBootstrapFinding]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    findings: list[StaticBootstrapFinding]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class StaticBootstrapScanner(ABC):

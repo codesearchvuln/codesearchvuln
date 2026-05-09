@@ -1,9 +1,9 @@
+from .bandit import BanditBootstrapScanner
 from .base import (
     StaticBootstrapFinding,
-    StaticBootstrapScanResult,
     StaticBootstrapScanner,
+    StaticBootstrapScanResult,
 )
-from .bandit import BanditBootstrapScanner
 from .opengrep import OpenGrepBootstrapScanner
 from .phpstan import PhpstanBootstrapScanner
 from .yasa import YasaBootstrapScanner

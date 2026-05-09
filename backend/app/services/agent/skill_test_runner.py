@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -20,6 +19,7 @@ from app.services.agent.skills.scan_core import (
     get_scan_core_skill_test_policy,
 )
 from app.services.agent.tools import (
+    BashShellTool,
     CodeWindowTool,
     ControlFlowAnalysisLightTool,
     DataFlowAnalysisTool,
@@ -31,11 +31,9 @@ from app.services.agent.tools import (
     QuickAuditTool,
     SmartScanTool,
     SymbolBodyTool,
-    BashShellTool,
 )
 from app.services.agent.tools.base import ToolResult
 from app.services.flow_parser_runner import get_flow_parser_runner_client
-
 
 _SUPPORTED_TOOL_BUILDERS = {
     "get_code_window": lambda project_root, llm_service: CodeWindowTool(project_root),
@@ -51,7 +49,7 @@ _SUPPORTED_TOOL_BUILDERS = {
 }
 
 
-def build_skill_test_tool_allowlist(skill_id: str) -> Tuple[str, ...]:
+def build_skill_test_tool_allowlist(skill_id: str) -> tuple[str, ...]:
     policy = get_scan_core_skill_test_policy(skill_id)
     if not bool(policy.get("test_supported")):
         raise HTTPException(
@@ -62,8 +60,8 @@ def build_skill_test_tool_allowlist(skill_id: str) -> Tuple[str, ...]:
     return tuple(item for item in ordered if item)
 
 
-def build_skill_test_tools(skill_id: str, project_root: str, llm_service: Any) -> Dict[str, Any]:
-    tools: Dict[str, Any] = {}
+def build_skill_test_tools(skill_id: str, project_root: str, llm_service: Any) -> dict[str, Any]:
+    tools: dict[str, Any] = {}
     for tool_name in build_skill_test_tool_allowlist(skill_id):
         builder = _SUPPORTED_TOOL_BUILDERS.get(tool_name)
         if builder is None:
@@ -123,7 +121,7 @@ def _resolve_function_via_flow_parser_runner(
     function_name: str,
     line_start: int | None = None,
     line_end: int | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     normalized_file_path = str(file_path or "").replace("\\", "/").lstrip("./")
     normalized_function_name = str(function_name or "").strip()
     if not normalized_file_path or not normalized_function_name:
@@ -180,9 +178,9 @@ def _resolve_function_via_flow_parser_runner(
 def _build_structured_tool_execution_payload(
     *,
     skill_id: str,
-    request_payload: Dict[str, Any],
-    resolution: Dict[str, Any],
-) -> Dict[str, Any]:
+    request_payload: dict[str, Any],
+    resolution: dict[str, Any],
+) -> dict[str, Any]:
     tool_input = dict(request_payload.get("tool_input") or {})
     normalized_skill_id = str(skill_id or "").strip()
     if normalized_skill_id == "dataflow_analysis":
@@ -207,7 +205,7 @@ class StructuredToolTestRunner:
         self,
         *,
         skill_id: str,
-        request_payload: Dict[str, Any],
+        request_payload: dict[str, Any],
         llm_service: Any | None = None,
         project_name: str,
         zip_path: str,
@@ -222,7 +220,7 @@ class StructuredToolTestRunner:
         self.fallback_used = bool(fallback_used)
         self.event_emitter = event_emitter
 
-    async def run(self) -> Dict[str, Any]:
+    async def run(self) -> dict[str, Any]:
         policy = get_scan_core_skill_test_policy(self.skill_id)
         if str(policy.get("test_mode") or "") != "structured_tool":
             raise HTTPException(status_code=400, detail="当前 skill 暂不支持结构化工具测试")
@@ -239,8 +237,8 @@ class StructuredToolTestRunner:
         cleanup_success = True
         cleanup_error = None
         pending_error: Exception | None = None
-        result_payload: Dict[str, Any] | None = None
-        execution_payload: Dict[str, Any] | None = None
+        result_payload: dict[str, Any] | None = None
+        execution_payload: dict[str, Any] | None = None
         tool_result_emitted = False
 
         await self.event_emitter.emit_event(
@@ -430,7 +428,7 @@ class SkillTestRunner:
         self.fallback_used = bool(fallback_used)
         self.event_emitter = event_emitter
 
-    async def run(self) -> Dict[str, Any]:
+    async def run(self) -> dict[str, Any]:
         policy = get_scan_core_skill_test_policy(self.skill_id)
         if not bool(policy.get("test_supported")):
             raise HTTPException(
@@ -450,7 +448,7 @@ class SkillTestRunner:
         cleanup_success = True
         cleanup_error = None
         pending_error: Exception | None = None
-        result_payload: Dict[str, Any] | None = None
+        result_payload: dict[str, Any] | None = None
 
         await self.event_emitter.emit_event(
             "project_prepare",

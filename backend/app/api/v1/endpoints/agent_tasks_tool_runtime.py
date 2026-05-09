@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from app.services.agent.write_scope import (
     HARD_MAX_WRITABLE_FILES_PER_TASK,
@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 def build_task_write_scope_guard(
     *,
     project_root: str,
-    target_files: Optional[List[str]] = None,
-    bootstrap_findings: Optional[List[dict]] = None,
+    target_files: list[str] | None = None,
+    bootstrap_findings: list[dict] | None = None,
 ) -> TaskWriteScopeGuard:
     """Build and seed a TaskWriteScopeGuard for a given task."""
     from app.core.config import settings
@@ -50,8 +50,8 @@ def build_task_write_scope_guard(
 async def _run_task_llm_connection_test(
     *,
     llm_service: Any,
-    event_emitter: Optional[Any] = None,
-) -> Dict[str, Any]:
+    event_emitter: Any | None = None,
+) -> dict[str, Any]:
     if event_emitter:
         await event_emitter.emit_info(
             "🧪 正在测试 LLM 连接...",
@@ -118,7 +118,7 @@ def _sync_tool_catalog_to_memory(
         logger.warning("[ToolDocSync] append shared entry failed: %s", exc)
 
 
-def _load_tool_playbook(*, max_chars: int) -> Tuple[Optional[Path], str]:
+def _load_tool_playbook(*, max_chars: int) -> tuple[Path | None, str]:
     docs_root = Path(__file__).resolve().parents[4] / "docs" / "agent-tools"
     playbook_path = docs_root / "TOOL_PLAYBOOK.md"
     if not playbook_path.exists():
@@ -175,7 +175,7 @@ def _build_tool_skills_snapshot(*, max_chars: int) -> str:
         "function_context.skill.md",
     ]
 
-    fragments: List[str] = []
+    fragments: list[str] = []
     if index_path.exists():
         try:
             fragments.append(index_path.read_text(encoding="utf-8", errors="replace").strip())
@@ -184,7 +184,7 @@ def _build_tool_skills_snapshot(*, max_chars: int) -> str:
 
     if skills_dir.exists():
         all_skill_docs = {doc.name: doc for doc in skills_dir.glob("*.skill.md")}
-        ordered_skill_docs: List[Path] = []
+        ordered_skill_docs: list[Path] = []
         for preferred_name in preferred_skill_order:
             preferred_doc = all_skill_docs.pop(preferred_name, None)
             if preferred_doc is not None:

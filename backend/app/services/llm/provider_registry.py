@@ -2,11 +2,10 @@
 LLM provider registry helpers.
 """
 
-from typing import Any, Optional
+from typing import Any
 
-from .factory import LLMFactory, NATIVE_ONLY_PROVIDERS
+from .factory import NATIVE_ONLY_PROVIDERS, LLMFactory
 from .types import DEFAULT_BASE_URLS, LLMProvider
-
 
 LLM_PROVIDER_ALIASES: dict[str, str] = {
     "gemini": "gemini",
@@ -132,14 +131,14 @@ def normalize_llm_provider_id(provider: Any) -> str:
     return LLM_PROVIDER_ALIASES.get(normalized, normalized)
 
 
-def resolve_llm_runtime_provider(provider: Any) -> tuple[str, Optional[LLMProvider]]:
+def resolve_llm_runtime_provider(provider: Any) -> tuple[str, LLMProvider | None]:
     provider_id = normalize_llm_provider_id(provider)
     return provider_id, LLM_PROVIDER_RUNTIME_MAP.get(provider_id)
 
 
 def _get_provider_default_model(
     provider_id: str,
-    runtime_provider: Optional[LLMProvider],
+    runtime_provider: LLMProvider | None,
 ) -> str:
     override = LLM_PROVIDER_META_OVERRIDES.get(provider_id, {})
     if "defaultModel" in override:
@@ -151,7 +150,7 @@ def _get_provider_default_model(
 
 def _get_provider_default_base_url(
     provider_id: str,
-    runtime_provider: Optional[LLMProvider],
+    runtime_provider: LLMProvider | None,
 ) -> str:
     override = LLM_PROVIDER_META_OVERRIDES.get(provider_id, {}).get("defaultBaseUrl")
     if isinstance(override, str):
@@ -163,7 +162,7 @@ def _get_provider_default_base_url(
 
 def _get_provider_static_models(
     provider_id: str,
-    runtime_provider: Optional[LLMProvider],
+    runtime_provider: LLMProvider | None,
 ) -> list[str]:
     override = LLM_PROVIDER_META_OVERRIDES.get(provider_id, {})
     if "models" in override and isinstance(override.get("models"), list):

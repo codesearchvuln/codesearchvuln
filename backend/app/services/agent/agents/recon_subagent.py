@@ -4,14 +4,14 @@ import asyncio
 import logging
 import re
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from app.services.json_safe import dump_json_safe
 
-from .base import AgentResult, ensure_chinese_system_prompt
-from .recon import ReconAgent
 from ..json_parser import AgentJsonParser
 from ..workflow.recon_models import derive_module_root_directories
+from .base import AgentResult, ensure_chinese_system_prompt
+from .recon import ReconAgent
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class ReconSubAgent(ReconAgent):
         "locate_enclosing_function",
     }
 
-    def __init__(self, llm_service, tools: Dict[str, Any], event_emitter=None):
+    def __init__(self, llm_service, tools: dict[str, Any], event_emitter=None):
         super().__init__(llm_service=llm_service, tools=tools, event_emitter=event_emitter)
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
         self.config.name = "ReconSubAgent"
@@ -132,7 +132,7 @@ class ReconSubAgent(ReconAgent):
         text = str(value or "").replace("\\", "/").strip().lstrip("./")
         return text or "."
 
-    def _prepare_module_scope(self, input_data: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, Any] | None]:
+    def _prepare_module_scope(self, input_data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
         runtime_config = (
             dict(input_data.get("config", {}))
             if isinstance(input_data.get("config"), dict)
@@ -164,8 +164,8 @@ class ReconSubAgent(ReconAgent):
     def _build_module_context_lines(
         self,
         *,
-        module: Dict[str, Any] | None,
-        project_model: Dict[str, Any] | None,
+        module: dict[str, Any] | None,
+        project_model: dict[str, Any] | None,
         task_context: str,
     ) -> str:
         if not isinstance(module, dict):
@@ -241,12 +241,12 @@ class ReconSubAgent(ReconAgent):
     def _build_initial_message(
         self,
         *,
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
         task: str,
         task_context: str,
-        module: Dict[str, Any] | None,
-        project_model: Dict[str, Any] | None,
+        module: dict[str, Any] | None,
+        project_model: dict[str, Any] | None,
     ) -> str:
         target_files = module.get("target_files") if isinstance(module, dict) else []
         if not isinstance(target_files, list):
@@ -329,9 +329,9 @@ class ReconSubAgent(ReconAgent):
 """
         return initial_message
 
-    def _collect_action_stats(self) -> Dict[str, Any]:
-        list_dirs: List[str] = []
-        search_dirs: List[str] = []
+    def _collect_action_stats(self) -> dict[str, Any]:
+        list_dirs: list[str] = []
+        search_dirs: list[str] = []
         search_count = 0
         context_count = 0
         push_count = 0
@@ -385,9 +385,9 @@ class ReconSubAgent(ReconAgent):
     def _validate_completion_gate(
         self,
         *,
-        module: Dict[str, Any] | None,
-        final_result: Dict[str, Any],
-    ) -> Tuple[bool, List[str]]:
+        module: dict[str, Any] | None,
+        final_result: dict[str, Any],
+    ) -> tuple[bool, list[str]]:
         if not isinstance(module, dict):
             return True, []
 
@@ -416,7 +416,7 @@ class ReconSubAgent(ReconAgent):
         if not isinstance(risk_points, list):
             risk_points = []
 
-        missing: List[str] = []
+        missing: list[str] = []
         listed_roots = set(stats["list_dirs"])
         for root in module_roots:
             if root not in listed_roots:
@@ -444,7 +444,7 @@ class ReconSubAgent(ReconAgent):
 
         return len(missing) == 0, missing
 
-    def _build_continue_prompt(self, missing_items: List[str], module: Dict[str, Any] | None) -> str:
+    def _build_continue_prompt(self, missing_items: list[str], module: dict[str, Any] | None) -> str:
         module_roots = []
         if isinstance(module, dict):
             roots = module.get("module_root_paths") or module.get("paths") or []
@@ -483,7 +483,7 @@ class ReconSubAgent(ReconAgent):
 
 Final Answer:"""
 
-    async def run(self, input_data: Dict[str, Any]):
+    async def run(self, input_data: dict[str, Any]):
         import copy
 
         start_time = time.time()

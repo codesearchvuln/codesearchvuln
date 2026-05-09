@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -13,22 +13,22 @@ class FindingTableItem:
     file_path: str
     line_start: int
     line_end: int
-    function_name: Optional[str]
+    function_name: str | None
     vulnerability_type: str
     severity: str
-    sources: List[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
 
     context_status: str = "pending"  # pending|collecting|ready|failed
     verify_status: str = "unverified"  # unverified|verifying|verified|false_positive
     context_round: int = 0
     attempts: int = 0
-    blocked_reason: Optional[str] = None
-    context_bundle: Dict[str, Any] = field(default_factory=dict)
-    verification_result: Dict[str, Any] = field(default_factory=dict)
-    parent_fingerprint: Optional[str] = None
-    discovered_by: Optional[str] = None
+    blocked_reason: str | None = None
+    context_bundle: dict[str, Any] = field(default_factory=dict)
+    verification_result: dict[str, Any] = field(default_factory=dict)
+    parent_fingerprint: str | None = None
+    discovered_by: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "fingerprint": self.fingerprint,
@@ -56,9 +56,9 @@ class VerificationFindingTable:
     def __init__(self, *, max_rounds: int = 10, max_items: int = 200) -> None:
         self.max_rounds = max(1, int(max_rounds))
         self.max_items = max(1, int(max_items))
-        self._items: Dict[str, FindingTableItem] = {}
-        self._order: List[str] = []
-        self._dedup_keys: Dict[str, str] = {}
+        self._items: dict[str, FindingTableItem] = {}
+        self._order: list[str] = []
+        self._dedup_keys: dict[str, str] = {}
 
     @staticmethod
     def _safe_int(value: Any, default: int) -> int:
@@ -76,7 +76,7 @@ class VerificationFindingTable:
         return text if text else default
 
     @classmethod
-    def _build_fingerprint(cls, finding: Dict[str, Any], index: int) -> str:
+    def _build_fingerprint(cls, finding: dict[str, Any], index: int) -> str:
         file_path = cls._safe_text(finding.get("file_path") or finding.get("file"))
         line_start = cls._safe_int(finding.get("line_start") or finding.get("line"), 1)
         vuln = cls._safe_text(finding.get("vulnerability_type"), "unknown").lower()
@@ -85,7 +85,7 @@ class VerificationFindingTable:
         return hashlib.sha1(raw.encode("utf-8", errors="ignore")).hexdigest()[:20]
 
     @classmethod
-    def _build_dedup_key(cls, finding: Dict[str, Any]) -> str:
+    def _build_dedup_key(cls, finding: dict[str, Any]) -> str:
         file_path = cls._safe_text(finding.get("file_path") or finding.get("file"))
         line_start = cls._safe_int(finding.get("line_start") or finding.get("line"), 1)
         vuln = cls._safe_text(finding.get("vulnerability_type"), "unknown").lower()
@@ -93,13 +93,13 @@ class VerificationFindingTable:
 
     def add_candidate(
         self,
-        finding: Dict[str, Any],
+        finding: dict[str, Any],
         *,
         source: str,
         index: int = 0,
-        parent_fingerprint: Optional[str] = None,
-        discovered_by: Optional[str] = None,
-    ) -> Optional[FindingTableItem]:
+        parent_fingerprint: str | None = None,
+        discovered_by: str | None = None,
+    ) -> FindingTableItem | None:
         if not isinstance(finding, dict):
             return None
         if len(self._order) >= self.max_items:
@@ -138,13 +138,13 @@ class VerificationFindingTable:
         self._dedup_keys[dedup_key] = item.fingerprint
         return item
 
-    def get(self, fingerprint: str) -> Optional[FindingTableItem]:
+    def get(self, fingerprint: str) -> FindingTableItem | None:
         return self._items.get(str(fingerprint or "").strip())
 
-    def iter_items(self) -> List[FindingTableItem]:
+    def iter_items(self) -> list[FindingTableItem]:
         return [self._items[fp] for fp in self._order if fp in self._items]
 
-    def pending_context_items(self) -> List[FindingTableItem]:
+    def pending_context_items(self) -> list[FindingTableItem]:
         return [
             item
             for item in self.iter_items()
@@ -156,9 +156,9 @@ class VerificationFindingTable:
         fingerprint: str,
         *,
         status: str,
-        context_round: Optional[int] = None,
-        blocked_reason: Optional[str] = None,
-        context_bundle: Optional[Dict[str, Any]] = None,
+        context_round: int | None = None,
+        blocked_reason: str | None = None,
+        context_bundle: dict[str, Any] | None = None,
     ) -> None:
         item = self.get(fingerprint)
         if not item:
@@ -177,9 +177,9 @@ class VerificationFindingTable:
         fingerprint: str,
         *,
         status: str,
-        attempts: Optional[int] = None,
-        blocked_reason: Optional[str] = None,
-        verification_result: Optional[Dict[str, Any]] = None,
+        attempts: int | None = None,
+        blocked_reason: str | None = None,
+        verification_result: dict[str, Any] | None = None,
     ) -> None:
         item = self.get(fingerprint)
         if not item:
@@ -193,7 +193,7 @@ class VerificationFindingTable:
         if isinstance(verification_result, dict):
             item.verification_result = dict(verification_result)
 
-    def to_todo_list(self) -> List[Dict[str, Any]]:
+    def to_todo_list(self) -> list[dict[str, Any]]:
         return [item.to_dict() for item in self.iter_items()]
 
     def summary(
@@ -202,7 +202,7 @@ class VerificationFindingTable:
         round_index: int = 0,
         queue_size: int = 0,
         newly_discovered_count: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         items = self.iter_items()
         context_pending = len([i for i in items if i.context_status == "pending"])
         context_collecting = len([i for i in items if i.context_status == "collecting"])

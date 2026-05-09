@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import os
-from typing import Any, Dict
+from dataclasses import dataclass, field
+from typing import Any
 
 from ...push_finding_payload import normalize_push_finding_payload
 from .context import ToolCallContext, ToolFailureState
@@ -12,11 +12,11 @@ from .contracts import ToolContractViolation
 @dataclass
 class ToolHookResult:
     continue_execution: bool = True
-    normalized_input: Dict[str, Any] | None = None
+    normalized_input: dict[str, Any] | None = None
     diagnostics_additions: list[str] = field(default_factory=list)
     error: str = ""
     error_code: str = ""
-    reflection_request: Dict[str, Any] = field(default_factory=dict)
+    reflection_request: dict[str, Any] = field(default_factory=dict)
 
 
 class ToolHook:

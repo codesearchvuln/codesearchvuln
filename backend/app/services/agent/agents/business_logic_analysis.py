@@ -17,8 +17,8 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any
 
 from app.models.analysis import (
     REAL_DATAFLOW_EVIDENCE_LIST_FIELDS,
@@ -27,14 +27,13 @@ from app.models.analysis import (
     REAL_DATAFLOW_SEMANTIC_LIST_FIELDS,
 )
 
-from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
-from .react_parser import parse_react_response
-from ..json_parser import AgentJsonParser
 from ..utils.vulnerability_naming import is_business_logic_vulnerability_type
+from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent
+from .react_parser import parse_react_response
 
 logger = logging.getLogger(__name__)
 
-REAL_DATAFLOW_METADATA_KEYS: Tuple[str, ...] = (
+REAL_DATAFLOW_METADATA_KEYS: tuple[str, ...] = (
     "sink_reachable",
     "upstream_call_chain",
     "sink_trigger_condition",
@@ -356,11 +355,11 @@ Final Answer: 分析完成，所有确认的业务逻辑漏洞已推送至队列
 class BLAnalysisStep:
     """业务逻辑分析步骤"""
     thought: str
-    action: Optional[str] = None
-    action_input: Optional[Dict] = None
-    observation: Optional[str] = None
+    action: str | None = None
+    action_input: dict | None = None
+    observation: str | None = None
     is_final: bool = False
-    final_answer: Optional[str] = None
+    final_answer: str | None = None
 
 
 class BusinessLogicAnalysisAgent(BaseAgent):
@@ -374,7 +373,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
     def __init__(
         self,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
     ):
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
@@ -397,12 +396,12 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         )
         super().__init__(config, llm_service, tools, event_emitter)
 
-        self._conversation_history: List[Dict[str, str]] = []
-        self._steps: List[BLAnalysisStep] = []
-        self._agent_results: Dict[str, Any] = {}
+        self._conversation_history: list[dict[str, str]] = []
+        self._steps: list[BLAnalysisStep] = []
+        self._agent_results: dict[str, Any] = {}
 
     @staticmethod
-    def _normalize_text_list(value: Any) -> List[str]:
+    def _normalize_text_list(value: Any) -> list[str]:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         if isinstance(value, str):
@@ -411,7 +410,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         return []
 
     @staticmethod
-    def _normalize_reachability_flag(value: Any) -> Optional[bool]:
+    def _normalize_reachability_flag(value: Any) -> bool | None:
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
@@ -441,7 +440,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         return text.startswith("<") and text.endswith(">")
 
     @staticmethod
-    def _normalize_finding_payload(candidate: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_finding_payload(candidate: Any) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):
             return None
         nested = candidate.get("finding")
@@ -515,8 +514,8 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         return finding
 
     @classmethod
-    def _validate_real_source_sink_finding(cls, finding: Dict[str, Any]) -> List[str]:
-        errors: List[str] = []
+    def _validate_real_source_sink_finding(cls, finding: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
         if not isinstance(finding, dict):
             return ["finding payload 必须是 JSON 对象"]
 
@@ -565,7 +564,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         return errors
 
     @staticmethod
-    def _build_rejected_push_observation(errors: List[str]) -> str:
+    def _build_rejected_push_observation(errors: list[str]) -> str:
         detail = "; ".join(str(item).strip() for item in errors if str(item).strip())
         if not detail:
             detail = "source/sink 真实性证据不足"
@@ -576,7 +575,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         )
 
     @classmethod
-    def _has_real_source_sink_evidence(cls, finding: Dict[str, Any]) -> bool:
+    def _has_real_source_sink_evidence(cls, finding: dict[str, Any]) -> bool:
         cloned_finding = dict(finding or {})
         metadata = cloned_finding.get("finding_metadata")
         if isinstance(metadata, dict):
@@ -599,9 +598,9 @@ class BusinessLogicAnalysisAgent(BaseAgent):
 
     def _build_context_pack(
         self,
-        risk_point: Dict[str, Any],
+        risk_point: dict[str, Any],
         input_context_pack: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         context_pack = dict(input_context_pack) if isinstance(input_context_pack, dict) else {}
         route = str(context_pack.get("route") or risk_point.get("route") or "").strip()
         http_method = str(context_pack.get("http_method") or risk_point.get("http_method") or "").strip().upper()
@@ -620,7 +619,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
             context_pack.get("sensitive_action") or risk_point.get("sensitive_action") or ""
         ).strip()
 
-        related_symbols: List[str] = []
+        related_symbols: list[str] = []
         for source in (
             context_pack.get("related_symbols"),
             risk_point.get("related_symbols"),
@@ -634,7 +633,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         if entry_function and entry_function not in related_symbols:
             related_symbols.append(entry_function)
 
-        evidence_refs: List[str] = []
+        evidence_refs: list[str] = []
         for source in (
             context_pack.get("evidence_refs"),
             risk_point.get("evidence_refs"),
@@ -691,7 +690,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
             final_answer=str(parsed.final_answer) if parsed.is_final else None,
         )
 
-    def _normalize_risk_point(self, candidate: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_risk_point(self, candidate: Any) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):
             return None
         file_path = str(candidate.get("file_path") or "").strip()
@@ -731,7 +730,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         )
 
     @classmethod
-    def _build_scope_rejected_push_observation(cls, candidate: Dict[str, Any]) -> str:
+    def _build_scope_rejected_push_observation(cls, candidate: dict[str, Any]) -> str:
         vuln_type = str(candidate.get("vulnerability_type") or candidate.get("type") or "other").strip() or "other"
         return (
             "push_finding_to_queue 已拦截：当前发现属于常规代码漏洞，超出 BusinessLogicAnalysisAgent 的职责范围。"
@@ -739,7 +738,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
             "请交由 AnalysisAgent 处理，不要在本 Agent 中推送。"
         )
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         分析单个业务逻辑风险点。
 
@@ -751,7 +750,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
         """
         start_time = time.time()
 
-        risk_point: Optional[Dict[str, Any]] = None
+        risk_point: dict[str, Any] | None = None
         if isinstance(input_data, dict):
             risk_point = input_data.get("risk_point") or input_data.get("context_dict")
             if not isinstance(risk_point, dict):
@@ -807,7 +806,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
 
         file_path = str(risk_point.get("file_path") or "").strip()
         line_start = int(risk_point.get("line_start") or 1)
-        description = str(risk_point.get("description") or "").strip()
+        str(risk_point.get("description") or "").strip()
         vuln_type = str(risk_point.get("vulnerability_type") or "business_logic").lower()
         entry_function = str(risk_point.get("entry_function") or "").strip()
         context_hint = str(risk_point.get("context") or "").strip()
@@ -834,16 +833,16 @@ class BusinessLogicAnalysisAgent(BaseAgent):
                 "   请优先结合该证据包检查同对象接口、全局鉴权补偿、中间件/依赖注入/service guard/repository filter。\n"
             )
         initial_message += (
-            f"\n确认为真实漏洞后，立即调用 `push_finding_to_queue` 推送，"
-            f"必须包含 `attacker_flow` 字段描述攻击路径。\n"
+            "\n确认为真实漏洞后，立即调用 `push_finding_to_queue` 推送，"
+            "必须包含 `attacker_flow` 字段描述攻击路径。\n"
             "每个 sink 推送前必须补齐：`source`、`sink`、`finding_metadata.sink_reachable=true`、"
             "`finding_metadata.upstream_call_chain`、`finding_metadata.sink_trigger_condition`。\n"
             "请先梳理 `variable_flow`（变量逐跳流向）、`call_context`（调用上下文）、"
             "`input_output_relations`（输入如何决定敏感输出/副作用）、`attack_chain_steps`（完整攻击链步骤）。\n"
             "尤其要验证“用户输入是否未过滤 -> 输入是否进入敏感函数 -> 敏感函数是否真的执行系统命令或高危业务操作”，"
             "避免只看到单个危险点就误报。\n"
-            f"禁止直接输出 Final Answer，第一轮必须执行 `get_code_window`。\n"
-            f"若发现局部缺少校验，必须尝试搜索全局补偿逻辑，避免将已被中间件/依赖统一保护的接口误报。"
+            "禁止直接输出 Final Answer，第一轮必须执行 `get_code_window`。\n"
+            "若发现局部缺少校验，必须尝试搜索全局补偿逻辑，避免将已被中间件/依赖统一保护的接口误报。"
         )
         initial_message += f"""
 
@@ -920,7 +919,7 @@ class BusinessLogicAnalysisAgent(BaseAgent):
                 await self.emit_llm_action(step.action, step.action_input or {})
 
                 action_input = dict(step.action_input or {})
-                normalized_finding_for_push: Optional[Dict[str, Any]] = None
+                normalized_finding_for_push: dict[str, Any] | None = None
                 if step.action == "push_finding_to_queue":
                     normalized_finding_for_push = self._normalize_finding_payload(action_input)
                     if not normalized_finding_for_push:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 MAIN_FILE = Path(__file__).resolve().parents[1] / "app" / "main.py"
 
 

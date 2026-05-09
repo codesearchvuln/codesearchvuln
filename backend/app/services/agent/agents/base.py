@@ -10,40 +10,40 @@ Agent 基类
 5. 完整的状态管理和Agent间通信
 """
 
-from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncGenerator, Tuple, Set, TYPE_CHECKING
-from dataclasses import dataclass, field
-from enum import Enum
-from collections import deque
-from datetime import datetime, timezone
+import ast
 import asyncio
+import copy
 import hashlib
 import json
 import logging
 import os
 import re
-import uuid
-import copy
-import ast
-import threading
 import tempfile
+import threading
+import uuid
+from abc import ABC, abstractmethod
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 from app.services.json_safe import dump_json_safe, normalize_json_safe
 
-from ..core.state import AgentState, AgentStatus
+from ..core.message import AgentMessage, MessageType, message_bus
 from ..core.registry import agent_registry
-from ..core.message import message_bus, MessageType, AgentMessage
+from ..core.state import AgentState
 from ..flow.lightweight.function_locator_payload import (
     parse_locator_payload,
     select_locator_function,
 )
+from ..push_finding_payload import normalize_push_finding_payload
+from ..skills.scan_core import SCAN_CORE_LOCAL_SKILL_IDS
 from ..utils.vulnerability_naming import (
     build_cn_structured_description_markdown,
     normalize_cwe_id,
 )
-from ..skills.scan_core import SCAN_CORE_LOCAL_SKILL_IDS
-from ..push_finding_payload import normalize_push_finding_payload
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ CHINESE_OUTPUT_REQUIREMENT_TEXT = """## 输出语言约束（强制）
 """
 
 
-def ensure_chinese_system_prompt(system_prompt: Optional[str]) -> Optional[str]:
+def ensure_chinese_system_prompt(system_prompt: str | None) -> str | None:
     """统一为系统提示词追加中文输出约束（幂等）。"""
     prompt_text = str(system_prompt or "")
     if not prompt_text.strip():
@@ -67,20 +67,20 @@ def ensure_chinese_system_prompt(system_prompt: Optional[str]) -> Optional[str]:
         return prompt_text
     return f"{prompt_text.rstrip()}\n\n{CHINESE_OUTPUT_REQUIREMENT_TEXT}"
 
-TOOL_ALIAS_CANDIDATES: Dict[str, List[str]] = {
+TOOL_ALIAS_CANDIDATES: dict[str, list[str]] = {
     "list": ["list_files"],
     "smart_scan": ["smart_scan", "quick_audit", "pattern_match", "search_code", "get_code_window"],
     "quick_audit": ["quick_audit", "smart_scan", "pattern_match", "search_code", "get_code_window"],
     "save_verification_results": ["save_verification_result"],
 }
-VIRTUAL_TOOL_NAMES: Set[str] = set()
+VIRTUAL_TOOL_NAMES: set[str] = set()
 
-DOWNLINED_TOOL_MESSAGES: Dict[str, str] = {
+DOWNLINED_TOOL_MESSAGES: dict[str, str] = {
     "read_file": "工具 `read_file` 已下线。请改用 `get_code_window` 获取代码窗口，`get_file_outline` 获取文件概览，或 `get_function_summary` 获取函数语义总结。",
     "extract_function": "工具 `extract_function` 已下线。请改用 `get_symbol_body` 提取函数/符号主体源码。",
 }
 
-TOOL_INPUT_REPAIR_MAP: Dict[str, str] = {
+TOOL_INPUT_REPAIR_MAP: dict[str, str] = {
     "query": "keyword",
     "pattern": "keyword",
     "glob": "file_pattern",
@@ -91,8 +91,9 @@ TOOL_INPUT_REPAIR_MAP: Dict[str, str] = {
     "dir": "directory",
 }
 
-RETRY_GUARD_TOOLS: Set[str] = {
+RETRY_GUARD_TOOLS: set[str] = {
     "get_code_window",
+    "read_file",
     "search_code",
     "pattern_match",
     "get_recon_risk_queue_status",
@@ -101,7 +102,7 @@ RETRY_GUARD_TOOLS: Set[str] = {
     "dequeue_finding",
     "get_bl_risk_queue_status",
 }
-NON_CACHEABLE_TOOL_NAMES: Set[str] = {
+NON_CACHEABLE_TOOL_NAMES: set[str] = {
     "push_finding_to_queue",
     "get_queue_status",
     "dequeue_finding",
@@ -123,7 +124,7 @@ NON_CACHEABLE_TOOL_NAMES: Set[str] = {
     "run_recon_subagent",
     "bash_shell",
 }
-STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
+STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: set[str] = {
     "push_risk_point_to_queue",
     "push_risk_points_to_queue",
     "get_recon_risk_queue_status",
@@ -145,8 +146,8 @@ STRICT_MODE_LOCAL_ONLY_TOOL_NAMES: Set[str] = {
     "is_bl_risk_point_in_queue",
     "run_recon_subagent",
 }
-WRITE_TOOL_GUARD_NAMES: Set[str] = {"edit_file", "write_file", "move_file", "create_directory"}
-DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (
+WRITE_TOOL_GUARD_NAMES: set[str] = {"edit_file", "write_file", "move_file", "create_directory"}
+DETERMINISTIC_ERROR_HINTS: tuple[str, ...] = (
     "文件不存在",
     "不是文件",
     "目录不存在",
@@ -156,7 +157,7 @@ DETERMINISTIC_ERROR_HINTS: Tuple[str, ...] = (
     "参数校验失败",
     "工具参数缺失",
 )
-STRICT_MODE_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
+STRICT_MODE_TRANSIENT_ERROR_HINTS: tuple[str, ...] = (
     "timeout",
     "timed out",
     "temporarily unavailable",
@@ -166,10 +167,10 @@ STRICT_MODE_TRANSIENT_ERROR_HINTS: Tuple[str, ...] = (
 )
 if TYPE_CHECKING:
     from ..tool_runtime.runtime import ToolRuntime
-    from ..tool_runtime.write_scope import TaskWriteScopeGuard, WriteScopeDecision
+    from ..tool_runtime.write_scope import TaskWriteScopeGuard
 
 
-def _truncate_with_flag(text: str, max_chars: int = MAX_EVENT_PAYLOAD_CHARS) -> Tuple[str, bool]:
+def _truncate_with_flag(text: str, max_chars: int = MAX_EVENT_PAYLOAD_CHARS) -> tuple[str, bool]:
     if len(text) <= max_chars:
         return text, False
     return text[:max_chars], True
@@ -196,24 +197,24 @@ class AgentConfig:
     name: str
     agent_type: AgentType
     pattern: AgentPattern = AgentPattern.REACT
-    
+
     # LLM 配置
-    model: Optional[str] = None
+    model: str | None = None
     temperature: float = 0.1
     max_tokens: int = 8192
-    
+
     # 执行限制
     max_iterations: int = 20
     timeout_seconds: int = 600
-    
+
     # 工具配置
-    tools: List[str] = field(default_factory=list)
-    
+    tools: list[str] = field(default_factory=list)
+
     # 系统提示词
-    system_prompt: Optional[str] = None
-    
+    system_prompt: str | None = None
+
     # 元数据
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -221,24 +222,24 @@ class AgentResult:
     """Agent 执行结果"""
     success: bool
     data: Any = None
-    error: Optional[str] = None
-    
+    error: str | None = None
+
     # 执行统计
     iterations: int = 0
     tool_calls: int = 0
     tokens_used: int = 0
     duration_ms: int = 0
-    
+
     # 中间结果
-    intermediate_steps: List[Dict[str, Any]] = field(default_factory=list)
-    
+    intermediate_steps: list[dict[str, Any]] = field(default_factory=list)
+
     # 元数据
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    metadata: dict[str, Any] = field(default_factory=dict)
+
     #  协作信息 - Agent 传递给下一个 Agent 的结构化信息
     handoff: Optional["TaskHandoff"] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "success": self.success,
             "data": self.data,
@@ -256,7 +257,7 @@ class AgentResult:
 class TaskHandoff:
     """
     任务交接协议 - Agent 之间传递的结构化信息
-    
+
     设计原则：
     1. 包含足够的上下文让下一个 Agent 理解前序工作
     2. 提供明确的建议和关注点
@@ -265,30 +266,30 @@ class TaskHandoff:
     # 基本信息
     from_agent: str
     to_agent: str
-    
+
     # 工作摘要
     summary: str
-    work_completed: List[str] = field(default_factory=list)
-    
+    work_completed: list[str] = field(default_factory=list)
+
     # 关键发现和洞察
-    key_findings: List[Dict[str, Any]] = field(default_factory=list)
-    insights: List[str] = field(default_factory=list)
-    
+    key_findings: list[dict[str, Any]] = field(default_factory=list)
+    insights: list[str] = field(default_factory=list)
+
     # 建议和关注点
-    suggested_actions: List[Dict[str, Any]] = field(default_factory=list)
-    attention_points: List[str] = field(default_factory=list)
-    priority_areas: List[str] = field(default_factory=list)
-    
+    suggested_actions: list[dict[str, Any]] = field(default_factory=list)
+    attention_points: list[str] = field(default_factory=list)
+    priority_areas: list[str] = field(default_factory=list)
+
     # 上下文数据
-    context_data: Dict[str, Any] = field(default_factory=dict)
-    
+    context_data: dict[str, Any] = field(default_factory=dict)
+
     # 置信度
     confidence: float = 0.8
-    
+
     # 时间戳
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    
-    def to_dict(self) -> Dict[str, Any]:
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "from_agent": self.from_agent,
             "to_agent": self.to_agent,
@@ -303,9 +304,9 @@ class TaskHandoff:
             "confidence": self.confidence,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TaskHandoff":
+    def from_dict(cls, data: dict[str, Any]) -> "TaskHandoff":
         return cls(
             from_agent=data.get("from_agent", ""),
             to_agent=data.get("to_agent", ""),
@@ -319,7 +320,7 @@ class TaskHandoff:
             context_data=data.get("context_data", {}),
             confidence=data.get("confidence", 0.8),
         )
-    
+
     def to_prompt_context(self) -> str:
         """
         转换为 LLM 可理解的上下文格式
@@ -338,17 +339,17 @@ class TaskHandoff:
         lines = [
             f"## 来自 {self.from_agent} Agent 的任务交接",
             "",
-            f"### 工作摘要",
+            "### 工作摘要",
             self.summary,
             "",
         ]
-        
+
         if self.work_completed:
             lines.append("### 已完成的工作")
             for work in self.work_completed:
                 lines.append(f"- {work}")
             lines.append("")
-        
+
         if self.key_findings:
             lines.append("### 关键发现")
             for i, finding in enumerate(self.key_findings[:15], 1):
@@ -361,13 +362,13 @@ class TaskHandoff:
                 if finding.get("description"):
                     lines.append(f"   描述: {finding['description'][:100]}")
             lines.append("")
-        
+
         if self.insights:
             lines.append("### 洞察和分析")
             for insight in self.insights:
                 lines.append(f"- {insight}")
             lines.append("")
-        
+
         if self.suggested_actions:
             lines.append("### 建议的下一步行动")
             for action in self.suggested_actions:
@@ -376,13 +377,13 @@ class TaskHandoff:
                 priority = action.get("priority", "medium")
                 lines.append(f"- [{priority.upper()}] {action_type}: {description}")
             lines.append("")
-        
+
         if self.attention_points:
             lines.append("### 需要特别关注")
             for point in self.attention_points:
                 lines.append(f"- {point}")
             lines.append("")
-        
+
         if self.priority_areas:
             lines.append("### 优先分析区域")
             for area in self.priority_areas:
@@ -404,35 +405,35 @@ class TaskHandoff:
 class BaseAgent(ABC):
     """
     Agent 基类
-    
+
     核心原则：
     1. LLM 是 Agent 的大脑，全程参与决策
     2. 所有日志应该反映 LLM 的思考过程
     3. 工具调用是 LLM 的决策结果
-    
+
     协作原则：
     1. 通过 TaskHandoff 接收前序 Agent 的上下文
     2. 执行完成后生成 TaskHandoff 传递给下一个 Agent
     3. 洞察和发现应该结构化记录
-    
+
     动态Agent树：
     1. 支持动态创建子Agent
     2. Agent间通过消息总线通信
     3. 完整的状态管理和生命周期
     """
-    
+
     def __init__(
         self,
         config: AgentConfig,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
-        parent_id: Optional[str] = None,
-        knowledge_modules: Optional[List[str]] = None,
+        parent_id: str | None = None,
+        knowledge_modules: list[str] | None = None,
     ):
         """
         初始化 Agent
-        
+
         Args:
             config: Agent 配置
             llm_service: LLM 服务
@@ -448,10 +449,10 @@ class BaseAgent(ABC):
         self.event_emitter = event_emitter
         self.parent_id = parent_id
         self.knowledge_modules = knowledge_modules or []
-        
+
         #  生成唯一ID
         self._agent_id = f"agent_{uuid.uuid4().hex[:8]}"
-        
+
         #  增强的状态管理
         self._state = AgentState(
             agent_id=self._agent_id,
@@ -461,48 +462,48 @@ class BaseAgent(ABC):
             max_iterations=config.max_iterations,
             knowledge_modules=self.knowledge_modules,
         )
-        
+
         # 运行状态（保持向后兼容）
         self._iteration = 0
         self._total_tokens = 0
         self._tool_calls = 0
         self._cancelled = False
-        self._task_id: Optional[str] = None
+        self._task_id: str | None = None
 
         # 获取超时配置
         self._timeout_config = self._get_timeout_config()
-        
+
         #  协作状态
-        self._incoming_handoff: Optional[TaskHandoff] = None
-        self._insights: List[str] = []  # 收集的洞察
-        self._work_completed: List[str] = []  # 完成的工作记录
+        self._incoming_handoff: TaskHandoff | None = None
+        self._insights: list[str] = []  # 收集的洞察
+        self._work_completed: list[str] = []  # 完成的工作记录
 
         #  最近一次工具输出快照（用于避免 llm_observation 复写同一段 tool_result）
-        self._last_tool_result_snapshot: Optional[Dict[str, Any]] = None
-        self._last_tool_result_payload: Optional[Dict[str, Any]] = None
-        self._last_successful_tool_context: Optional[Dict[str, Any]] = None
-        self._last_llm_stream_meta: Dict[str, Any] = {}
+        self._last_tool_result_snapshot: dict[str, Any] | None = None
+        self._last_tool_result_payload: dict[str, Any] | None = None
+        self._last_successful_tool_context: dict[str, Any] | None = None
+        self._last_llm_stream_meta: dict[str, Any] = {}
         self._thinking_push_mode: str = "stream"
-        self._last_llm_thought_digest: Optional[str] = None
+        self._last_llm_thought_digest: str | None = None
         self._llm_thought_repeat_count: int = 0
         self._llm_thought_suppressed_count: int = 0
         self._llm_thought_repeat_suppress_threshold: int = 2
         self._llm_thought_repeat_summary_interval: int = 5
-        self._tool_repeat_call_counts: Dict[str, int] = {}
-        self._deterministic_failure_counts: Dict[str, int] = {}
-        self._deterministic_failure_last_error: Dict[str, str] = {}
+        self._tool_repeat_call_counts: dict[str, int] = {}
+        self._deterministic_failure_counts: dict[str, int] = {}
+        self._deterministic_failure_last_error: dict[str, str] = {}
         self._recent_thought_texts: deque[str] = deque(maxlen=6)
-        self._tool_success_cache: Dict[str, str] = {}
+        self._tool_success_cache: dict[str, str] = {}
         self._recent_reason_dirs: deque[str] = deque(maxlen=16)
         self._recent_search_directories: deque[str] = deque(maxlen=12)
-        self._tool_runtime: Optional["ToolRuntime"] = None
-        self._write_scope_guard: Optional["TaskWriteScopeGuard"] = None
+        self._tool_runtime: ToolRuntime | None = None
+        self._write_scope_guard: TaskWriteScopeGuard | None = None
         self._max_history_observation_chars: int = 12000
-        
+
         #  兜底机制：追踪关键工具调用（push/save）
         self._critical_tool_called: bool = False  # 是否调用了关键工具
-        self._critical_tool_name: Optional[str] = None  # 调用的关键工具名称
-        self._critical_tool_calls: List[Dict[str, Any]] = []  # 所有关键工具调用记录
+        self._critical_tool_name: str | None = None  # 调用的关键工具名称
+        self._critical_tool_calls: list[dict[str, Any]] = []  # 所有关键工具调用记录
         try:
             from app.services.agent.config import get_agent_config
 
@@ -511,45 +512,45 @@ class BaseAgent(ABC):
             self._max_history_observation_chars = max(200, configured_value)
         except Exception:
             self._max_history_observation_chars = 12000
-        
+
         #  是否已注册到注册表
         self._registered = False
 
-        self._trace_logger: Optional[logging.Logger] = None
-        self._trace_log_path: Optional[str] = None
+        self._trace_logger: logging.Logger | None = None
+        self._trace_log_path: str | None = None
         self.configure_trace_logger(identity=self.name, task_id=None)
         self._trace("agent_initialized", agent_type=self.config.agent_type.value)
 
-        self._trace_logger: Optional[logging.Logger] = None
-        self._trace_log_path: Optional[str] = None
+        self._trace_logger: logging.Logger | None = None
+        self._trace_log_path: str | None = None
         self.configure_trace_logger(identity=self.name, task_id=None)
         self._trace("agent_initialized", agent_type=self.config.agent_type.value)
-        
+
         #  加载知识模块到系统提示词
         if self.knowledge_modules:
             self._load_knowledge_modules()
 
     @staticmethod
-    def _sanitize_log_token(value: Optional[str], default: str) -> str:
+    def _sanitize_log_token(value: str | None, default: str) -> str:
         raw = str(value or "").strip().lower()
         safe = re.sub(r"[^a-z0-9._-]+", "_", raw)
         return safe or default
 
     @classmethod
-    def _resolve_task_log_dir(cls, task_id: Optional[str]) -> Path:
+    def _resolve_task_log_dir(cls, task_id: str | None) -> Path:
         safe_task_id = cls._sanitize_log_token(task_id, "no_task")
         log_dir = Path(__file__).resolve().parents[4] / "log" / "agent_runs" / safe_task_id
         log_dir.mkdir(parents=True, exist_ok=True)
         return log_dir
 
     @classmethod
-    def _resolve_trace_log_path(cls, identity: str, task_id: Optional[str]) -> str:
+    def _resolve_trace_log_path(cls, identity: str, task_id: str | None) -> str:
         safe_identity = cls._sanitize_log_token(identity, "agent")
         log_dir = cls._resolve_task_log_dir(task_id)
         return str(log_dir / f"{safe_identity}.log")
 
     @classmethod
-    def _build_trace_logger(cls, identity: str, task_id: Optional[str]) -> tuple[logging.Logger, str]:
+    def _build_trace_logger(cls, identity: str, task_id: str | None) -> tuple[logging.Logger, str]:
         safe_identity = cls._sanitize_log_token(identity, "agent")
         safe_task = cls._sanitize_log_token(task_id, "no_task")
         logger_name = f"{__name__}.trace.{safe_task}.{safe_identity}"
@@ -582,8 +583,8 @@ class BaseAgent(ABC):
 
     def configure_trace_logger(
         self,
-        identity: Optional[str] = None,
-        task_id: Optional[str] = None,
+        identity: str | None = None,
+        task_id: str | None = None,
     ) -> str:
         """配置当前 Agent 的 trace 日志输出目录，按 task_id 归档。"""
         final_identity = str(identity or self.name or "agent").strip() or "agent"
@@ -604,7 +605,7 @@ class BaseAgent(ABC):
         trace_logger = getattr(self, "_trace_logger", None)
         if trace_logger is None:
             return
-        details: List[str] = []
+        details: list[str] = []
         for key, value in fields.items():
             if value is None:
                 continue
@@ -614,15 +615,15 @@ class BaseAgent(ABC):
             details.append(f"{key}={text}")
         suffix = f" | {'; '.join(details)}" if details else ""
         trace_logger.info(f"[{self.name}] {message}{suffix}")
-    
-    def _register_to_registry(self, task: Optional[str] = None) -> None:
+
+    def _register_to_registry(self, task: str | None = None) -> None:
         """注册到Agent注册表（延迟注册，在run时调用）"""
         logger.debug(f"[AgentTree] _register_to_registry 被调用: {self.config.name} (id={self._agent_id}, parent={self.parent_id}, _registered={self._registered})")
-        
+
         if self._registered:
             logger.debug(f"[AgentTree] {self.config.name} 已注册，跳过 (id={self._agent_id})")
             return
-        
+
         logger.debug(f"[AgentTree] 正在注册 Agent: {self.config.name} (id={self._agent_id}, parent={self.parent_id})")
         task_id = str(getattr(self, "_task_id", "") or "").strip() or None
         if task_id:
@@ -639,19 +640,19 @@ class BaseAgent(ABC):
             knowledge_modules=self.knowledge_modules,
             task_id=task_id,
         )
-        
+
         # 创建消息队列
         message_bus.create_queue(self._agent_id)
         self._registered = True
-        
+
         tree = agent_registry.get_agent_tree(task_id=task_id)
         logger.debug(f"[AgentTree] Agent 注册完成: {self.config.name}, 当前树节点数: {len(tree['nodes'])}")
-    
+
     def set_parent_id(self, parent_id: str) -> None:
         """设置父Agent ID（在调度时调用）"""
         self.parent_id = parent_id
         self._state.parent_id = parent_id
-    
+
     def _load_knowledge_modules(self) -> None:
         """加载知识模块到系统提示词"""
         if not self.knowledge_modules:
@@ -670,7 +671,7 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.warning(f"Failed to load knowledge modules: {e}")
 
-    def _get_timeout_config(self) -> Dict[str, int]:
+    def _get_timeout_config(self) -> dict[str, int]:
         """
         获取超时配置（秒）
 
@@ -693,7 +694,7 @@ class BaseAgent(ABC):
             'sub_agent_timeout': getattr(settings, 'SUB_AGENT_TIMEOUT_SECONDS', 1200),
             'tool_timeout': getattr(settings, 'TOOL_TIMEOUT_SECONDS', 60),
         }
-    
+
     @property
     def name(self) -> str:
         return self.config.name
@@ -705,21 +706,21 @@ class BaseAgent(ABC):
     @property
     def agent_id(self) -> str:
         return self._agent_id
-    
+
     @property
     def state(self) -> AgentState:
         return self._state
-    
+
     @property
     def agent_type(self) -> AgentType:
         return self.config.agent_type
-    
+
     # ============ Agent间消息处理 ============
-    
-    def check_messages(self) -> List[AgentMessage]:
+
+    def check_messages(self) -> list[AgentMessage]:
         """
         检查并处理收到的消息
-        
+
         Returns:
             未读消息列表
         """
@@ -728,7 +729,7 @@ class BaseAgent(ABC):
             unread_only=True,
             mark_as_read=True,
         )
-        
+
         for msg in messages:
             # 处理消息
             if msg.from_agent == "user":
@@ -737,18 +738,18 @@ class BaseAgent(ABC):
             else:
                 # Agent间消息使用XML格式
                 self._state.add_message("user", msg.to_xml())
-            
+
             # 如果在等待状态，恢复执行
             if self._state.is_waiting_for_input():
                 self._state.resume_from_waiting()
                 agent_registry.update_agent_status(self._agent_id, "running")
-        
+
         return messages
-    
+
     def has_pending_messages(self) -> bool:
         """检查是否有待处理的消息"""
         return message_bus.has_unread_messages(self._agent_id)
-    
+
     def send_message_to_parent(
         self,
         content: str,
@@ -762,7 +763,7 @@ class BaseAgent(ABC):
                 content=content,
                 message_type=message_type,
             )
-    
+
     def send_message_to_agent(
         self,
         target_id: str,
@@ -776,19 +777,19 @@ class BaseAgent(ABC):
             content=content,
             message_type=message_type,
         )
-    
+
     # ============ 生命周期管理 ============
-    
+
     def on_start(self) -> None:
         """Agent开始执行时调用"""
         self._state.start()
         agent_registry.update_agent_status(self._agent_id, "running")
-    
-    def on_complete(self, result: Dict[str, Any]) -> None:
+
+    def on_complete(self, result: dict[str, Any]) -> None:
         """Agent完成时调用"""
         self._state.set_completed(result)
         agent_registry.update_agent_status(self._agent_id, "completed", result)
-        
+
         # 向父Agent报告完成
         if self.parent_id:
             message_bus.send_completion_report(
@@ -798,30 +799,30 @@ class BaseAgent(ABC):
                 findings=result.get("findings", []),
                 success=True,
             )
-    
+
     def on_error(self, error: str) -> None:
         """Agent出错时调用"""
         self._state.set_failed(error)
         agent_registry.update_agent_status(self._agent_id, "failed", {"error": error})
-    
+
     @abstractmethod
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         执行 Agent 任务
-        
+
         Args:
             input_data: 输入数据
-            
+
         Returns:
             Agent 执行结果
         """
         pass
-    
+
     def cancel(self):
         """取消执行"""
         self._cancelled = True
         logger.info(f"[{self.name}] Cancel requested")
-    
+
         #  外部取消检查回调
         self._cancel_callback = None
 
@@ -861,9 +862,10 @@ class BaseAgent(ABC):
             except Exception:
                 self._write_scope_guard = None
 
-    def set_write_scope_guard(self, guard: Optional["TaskWriteScopeGuard"]) -> None:
-        """设置写入范围守卫。"""
-        self._write_scope_guard = guard
+    def set_mcp_runtime(self, runtime: Optional["ToolRuntime"]) -> None:
+        """Backward-compatible alias for older MCP runtime callers."""
+        self.set_tool_runtime(runtime)
+        self.config.metadata["mcp_runtime_alias"] = True
 
     @staticmethod
     def _is_strict_mode(runtime: Optional["ToolRuntime"]) -> bool:
@@ -886,14 +888,14 @@ class BaseAgent(ABC):
             runtime_can_handle=False,
         )
 
-    def _runtime_metadata(self) -> Dict[str, Any]:
+    def _runtime_metadata(self) -> dict[str, Any]:
         metadata = getattr(self.config, "metadata", None)
         if isinstance(metadata, dict):
             return metadata
         return {}
 
     @staticmethod
-    def _metadata_bool(metadata: Dict[str, Any], key: str, default: bool = False) -> bool:
+    def _metadata_bool(metadata: dict[str, Any], key: str, default: bool = False) -> bool:
         value = metadata.get(key)
         if isinstance(value, bool):
             return value
@@ -914,7 +916,7 @@ class BaseAgent(ABC):
             default=self._is_smart_audit_mode(),
         )
 
-    def _strict_local_tool_allowlist(self) -> Set[str]:
+    def _strict_local_tool_allowlist(self) -> set[str]:
         allowlist = set(STRICT_MODE_LOCAL_ONLY_TOOL_NAMES)
         allowlist.update(SCAN_CORE_LOCAL_SKILL_IDS)
         metadata = self._runtime_metadata()
@@ -926,6 +928,10 @@ class BaseAgent(ABC):
                 if str(item or "").strip()
             )
         return allowlist
+
+    def _strict_mcp_local_tool_allowlist(self) -> set[str]:
+        """Backward-compatible alias for older MCP strict-mode tests."""
+        return self._strict_local_tool_allowlist()
 
     def _is_strict_local_tool_allowed(
         self,
@@ -978,8 +984,8 @@ class BaseAgent(ABC):
     def _enforce_write_scope(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any],
-    ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[str]]:
+        tool_input: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
         """执行写入作用域校验，并返回规范化后的输入与事件 metadata。"""
         normalized_input = dict(tool_input or {})
         guard = self._write_scope_guard
@@ -998,7 +1004,7 @@ class BaseAgent(ABC):
             logger.warning("[%s] write scope guard evaluation failed: %s", self.name, exc)
             return normalized_input, {}, None
 
-        metadata: Dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
         if hasattr(guard, "decision_metadata"):
             try:
                 metadata = dict(guard.decision_metadata(decision))  # type: ignore[arg-type]
@@ -1020,13 +1026,13 @@ class BaseAgent(ABC):
 
         reason = str(getattr(decision, "reason", "") or "write_scope_not_allowed")
         return normalized_input, metadata, self._build_write_scope_error(reason)
-    
+
     # ============ 协作方法 ============
-    
+
     def receive_handoff(self, handoff: TaskHandoff):
         """
         接收来自前序 Agent 的任务交接
-        
+
         Args:
             handoff: 任务交接对象
         """
@@ -1035,39 +1041,39 @@ class BaseAgent(ABC):
             f"[{self.name}] Received handoff from {handoff.from_agent}: "
             f"{handoff.summary[:50]}..."
         )
-    
+
     def get_handoff_context(self) -> str:
         """
         获取交接上下文（用于构建 LLM prompt）
-        
+
         Returns:
             格式化的上下文字符串
         """
         if not self._incoming_handoff:
             return ""
         return self._incoming_handoff.to_prompt_context()
-    
+
     def add_insight(self, insight: str):
         """记录洞察"""
         self._insights.append(insight)
-    
+
     def record_work(self, work: str):
         """记录完成的工作"""
         self._work_completed.append(work)
-    
+
     def create_handoff(
         self,
         to_agent: str,
         summary: str,
-        key_findings: List[Dict[str, Any]] = None,
-        suggested_actions: List[Dict[str, Any]] = None,
-        attention_points: List[str] = None,
-        priority_areas: List[str] = None,
-        context_data: Dict[str, Any] = None,
+        key_findings: list[dict[str, Any]] = None,
+        suggested_actions: list[dict[str, Any]] = None,
+        attention_points: list[str] = None,
+        priority_areas: list[str] = None,
+        context_data: dict[str, Any] = None,
     ) -> TaskHandoff:
         """
         创建任务交接
-        
+
         Args:
             to_agent: 目标 Agent
             summary: 工作摘要
@@ -1076,7 +1082,7 @@ class BaseAgent(ABC):
             attention_points: 需要关注的点
             priority_areas: 优先分析区域
             context_data: 上下文数据
-            
+
         Returns:
             TaskHandoff 对象
         """
@@ -1092,21 +1098,21 @@ class BaseAgent(ABC):
             priority_areas=priority_areas or [],
             context_data=context_data or {},
         )
-    
+
     def build_prompt_with_handoff(self, base_prompt: str) -> str:
         """
         构建包含交接上下文的 prompt
-        
+
         Args:
             base_prompt: 基础 prompt
-            
+
         Returns:
             增强后的 prompt
         """
         handoff_context = self.get_handoff_context()
         if not handoff_context:
             return base_prompt
-        
+
         return f"""{base_prompt}
 
 ---
@@ -1117,17 +1123,17 @@ class BaseAgent(ABC):
 ---
 请基于以上来自前序 Agent 的信息，结合你的专业能力开展工作。
 """
-    
+
     def reset_session_memory(self) -> None:
         """
         重置会话级内存（任务级隔离）
-        
+
         在 Workflow 中每个任务/轮次完成后调用，确保：
         - _insights 和 _work_completed 被清除
         - _incoming_handoff 被重置
-        
+
         这样可以完全隔离任务，防止跨任务的内存污染。
-        
+
         使用场景：
         - Analysis 处理完一个风险点，清理内存
         - Verification 验证完一个漏洞，清理内存
@@ -1136,13 +1142,13 @@ class BaseAgent(ABC):
         self._insights.clear()
         self._work_completed.clear()
         self._incoming_handoff = None
-        
+
         logger.debug(
             f"[{self.name}] Session memory reset: insights cleared, work_completed cleared, handoff cleared"
         )
-    
+
     # ============ 核心事件发射方法 ============
-    
+
     async def emit_event(
         self,
         event_type: str,
@@ -1152,18 +1158,18 @@ class BaseAgent(ABC):
         """发射事件"""
         if self.event_emitter:
             from ..event_manager import AgentEventData
-            
+
             # 准备 metadata
             metadata = kwargs.get("metadata", {}) or {}
             if "agent_name" not in metadata:
                 metadata["agent_name"] = self.name
-            
+
             # 分离已知字段和未知字段
             known_fields = {
-                "phase", "tool_name", "tool_input", "tool_output", 
+                "phase", "tool_name", "tool_input", "tool_output",
                 "tool_duration_ms", "finding_id", "tokens_used"
             }
-            
+
             event_kwargs = {}
             for k, v in kwargs.items():
                 if k in known_fields:
@@ -1171,20 +1177,20 @@ class BaseAgent(ABC):
                 elif k != "metadata":
                     # 将未知字段放入 metadata
                     metadata[k] = v
-            
+
             await self.event_emitter.emit(AgentEventData(
                 event_type=event_type,
                 message=message,
                 metadata=metadata,
                 **event_kwargs
             ))
-    
+
     # ============ LLM 思考相关事件 ============
-    
+
     async def emit_thinking(self, message: str):
         """发射 LLM 思考事件"""
         await self.emit_event("thinking", message)
-    
+
     async def emit_llm_start(self, iteration: int):
         """发射 LLM 开始思考事件"""
         self._trace("llm_start", iteration=iteration)
@@ -1193,7 +1199,7 @@ class BaseAgent(ABC):
             f"[{self.name}] 第 {iteration} 轮迭代开始",
             metadata={"iteration": iteration}
         )
-    
+
     async def emit_llm_thought(self, thought: str, iteration: int):
         """发射 LLM 思考内容事件 - 这是核心！展示 LLM 在想什么"""
         self._trace("llm_thought", iteration=iteration, thought_preview=(str(thought or "")[:300]))
@@ -1240,11 +1246,11 @@ class BaseAgent(ABC):
                 "suppressed_repeat_count": self._llm_thought_suppressed_count,
             }
         )
-    
+
     async def emit_thinking_start(self):
         """发射开始思考事件（流式输出用）"""
         await self.emit_event("thinking_start", "开始思考...")
-    
+
     async def emit_thinking_token(self, token: str, accumulated: str):
         """发射思考 token 事件（流式输出用）"""
         await self.emit_event(
@@ -1255,7 +1261,7 @@ class BaseAgent(ABC):
                 "accumulated": accumulated,
             }
         )
-    
+
     async def emit_thinking_end(self, full_response: str):
         """发射思考结束事件（流式输出用）"""
         await self.emit_event(
@@ -1263,7 +1269,7 @@ class BaseAgent(ABC):
             "思考完成",
             metadata={"accumulated": full_response}
         )
-    
+
     async def emit_llm_decision(self, decision: str, reason: str = ""):
         """发射 LLM 决策事件 - 展示 LLM 做了什么决定"""
         self._trace("llm_decision", decision=decision, reason=(reason or "")[:300])
@@ -1275,7 +1281,7 @@ class BaseAgent(ABC):
                 "reason": reason,
             }
         )
-    
+
     async def emit_llm_complete(self, result_summary: str, tokens_used: int):
         """发射 LLM 完成事件"""
         self._trace("llm_complete", result_summary=(result_summary or "")[:300], tokens_used=tokens_used)
@@ -1286,8 +1292,8 @@ class BaseAgent(ABC):
                 "tokens_used": tokens_used,
             }
         )
-    
-    async def emit_llm_action(self, action: str, action_input: Dict):
+
+    async def emit_llm_action(self, action: str, action_input: dict):
         """发射 LLM 动作决策事件"""
         safe_action_input = normalize_json_safe(action_input or {})
         self._trace(
@@ -1303,7 +1309,7 @@ class BaseAgent(ABC):
                 "action_input": safe_action_input,
             }
         )
-    
+
     async def emit_llm_observation(self, observation: str):
         """发射 LLM 观察事件"""
         self._trace("llm_observation", observation_preview=(str(observation or "")[:500]))
@@ -1312,7 +1318,7 @@ class BaseAgent(ABC):
         # If the observation mostly repeats the latest tool_result output, avoid logging it twice.
         snapshot = self._last_tool_result_snapshot if isinstance(self._last_tool_result_snapshot, dict) else None
         deduped = False
-        observation_ref: Optional[Dict[str, Any]] = None
+        observation_ref: dict[str, Any] | None = None
         if snapshot and isinstance(obs_text, str) and obs_text.strip():
             snap_prefix = str(snapshot.get("prefix") or "")
             # Heuristic: if the tool output prefix shows up inside observation, treat as duplicate.
@@ -1338,18 +1344,18 @@ class BaseAgent(ABC):
                 "observation_ref": observation_ref,
             }
         )
-    
+
     # ============ 工具调用相关事件 ============
-    
+
     async def emit_tool_call(
         self,
         tool_name: str,
-        tool_input: Dict,
-        tool_call_id: Optional[str] = None,
-        alias_used: Optional[str] = None,
-        input_repaired: Optional[Dict[str, str]] = None,
-        validation_error: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        tool_input: dict,
+        tool_call_id: str | None = None,
+        alias_used: str | None = None,
+        input_repaired: dict[str, str] | None = None,
+        validation_error: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ):
         """发射工具调用事件"""
         safe_tool_input = normalize_json_safe(tool_input or {})
@@ -1360,7 +1366,7 @@ class BaseAgent(ABC):
             tool_call_id=tool_call_id,
             alias_used=alias_used,
         )
-        metadata: Dict[str, Any] = {}
+        metadata: dict[str, Any] = {}
         if tool_call_id:
             metadata["tool_call_id"] = tool_call_id
         if alias_used:
@@ -1378,24 +1384,24 @@ class BaseAgent(ABC):
             tool_input=safe_tool_input,
             metadata=metadata,
         )
-    
+
     async def emit_tool_result(
         self,
         tool_name: str,
         result: str,
         duration_ms: int,
-        tool_call_id: Optional[str] = None,
+        tool_call_id: str | None = None,
         tool_status: str = "completed",
-        alias_used: Optional[str] = None,
-        input_repaired: Optional[Dict[str, str]] = None,
-        validation_error: Optional[str] = None,
-        cache_hit: Optional[bool] = None,
-        cache_key: Optional[str] = None,
-        cache_policy: Optional[str] = None,
-        evidence_metadata: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
-        error_code: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        alias_used: str | None = None,
+        input_repaired: dict[str, str] | None = None,
+        validation_error: str | None = None,
+        cache_hit: bool | None = None,
+        cache_key: str | None = None,
+        cache_policy: str | None = None,
+        evidence_metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+        error_code: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ):
         """发射工具结果事件"""
         self._trace(
@@ -1433,7 +1439,7 @@ class BaseAgent(ABC):
             "tool_output": dict(tool_output_dict),
         }
 
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "tool_status": tool_status,
             "runtime_used": False,
         }
@@ -1461,7 +1467,7 @@ class BaseAgent(ABC):
             tool_duration_ms=duration_ms,
             metadata=metadata,
         )
-    
+
     # ============ 发现相关事件 ============
 
     async def emit_finding(
@@ -1470,63 +1476,63 @@ class BaseAgent(ABC):
         severity: str,
         vuln_type: str,
         file_path: str = "",
-        line_start: Optional[int] = None,
-        line_end: Optional[int] = None,
+        line_start: int | None = None,
+        line_end: int | None = None,
         is_verified: bool = False,
-        display_title: Optional[str] = None,
-        cwe_id: Optional[str] = None,
-        description: Optional[str] = None,
-        description_markdown: Optional[str] = None,
-        verification_evidence: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        code_context: Optional[str] = None,
-        function_trigger_flow: Optional[List[str]] = None,
-        reachability_file: Optional[str] = None,
-        reachability_function: Optional[str] = None,
-        reachability_function_start_line: Optional[int] = None,
-        reachability_function_end_line: Optional[int] = None,
-        context_start_line: Optional[int] = None,
-        context_end_line: Optional[int] = None,
-        finding_scope: Optional[str] = None,
-        verification_todo_id: Optional[str] = None,
-        verification_fingerprint: Optional[str] = None,
-        verification_status: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        display_title: str | None = None,
+        cwe_id: str | None = None,
+        description: str | None = None,
+        description_markdown: str | None = None,
+        verification_evidence: str | None = None,
+        code_snippet: str | None = None,
+        code_context: str | None = None,
+        function_trigger_flow: list[str] | None = None,
+        reachability_file: str | None = None,
+        reachability_function: str | None = None,
+        reachability_function_start_line: int | None = None,
+        reachability_function_end_line: int | None = None,
+        context_start_line: int | None = None,
+        context_end_line: int | None = None,
+        finding_scope: str | None = None,
+        verification_todo_id: str | None = None,
+        verification_fingerprint: str | None = None,
+        verification_status: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ):
         """发射漏洞发现事件"""
         finding_id = str(uuid.uuid4())
 
-        normalized_line_start: Optional[int] = None
+        normalized_line_start: int | None = None
         if line_start is not None:
             try:
                 normalized_line_start = int(line_start)
             except Exception:
                 normalized_line_start = None
-        normalized_line_end: Optional[int] = None
+        normalized_line_end: int | None = None
         if line_end is not None:
             try:
                 normalized_line_end = int(line_end)
             except Exception:
                 normalized_line_end = None
-        normalized_reachability_start: Optional[int] = None
+        normalized_reachability_start: int | None = None
         if reachability_function_start_line is not None:
             try:
                 normalized_reachability_start = int(reachability_function_start_line)
             except Exception:
                 normalized_reachability_start = None
-        normalized_reachability_end: Optional[int] = None
+        normalized_reachability_end: int | None = None
         if reachability_function_end_line is not None:
             try:
                 normalized_reachability_end = int(reachability_function_end_line)
             except Exception:
                 normalized_reachability_end = None
-        normalized_context_start: Optional[int] = None
+        normalized_context_start: int | None = None
         if context_start_line is not None:
             try:
                 normalized_context_start = int(context_start_line)
             except Exception:
                 normalized_context_start = None
-        normalized_context_end: Optional[int] = None
+        normalized_context_end: int | None = None
         if context_end_line is not None:
             try:
                 normalized_context_end = int(context_end_line)
@@ -1534,7 +1540,7 @@ class BaseAgent(ABC):
                 normalized_context_end = None
 
         normalized_cwe_id = normalize_cwe_id(cwe_id)
-        generated_description_markdown: Optional[str] = (
+        generated_description_markdown: str | None = (
             str(description_markdown).strip()
             if description_markdown is not None and str(description_markdown).strip()
             else None
@@ -1631,17 +1637,17 @@ class BaseAgent(ABC):
                     **(extra_metadata if isinstance(extra_metadata, dict) else {}),
                 }
             )
-    
+
     # ============ 通用工具方法 ============
-    
+
     async def call_tool(self, tool_name: str, **kwargs) -> Any:
         """
         调用工具
-        
+
         Args:
             tool_name: 工具名称
             **kwargs: 工具参数
-            
+
         Returns:
             工具执行结果
         """
@@ -1649,16 +1655,16 @@ class BaseAgent(ABC):
         if not tool:
             logger.warning(f"Tool not found: {tool_name}")
             return None
-        
+
         self._tool_calls += 1
         tool_call_id = str(uuid.uuid4())
         await self.emit_tool_call(tool_name, kwargs, tool_call_id=tool_call_id)
-        
+
         import time
         start = time.time()
-        
+
         result = await tool.execute(**kwargs)
-        
+
         duration_ms = int((time.time() - start) * 1000)
         await self.emit_tool_result(
             tool_name,
@@ -1667,17 +1673,17 @@ class BaseAgent(ABC):
             tool_call_id=tool_call_id,
             tool_status="completed" if result.success else "failed",
         )
-        
+
         return result
-    
+
     async def call_llm(
         self,
-        messages: List[Dict[str, str]],
-        tools: Optional[List[Dict]] = None,
-    ) -> Dict[str, Any]:
+        messages: list[dict[str, str]],
+        tools: list[dict] | None = None,
+    ) -> dict[str, Any]:
         """
         调用 LLM
-        
+
         Args:
             messages: 消息列表
             tools: 可用工具描述
@@ -1702,15 +1708,15 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             raise
-    
-    def get_tool_descriptions(self) -> List[Dict[str, Any]]:
+
+    def get_tool_descriptions(self) -> list[dict[str, Any]]:
         """获取工具描述（用于 LLM）"""
         descriptions = []
-        
+
         for name, tool in self.tools.items():
             if name.startswith("_"):
                 continue
-            
+
             desc = {
                 "type": "function",
                 "function": {
@@ -1718,16 +1724,16 @@ class BaseAgent(ABC):
                     "description": tool.description,
                 }
             }
-            
+
             # 添加参数 schema
             if hasattr(tool, 'args_schema') and tool.args_schema:
                 desc["function"]["parameters"] = tool.args_schema.schema()
-            
+
             descriptions.append(desc)
-        
+
         return descriptions
-    
-    def get_stats(self) -> Dict[str, Any]:
+
+    def get_stats(self) -> dict[str, Any]:
         """获取执行统计"""
         return {
             "agent": self.name,
@@ -1740,7 +1746,7 @@ class BaseAgent(ABC):
     def _prepare_observation_for_history(
         self,
         observation: str,
-        max_chars: Optional[int] = None,
+        max_chars: int | None = None,
     ) -> str:
         """
         Prepare observation text for conversation history.
@@ -1762,28 +1768,28 @@ class BaseAgent(ABC):
         return f"{text[:head_keep]}{marker}{text[-tail_keep:]}"
 
     @staticmethod
-    def _estimate_conversation_tokens(messages: List[Dict[str, Any]]) -> int:
+    def _estimate_conversation_tokens(messages: list[dict[str, Any]]) -> int:
         """A lightweight token estimate for diagnostics."""
         total_chars = 0
         for msg in messages or []:
             content = msg.get("content", "") if isinstance(msg, dict) else ""
             total_chars += len(str(content or ""))
         return max(0, total_chars // 4)
-    
+
     # ============ Memory Compression ============
-    
+
     def compress_messages_if_needed(
         self,
-        messages: List[Dict[str, str]],
-        max_tokens: Optional[int] = None,
-    ) -> List[Dict[str, str]]:
+        messages: list[dict[str, str]],
+        max_tokens: int | None = None,
+    ) -> list[dict[str, str]]:
         """
         如果消息历史过长，自动压缩
-        
+
         Args:
             messages: 消息列表
             max_tokens: 最大token数（None 时自动按模型窗口动态计算）
-            
+
         Returns:
             压缩后的消息列表
         """
@@ -1793,26 +1799,26 @@ class BaseAgent(ABC):
         if effective_max_tokens is None:
             model_budget = int((self.config.max_tokens or 4096) * 4)
             effective_max_tokens = max(6000, min(24000, model_budget))
-        
+
         compressor = MemoryCompressor(max_total_tokens=effective_max_tokens)
-        
+
         if compressor.should_compress(messages):
             logger.info(f"[{self.name}] Compressing conversation history...")
             compressed = compressor.compress_history(messages)
             logger.info(f"[{self.name}] Compressed {len(messages)} -> {len(compressed)} messages")
             return compressed
-        
+
         return messages
-    
+
     # ============ 统一的流式 LLM 调用 ============
 
     async def stream_llm_call(
         self,
-        messages: List[Dict[str, str]],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        messages: list[dict[str, str]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         auto_compress: bool = True,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """
         统一的流式 LLM 调用方法
 
@@ -1880,9 +1886,9 @@ class BaseAgent(ABC):
             first_token_received = False
             request_started_perf = time.perf_counter()
             last_chunk_at = request_started_perf
-            self._last_llm_stream_meta["llm_request_start_ts"] = datetime.now(timezone.utc).isoformat()
+            self._last_llm_stream_meta["llm_request_start_ts"] = datetime.now(UTC).isoformat()
 
-            def _merge_stream_diagnostics(chunk: Dict[str, Any]) -> None:
+            def _merge_stream_diagnostics(chunk: dict[str, Any]) -> None:
                 diagnostics = chunk.get("diagnostics") if isinstance(chunk, dict) else None
                 if not isinstance(diagnostics, dict):
                     return
@@ -1896,7 +1902,7 @@ class BaseAgent(ABC):
                 if self.is_cancelled:
                     logger.info(f"[{self.name}] Cancelled during LLM streaming loop")
                     break
-                
+
                 try:
                     #  使用用户配置的超时时间
                     # 第一个 token 使用首Token超时，后续 token 使用流式超时
@@ -1916,7 +1922,7 @@ class BaseAgent(ABC):
                     chunk_count += 1
                     self._last_llm_stream_meta["chunk_count"] = chunk_count
                     _merge_stream_diagnostics(chunk)
-                    
+
                     if chunk["type"] == "token":
                         if not first_token_received:
                             self._last_llm_stream_meta["first_token_latency_ms"] = round(
@@ -1991,7 +1997,7 @@ class BaseAgent(ABC):
 
                 except StopAsyncIteration:
                     break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     timeout_type = "First Token" if not first_token_received else "Stream"
                     timeout_stage = "preflight_timeout" if not first_token_received else "stream_idle_timeout"
                     logger.error(f"[{self.name}] LLM {timeout_type} Timeout ({timeout}s)")
@@ -2021,7 +2027,7 @@ class BaseAgent(ABC):
                     if not accumulated:
                          accumulated = f"[超时错误: {timeout}s 无响应] 请尝试简化请求或重试。"
                     break
-                    
+
         except asyncio.CancelledError:
             logger.info(f"[{self.name}] LLM call cancelled")
             raise
@@ -2060,7 +2066,7 @@ class BaseAgent(ABC):
                 finish_reason=self._last_llm_stream_meta.get("finish_reason"),
                 empty_reason=self._last_llm_stream_meta.get("empty_reason"),
             )
-        
+
         #  记录空响应警告，帮助调试
         if not accumulated or not accumulated.strip():
             finish_reason = self._last_llm_stream_meta.get("finish_reason")
@@ -2081,10 +2087,10 @@ class BaseAgent(ABC):
             elif self._last_llm_stream_meta.get("error_type"):
                 err = self._last_llm_stream_meta.get("error_type")
                 accumulated = f"[API_ERROR:{err}] 模型返回空响应"
-        
+
         return accumulated, total_tokens
 
-    def _resolve_tool_name(self, requested_tool_name: str) -> Tuple[str, Optional[str]]:
+    def _resolve_tool_name(self, requested_tool_name: str) -> tuple[str, str | None]:
         """Resolve unknown tool names using conservative alias candidates."""
         if requested_tool_name in self.tools:
             return requested_tool_name, None
@@ -2105,7 +2111,7 @@ class BaseAgent(ABC):
         if not text:
             return True
         lowered = text.lower()
-        if lowered.startswith(("", "", "错误:", "error:", "failed:", "失败")):
+        if lowered.startswith(("错误:", "error:", "failed:", "失败")):
             return True
         failure_hints = (
             "工具执行失败",
@@ -2119,7 +2125,7 @@ class BaseAgent(ABC):
         return any(hint in text for hint in failure_hints)
 
     @staticmethod
-    def _infer_search_keyword_from_input(tool_input: Dict[str, Any]) -> str:
+    def _infer_search_keyword_from_input(tool_input: dict[str, Any]) -> str:
         direct = str(tool_input.get("keyword") or "").strip()
         if direct:
             return direct
@@ -2147,10 +2153,10 @@ class BaseAgent(ABC):
     def _build_proxy_fallback_requests(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any],
-        tool_obj: Optional[Any] = None,
-    ) -> List[Tuple[str, Dict[str, Any]]]:
-        fallback_names: List[str] = []
+        tool_input: dict[str, Any],
+        tool_obj: Any | None = None,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        fallback_names: list[str] = []
         configured_fallbacks = getattr(tool_obj, "runtime_fallback_tools", None) if tool_obj is not None else None
         if isinstance(configured_fallbacks, list):
             fallback_names.extend(
@@ -2163,13 +2169,13 @@ class BaseAgent(ABC):
 
         normalized_tool = str(tool_name or "").strip().lower()
         if not fallback_names:
-            fallback_map: Dict[str, List[str]] = {
+            fallback_map: dict[str, list[str]] = {
                 "query_security_knowledge": ["search_code"],
                 "get_vulnerability_knowledge": ["search_code", "get_code_window"],
             }
             fallback_names.extend(fallback_map.get(normalized_tool, []))
 
-        fallback_requests: List[Tuple[str, Dict[str, Any]]] = []
+        fallback_requests: list[tuple[str, dict[str, Any]]] = []
         source_input = dict(tool_input or {})
         for candidate in fallback_names:
             if candidate == normalized_tool:
@@ -2240,10 +2246,10 @@ class BaseAgent(ABC):
         self,
         *,
         tool_name: str,
-        tool_input: Dict[str, Any],
-        tool_obj: Optional[Any],
+        tool_input: dict[str, Any],
+        tool_obj: Any | None,
         fallback_depth: int,
-    ) -> Optional[Tuple[str, str, Optional[Dict[str, Any]]]]:
+    ) -> tuple[str, str, dict[str, Any] | None] | None:
         if fallback_depth >= 2:
             return None
 
@@ -2267,7 +2273,7 @@ class BaseAgent(ABC):
             except Exception:
                 continue
             if not self._looks_like_tool_failure_output(fallback_output):
-                fallback_evidence_metadata: Optional[Dict[str, Any]] = None
+                fallback_evidence_metadata: dict[str, Any] | None = None
                 payload = self._last_tool_result_payload if isinstance(self._last_tool_result_payload, dict) else None
                 if payload and payload.get("tool_name") == fallback_tool_name:
                     tool_output_payload = payload.get("tool_output")
@@ -2277,7 +2283,7 @@ class BaseAgent(ABC):
         return None
 
     @staticmethod
-    def _split_multi_patterns(raw_value: Any) -> List[str]:
+    def _split_multi_patterns(raw_value: Any) -> list[str]:
         if raw_value is None:
             return []
         if isinstance(raw_value, list):
@@ -2289,7 +2295,7 @@ class BaseAgent(ABC):
         return parts or [text]
 
     @staticmethod
-    def _normalize_pattern_types(raw_value: Any) -> List[str]:
+    def _normalize_pattern_types(raw_value: Any) -> list[str]:
         if raw_value is None:
             return []
         if isinstance(raw_value, list):
@@ -2386,8 +2392,8 @@ class BaseAgent(ABC):
         self._append_recent_unique(self._recent_search_directories, value)
         self._append_recent_unique(self._recent_reason_dirs, value)
 
-    def _collect_reason_paths_for_read(self, file_hint: Dict[str, Any]) -> List[str]:
-        candidates: List[str] = []
+    def _collect_reason_paths_for_read(self, file_hint: dict[str, Any]) -> list[str]:
+        candidates: list[str] = []
         hinted_path = str(file_hint.get("file_path") or "").strip()
         if hinted_path:
             self._remember_reason_path(hinted_path)
@@ -2396,8 +2402,8 @@ class BaseAgent(ABC):
         candidates.extend(list(self._recent_reason_dirs))
         candidates.extend(list(self._recent_search_directories))
 
-        deduped: List[str] = []
-        seen: Set[str] = set()
+        deduped: list[str] = []
+        seen: set[str] = set()
         for item in candidates:
             normalized = self._normalize_path_key(item).strip("/")
             if not normalized or normalized in seen:
@@ -2411,8 +2417,8 @@ class BaseAgent(ABC):
     def _record_tool_context(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any],
-        tool_metadata: Dict[str, Any],
+        tool_input: dict[str, Any],
+        tool_metadata: dict[str, Any],
     ) -> None:
         self._record_evidence_paths_from_tool_context(tool_name, tool_input, tool_metadata)
         if tool_name in {"get_code_window", "get_file_outline", "get_function_summary", "get_symbol_body"}:
@@ -2438,11 +2444,11 @@ class BaseAgent(ABC):
     def _record_evidence_paths_from_tool_context(
         self,
         tool_name: str,
-        tool_input: Dict[str, Any],
-        tool_metadata: Dict[str, Any],
+        tool_input: dict[str, Any],
+        tool_metadata: dict[str, Any],
     ) -> None:
         normalized_tool = str(tool_name or "").strip().lower()
-        candidates: List[Any] = []
+        candidates: list[Any] = []
 
         if normalized_tool in {
             "get_code_window",
@@ -2502,7 +2508,7 @@ class BaseAgent(ABC):
         for value in candidates:
             self._register_evidence_path(value)
 
-    def _extract_file_hint_from_context(self, texts: List[str]) -> Dict[str, Any]:
+    def _extract_file_hint_from_context(self, texts: list[str]) -> dict[str, Any]:
         if not texts:
             return {}
 
@@ -2515,7 +2521,7 @@ class BaseAgent(ABC):
             r"))"
             r"(?::(?P<start>\d+)(?:-(?P<end>\d+))?)?"
         )
-        fallback: Dict[str, Any] = {}
+        fallback: dict[str, Any] = {}
         for text in reversed(texts):
             for match in pattern.finditer(str(text or "")):
                 raw_path = str(match.group("path") or "").strip()
@@ -2540,7 +2546,7 @@ class BaseAgent(ABC):
         return fallback
 
     @staticmethod
-    def _normalize_keyword_candidate(candidate: Any) -> Optional[str]:
+    def _normalize_keyword_candidate(candidate: Any) -> str | None:
         text = str(candidate or "").strip().strip("`'\"")
         text = text.strip("，,。！？；;")
         if not text:
@@ -2555,7 +2561,7 @@ class BaseAgent(ABC):
             return None
         return text
 
-    def _build_keyword_from_file_hint(self, file_path: Any) -> Optional[str]:
+    def _build_keyword_from_file_hint(self, file_path: Any) -> str | None:
         path_text = str(file_path or "").strip().strip("`'\"")
         if not path_text:
             return None
@@ -2576,8 +2582,8 @@ class BaseAgent(ABC):
             if normalized:
                 return normalized
         return None
-    
-    def _extract_keyword_hint_from_context(self, texts: List[str]) -> Optional[str]:
+
+    def _extract_keyword_hint_from_context(self, texts: list[str]) -> str | None:
         if not texts:
             return None
 
@@ -2636,7 +2642,7 @@ class BaseAgent(ABC):
             return True
         return bool(re.search(r"\{\d+(?:,\d*)?\}", text))
 
-    def _resolve_tool_timeout(self, resolved_tool_name: str) -> Optional[int]:
+    def _resolve_tool_timeout(self, resolved_tool_name: str) -> int | None:
         default_tool_timeout = int(self._timeout_config.get('tool_timeout', 60) or 60)
         normalized_tool_name = str(resolved_tool_name or "").strip().lower()
         # Recon Host fan-out tools manage their own worker lifecycle; do not kill them
@@ -2663,7 +2669,7 @@ class BaseAgent(ABC):
         return tool_timeouts.get(normalized_tool_name, default_tool_timeout)
 
     @staticmethod
-    def _coerce_positive_int(value: Any) -> Optional[int]:
+    def _coerce_positive_int(value: Any) -> int | None:
         try:
             parsed = int(value)
         except Exception:
@@ -2673,7 +2679,7 @@ class BaseAgent(ABC):
         return parsed
 
     @staticmethod
-    def _normalize_hint_list(raw_value: Any) -> List[str]:
+    def _normalize_hint_list(raw_value: Any) -> list[str]:
         if raw_value is None:
             return []
         if isinstance(raw_value, list):
@@ -2689,8 +2695,8 @@ class BaseAgent(ABC):
 
     def _normalize_verify_reachability_input(
         self,
-        tool_input: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        tool_input: dict[str, Any],
+    ) -> dict[str, Any]:
         payload = dict(tool_input or {})
         file_path = str(payload.get("file_path") or payload.get("path") or "").strip()
         line_start = self._coerce_positive_int(payload.get("line_start") or payload.get("line"))
@@ -2719,7 +2725,7 @@ class BaseAgent(ABC):
             "control_conditions_hint": control_conditions_hint,
         }
 
-    def _build_verify_reachability_keyword(self, payload: Dict[str, Any]) -> Optional[str]:
+    def _build_verify_reachability_keyword(self, payload: dict[str, Any]) -> str | None:
         for candidate in (
             payload.get("function_name"),
             payload.get("vulnerability_type"),
@@ -2732,7 +2738,7 @@ class BaseAgent(ABC):
         return None
 
     @staticmethod
-    def _extract_jsonish_dict(text: str) -> Optional[Dict[str, Any]]:
+    def _extract_jsonish_dict(text: str) -> dict[str, Any] | None:
         raw_text = str(text or "").strip()
         if not raw_text:
             return None
@@ -2754,14 +2760,14 @@ class BaseAgent(ABC):
     def _extract_location_from_search_output(
         self,
         output: str,
-    ) -> Tuple[Optional[str], Optional[int]]:
+    ) -> tuple[str | None, int | None]:
         text = str(output or "")
         path_line_patterns = (
             re.compile(
-                r"(?P<path>[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]+):(?P<line>\d+)(?::\d+)?"
+                r"(?P<path>[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_+-]+):(?P<line>\d+)(?::\d+)?"
             ),
             re.compile(
-                r"(?P<path>[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_]+)\s*\(\s*line\s*(?P<line>\d+)\s*\)",
+                r"(?P<path>[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_+-]+)\s*\(\s*line\s*(?P<line>\d+)\s*\)",
                 re.IGNORECASE,
             ),
         )
@@ -2774,7 +2780,7 @@ class BaseAgent(ABC):
 
         payload = self._extract_jsonish_dict(text)
         if isinstance(payload, dict):
-            search_lists: List[Any] = []
+            search_lists: list[Any] = []
             for key in ("results", "matches", "items"):
                 if isinstance(payload.get(key), list):
                     search_lists.append(payload.get(key))
@@ -2793,7 +2799,7 @@ class BaseAgent(ABC):
     def _extract_search_location_from_item(
         self,
         item: Any,
-    ) -> Optional[Tuple[str, int]]:
+    ) -> tuple[str, int] | None:
         if isinstance(item, str):
             return self._extract_location_from_search_output(item)
         if not isinstance(item, dict):
@@ -2868,8 +2874,8 @@ class BaseAgent(ABC):
         self,
         output: str,
         *,
-        target_line: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        target_line: int | None = None,
+    ) -> dict[str, Any]:
         payload = parse_locator_payload(output)
         selected = (
             select_locator_function(payload, line_start=target_line)
@@ -2877,9 +2883,9 @@ class BaseAgent(ABC):
             else None
         )
 
-        best_name: Optional[str] = None
-        best_start: Optional[int] = None
-        best_end: Optional[int] = None
+        best_name: str | None = None
+        best_start: int | None = None
+        best_end: int | None = None
         if isinstance(selected, dict):
             best_name = str(selected.get("function") or "").strip() or None
             best_start = self._coerce_positive_int(selected.get("start_line"))
@@ -2939,7 +2945,7 @@ class BaseAgent(ABC):
         return "unknown"
 
     @staticmethod
-    def _classify_verify_blocked_reason(output: str) -> Optional[str]:
+    def _classify_verify_blocked_reason(output: str) -> str | None:
         text = str(output or "")
         lowered = text.lower()
         if not text.strip():
@@ -2988,7 +2994,7 @@ class BaseAgent(ABC):
     async def _execute_verify_reachability_pipeline(
         self,
         *,
-        raw_tool_input: Dict[str, Any],
+        raw_tool_input: dict[str, Any],
         fallback_depth: int = 0,
     ) -> str:
         normalized_input = self._normalize_verify_reachability_input(raw_tool_input)
@@ -3007,12 +3013,12 @@ class BaseAgent(ABC):
         max_lines_per_read = 160
         max_total_read_lines = 600
         rounds_executed = 0
-        pipeline_steps: List[str] = []
-        flow_tools_used: List[str] = []
+        pipeline_steps: list[str] = []
+        flow_tools_used: list[str] = []
         read_scope_lines_total = 0
-        read_scope_ranges: List[Dict[str, int]] = []
-        blocked_reason: Optional[str] = None
-        blocked_stage: Optional[str] = None
+        read_scope_ranges: list[dict[str, int]] = []
+        blocked_reason: str | None = None
+        blocked_stage: str | None = None
         reachability = "likely_reachable"
         authenticity_hint = "likely"
         location_source = "input"
@@ -3020,11 +3026,11 @@ class BaseAgent(ABC):
         line_start = self._coerce_positive_int(normalized_input.get("line_start"))
         line_end = self._coerce_positive_int(normalized_input.get("line_end")) or line_start
         function_name = str(normalized_input.get("function_name") or "").strip() or None
-        function_start_line: Optional[int] = None
-        function_end_line: Optional[int] = None
+        function_start_line: int | None = None
+        function_end_line: int | None = None
         flow_observation_text = ""
         round_success = False
-        runtime_failures: List[Dict[str, Any]] = []
+        runtime_failures: list[dict[str, Any]] = []
 
         def _record_runtime_failure(stage: str, observation: str) -> None:
             if len(runtime_failures) >= 12:
@@ -3049,7 +3055,7 @@ class BaseAgent(ABC):
                     blocked_reason = "missing_location"
                     break
                 location_source = "search_code"
-                search_input: Dict[str, Any] = {"keyword": keyword, "max_results": 10}
+                search_input: dict[str, Any] = {"keyword": keyword, "max_results": 10}
                 directory_hint = str(file_path or "").strip()
                 if directory_hint and "/" in directory_hint:
                     search_input["directory"] = os.path.dirname(directory_hint) or "."
@@ -3280,14 +3286,14 @@ class BaseAgent(ABC):
             blocked_reason = "insufficient_flow_evidence"
             blocked_stage = "flow_conclusion"
 
-        unique_flow_tools: List[str] = []
+        unique_flow_tools: list[str] = []
         for item in flow_tools_used:
             normalized = str(item or "").strip()
             if normalized and normalized not in unique_flow_tools:
                 unique_flow_tools.append(normalized)
         flow_tools_used = unique_flow_tools
 
-        pipeline_metadata: Dict[str, Any] = {
+        pipeline_metadata: dict[str, Any] = {
             "verify_pipeline_steps": list(pipeline_steps),
             "verify_pipeline_rounds": int(rounds_executed),
             "read_scope_lines_total": int(read_scope_lines_total),
@@ -3380,8 +3386,8 @@ class BaseAgent(ABC):
     def _resolve_virtual_tool_name(
         self,
         requested_tool_name: str,
-        tool_input: Dict[str, Any],
-    ) -> Tuple[str, Optional[str]]:
+        tool_input: dict[str, Any],
+    ) -> tuple[str, str | None]:
         normalized = str(requested_tool_name or "").strip().lower()
         input_dict = tool_input if isinstance(tool_input, dict) else {}
 
@@ -3408,14 +3414,14 @@ class BaseAgent(ABC):
         self,
         *,
         tool_name: str,
-        tool_input: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        tool_input: dict[str, Any],
+    ) -> dict[str, Any]:
         """已废弃：不再使用路由元数据。"""
         return {}
 
     @staticmethod
-    def _compact_retry_input(raw_input: Dict[str, Any]) -> Dict[str, Any]:
-        normalized: Dict[str, Any] = {}
+    def _compact_retry_input(raw_input: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
         for key, value in dict(raw_input or {}).items():
             if value is None:
                 continue
@@ -3430,7 +3436,7 @@ class BaseAgent(ABC):
             normalized[str(key)] = value
         return normalized
 
-    def _build_retry_guard_key(self, tool_name: str, tool_input: Dict[str, Any]) -> Optional[str]:
+    def _build_retry_guard_key(self, tool_name: str, tool_input: dict[str, Any]) -> str | None:
         if tool_name not in RETRY_GUARD_TOOLS:
             return None
 
@@ -3457,6 +3463,28 @@ class BaseAgent(ABC):
                 ).encode("utf-8", errors="ignore")
             ).hexdigest()[:12]
             return f"{tool_name}|{file_path}|{anchor_line}|{before_lines}|{after_lines}|{fingerprint}"
+
+        if tool_name == "read_file":
+            file_path = self._normalize_path_key(tool_input.get("file_path"))
+            if not file_path:
+                return None
+            start_line = self._coerce_positive_int(tool_input.get("start_line")) or 0
+            end_line = self._coerce_positive_int(tool_input.get("end_line")) or 0
+            max_lines = self._coerce_positive_int(tool_input.get("max_lines")) or 0
+            fingerprint_payload = {
+                "file": file_path,
+                "start_line": int(start_line),
+                "end_line": int(end_line),
+                "max_lines": int(max_lines),
+            }
+            fingerprint = hashlib.sha1(
+                json.dumps(
+                    fingerprint_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8", errors="ignore")
+            ).hexdigest()[:12]
+            return f"{tool_name}|{file_path}|{start_line}|{end_line}|{max_lines}|{fingerprint}"
 
         if tool_name == "search_code":
             keyword = str(tool_input.get("keyword") or "").strip()
@@ -3524,7 +3552,7 @@ class BaseAgent(ABC):
         return any(hint in lowered for hint in path_not_found_hints)
 
     @staticmethod
-    def _extract_path_from_error_text(error_text: str) -> Optional[str]:
+    def _extract_path_from_error_text(error_text: str) -> str | None:
         text = str(error_text or "").strip()
         if not text:
             return None
@@ -3541,9 +3569,9 @@ class BaseAgent(ABC):
         return None
 
     @staticmethod
-    def _get_schema_fields(args_schema: Any) -> Tuple[Set[str], Set[str]]:
-        fields: Set[str] = set()
-        required_fields: Set[str] = set()
+    def _get_schema_fields(args_schema: Any) -> tuple[set[str], set[str]]:
+        fields: set[str] = set()
+        required_fields: set[str] = set()
         if not args_schema:
             return fields, required_fields
 
@@ -3574,8 +3602,8 @@ class BaseAgent(ABC):
 
     @staticmethod
     def _extract_raw_input_text(
-        tool_input: Dict[str, Any],
-        repaired_input: Dict[str, Any],
+        tool_input: dict[str, Any],
+        repaired_input: dict[str, Any],
     ) -> str:
         for source in (repaired_input, tool_input):
             if not isinstance(source, dict):
@@ -3626,7 +3654,7 @@ class BaseAgent(ABC):
         )
 
     @staticmethod
-    def _parse_raw_input_payload(raw_input_text: str) -> Dict[str, Any]:
+    def _parse_raw_input_payload(raw_input_text: str) -> dict[str, Any]:
         text = str(raw_input_text or "").strip()
         if not text:
             return {}
@@ -3651,7 +3679,7 @@ class BaseAgent(ABC):
                     return dict(parsed)
         return {}
 
-    def _extract_keyword_from_raw_input(self, raw_input_text: str) -> Optional[str]:
+    def _extract_keyword_from_raw_input(self, raw_input_text: str) -> str | None:
         text = str(raw_input_text or "").strip()
         if not text:
             return None
@@ -3665,7 +3693,7 @@ class BaseAgent(ABC):
 
         return self._extract_keyword_hint_from_context([text])
 
-    def _extract_file_hint_from_raw_input(self, raw_input_text: str) -> Dict[str, Any]:
+    def _extract_file_hint_from_raw_input(self, raw_input_text: str) -> dict[str, Any]:
         text = str(raw_input_text or "").strip()
         if not text:
             return {}
@@ -3687,17 +3715,17 @@ class BaseAgent(ABC):
     def _repair_tool_input(
         self,
         tool: Any,
-        tool_input: Dict[str, Any],
-        resolved_tool_name: Optional[str] = None,
-    ) -> Tuple[Dict[str, Any], Dict[str, str], List[str], List[str]]:
+        tool_input: dict[str, Any],
+        resolved_tool_name: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, str], list[str], list[str]]:
         args_schema = getattr(tool, "args_schema", None)
         schema_fields, required_fields = self._get_schema_fields(args_schema)
         if not schema_fields:
             return dict(tool_input), {}, [], []
 
         repaired = dict(tool_input)
-        repaired_changes: Dict[str, str] = {}
-        envelope_sources: List[Tuple[str, Dict[str, Any]]] = []
+        repaired_changes: dict[str, str] = {}
+        envelope_sources: list[tuple[str, dict[str, Any]]] = []
         arguments_payload = tool_input.get("arguments")
         if isinstance(arguments_payload, dict):
             envelope_sources.append(("arguments", arguments_payload))
@@ -3742,7 +3770,7 @@ class BaseAgent(ABC):
             raw_input_payload = {}
             repaired_changes["__raw_input.placeholder"] = "ignored"
 
-        raw_input_sources: List[Tuple[str, Dict[str, Any]]] = []
+        raw_input_sources: list[tuple[str, dict[str, Any]]] = []
         if raw_input_payload:
             raw_input_sources.append(("raw_input", raw_input_payload))
             for nested_key in ("arguments", "finding", "risk_point"):
@@ -3787,7 +3815,7 @@ class BaseAgent(ABC):
                 repaired_changes["pattern_types"] = "pattern_types(normalized)"
 
         if tool_name == "get_symbol_body":
-            positional_items: List[Any] = []
+            positional_items: list[Any] = []
             if isinstance(items_payload, list):
                 if len(items_payload) == 1 and isinstance(items_payload[0], (list, tuple)):
                     positional_items = list(items_payload[0])
@@ -3829,14 +3857,14 @@ class BaseAgent(ABC):
                     repaired_changes["__context.directory"] = "directory"
 
         if tool_name in {"get_file_outline", "get_code_window"} and "file_path" in schema_fields:
-            def _safe_positive_int(value: Any) -> Optional[int]:
+            def _safe_positive_int(value: Any) -> int | None:
                 try:
                     parsed = int(value)
                 except Exception:
                     return None
                 return parsed if parsed > 0 else None
 
-            file_hint: Dict[str, Any] = {}
+            file_hint: dict[str, Any] = {}
             file_path = str(repaired.get("file_path") or repaired.get("path") or "").strip()
             if not file_path:
                 used_raw_input_hint = False
@@ -3883,16 +3911,16 @@ class BaseAgent(ABC):
 
                 if anchor_line is not None:
                     repaired["anchor_line"] = int(anchor_line)
-        
+
         if tool_name == "read_file" and "file_path" in schema_fields:
-            def _safe_positive_int(value: Any) -> Optional[int]:
+            def _safe_positive_int(value: Any) -> int | None:
                 try:
                     parsed = int(value)
                 except Exception:
                     return None
                 return parsed if parsed > 0 else None
 
-            file_hint: Dict[str, Any] = {}
+            file_hint: dict[str, Any] = {}
             file_path = str(repaired.get("file_path") or "").strip()
             if not file_path:
                 used_raw_input_hint = False
@@ -3923,8 +3951,9 @@ class BaseAgent(ABC):
                         "start_line": explicit_hint.get("start_line"),
                         "end_line": explicit_hint.get("end_line"),
                     }
-                    #  修复：不修改大模型输出的原始路径，只用于提取行号信息
-                    # 原来的逻辑：if sanitized_path != file_path: repaired["file_path"] = sanitized_path
+                    if sanitized_path != file_path:
+                        repaired["file_path"] = sanitized_path
+                        repaired_changes["__sanitize.file_path"] = "file_path"
                 else:
                     file_hint = {"file_path": file_path}
 
@@ -4055,7 +4084,7 @@ class BaseAgent(ABC):
                 if not normalized_file_path:
                     normalized_file_path = self._sanitize_file_path_text(file_path_candidate)
                 #  修复：不修改大模型输出的原始路径
-                # 原来的逻辑：if normalized_file_path and repaired.get("file_path") != normalized_file_path: 
+                # 原来的逻辑：if normalized_file_path and repaired.get("file_path") != normalized_file_path:
                 #           repaired["file_path"] = normalized_file_path
                 if "line_start" in schema_fields and repaired.get("line_start") in (None, "") and controlflow_hint.get("start_line") is not None:
                     repaired["line_start"] = int(controlflow_hint["start_line"])
@@ -4135,7 +4164,7 @@ class BaseAgent(ABC):
             repaired_changes.update(push_repair_map)
 
         if tool_name == "push_risk_point_to_queue":
-            def _safe_positive_int(value: Any) -> Optional[int]:
+            def _safe_positive_int(value: Any) -> int | None:
                 try:
                     parsed = int(value)
                 except Exception:
@@ -4143,7 +4172,7 @@ class BaseAgent(ABC):
                 return parsed if parsed > 0 else None
 
             file_path = str(repaired.get("file_path") or "").strip()
-            file_hint: Dict[str, Any] = {}
+            file_hint: dict[str, Any] = {}
             if not file_path:
                 file_hint = self._extract_file_hint_from_context(context_texts)
                 hinted_path = str(file_hint.get("file_path") or "").strip()
@@ -4195,7 +4224,7 @@ class BaseAgent(ABC):
             if "description" not in repaired_changes:
                 repaired_changes["__auto_fill.description"] = "description"
 
-        missing_required: List[str] = []
+        missing_required: list[str] = []
         for name in sorted(required_fields):
             value = repaired.get(name, None)
             if value is None or value == "" or value == []:
@@ -4204,7 +4233,7 @@ class BaseAgent(ABC):
         return repaired, repaired_changes, missing_required, sorted(schema_fields)
 
     @staticmethod
-    def _strict_read_window(line_number: int) -> Tuple[int, int, int]:
+    def _strict_read_window(line_number: int) -> tuple[int, int, int]:
         safe_line = max(1, int(line_number))
         start_line = max(1, safe_line - 60)
         end_line = max(safe_line, safe_line + 99)
@@ -4215,11 +4244,11 @@ class BaseAgent(ABC):
 
     def _extract_read_anchor_keyword(
         self,
-        repaired_input: Dict[str, Any],
+        repaired_input: dict[str, Any],
         raw_input_text: str,
-    ) -> Tuple[Optional[str], Optional[str]]:
-        for field in ("keyword", "pattern", "query"):
-            candidate = self._normalize_keyword_candidate(repaired_input.get(field))
+    ) -> tuple[str | None, str | None]:
+        for input_field in ("keyword", "pattern", "query"):
+            candidate = self._normalize_keyword_candidate(repaired_input.get(input_field))
             if candidate:
                 return candidate, "input"
 
@@ -4236,7 +4265,7 @@ class BaseAgent(ABC):
         return None, None
 
     @staticmethod
-    def _build_include_guard_hint(file_path: str) -> Optional[str]:
+    def _build_include_guard_hint(file_path: str) -> str | None:
         basename = os.path.basename(str(file_path or "").strip())
         stem = os.path.splitext(basename)[0]
         normalized = re.sub(r"[^A-Za-z0-9]+", "_", stem).strip("_")
@@ -4247,11 +4276,11 @@ class BaseAgent(ABC):
 
     def _build_read_anchor_candidates(
         self,
-        repaired_input: Dict[str, Any],
+        repaired_input: dict[str, Any],
         raw_input_text: str,
-    ) -> List[Tuple[str, str]]:
-        candidates: List[Tuple[str, str]] = []
-        seen: Set[str] = set()
+    ) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        seen: set[str] = set()
 
         def _append(raw_value: Any, source: str) -> None:
             normalized = self._normalize_keyword_candidate(raw_value)
@@ -4263,8 +4292,8 @@ class BaseAgent(ABC):
             seen.add(key)
             candidates.append((normalized, source))
 
-        for field in ("keyword", "pattern", "query"):
-            _append(repaired_input.get(field), "input")
+        for input_field in ("keyword", "pattern", "query"):
+            _append(repaired_input.get(input_field), "input")
 
         if raw_input_text:
             _append(self._extract_keyword_from_raw_input(raw_input_text), "raw_input")
@@ -4282,7 +4311,7 @@ class BaseAgent(ABC):
         return candidates
 
     @staticmethod
-    def _coerce_read_line(value: Any) -> Optional[int]:
+    def _coerce_read_line(value: Any) -> int | None:
         try:
             parsed = int(value)
         except Exception:
@@ -4291,7 +4320,7 @@ class BaseAgent(ABC):
             return None
         return parsed
 
-    def _infer_search_directory_for_read(self, repaired_input: Dict[str, Any]) -> Optional[str]:
+    def _infer_search_directory_for_read(self, repaired_input: dict[str, Any]) -> str | None:
         file_path = str(repaired_input.get("file_path") or repaired_input.get("path") or "").strip()
         if file_path and "/" in file_path:
             directory = os.path.dirname(file_path).strip()
@@ -4315,11 +4344,11 @@ class BaseAgent(ABC):
         self,
         *,
         requested_tool_name: str,
-        repaired_input: Dict[str, Any],
-        repaired_changes: Dict[str, str],
+        repaired_input: dict[str, Any],
+        repaired_changes: dict[str, str],
         raw_input_text: str,
         fallback_depth: int,
-    ) -> Tuple[Dict[str, Any], Dict[str, str], Optional[str], Dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, str], str | None, dict[str, Any]]:
         policy = self._read_scope_policy()
         if policy != "strict_anchor":
             return repaired_input, repaired_changes, None, {}
@@ -4330,7 +4359,7 @@ class BaseAgent(ABC):
 
         output_input = dict(repaired_input)
         output_changes = dict(repaired_changes)
-        metadata: Dict[str, Any] = {"read_scope_policy": "strict_anchor"}
+        metadata: dict[str, Any] = {"read_scope_policy": "strict_anchor"}
         output_input["strict_anchor"] = True
 
         start_line = self._coerce_read_line(output_input.get("start_line"))
@@ -4352,12 +4381,12 @@ class BaseAgent(ABC):
             search_candidates = self._build_read_anchor_candidates(output_input, raw_input_text)
             search_candidates = search_candidates[:5]
 
-            located_file: Optional[str] = None
-            located_line: Optional[int] = None
-            last_search_failure: Optional[str] = None
+            located_file: str | None = None
+            located_line: int | None = None
+            last_search_failure: str | None = None
             if search_candidates:
                 for keyword, source in search_candidates:
-                    search_payload: Dict[str, Any] = {
+                    search_payload: dict[str, Any] = {
                         "keyword": keyword,
                         "max_results": int(output_input.get("max_results") or 8),
                     }
@@ -4454,11 +4483,11 @@ class BaseAgent(ABC):
             anchor_source = "context"
         metadata["read_anchor_source"] = anchor_source
         return output_input, output_changes, None, metadata
-    
+
     async def execute_tool(
         self,
         tool_name: str,
-        tool_input: Dict,
+        tool_input: dict,
         _fallback_depth: int = 0,
     ) -> str:
         """
@@ -4479,10 +4508,10 @@ class BaseAgent(ABC):
         if requested_tool_name in DOWNLINED_TOOL_MESSAGES and requested_tool_name not in self.tools:
             return f"{DOWNLINED_TOOL_MESSAGES[requested_tool_name]}"
         raw_tool_input = tool_input if isinstance(tool_input, dict) else {}
-        raw_input_text = self._extract_raw_input_text(raw_tool_input, raw_tool_input)
+        self._extract_raw_input_text(raw_tool_input, raw_tool_input)
 
         disable_virtual_routing = self._disable_virtual_routing()
-        runtime_policy_metadata: Dict[str, Any] = {}
+        runtime_policy_metadata: dict[str, Any] = {}
 
         if str(requested_tool_name).strip().lower() == "verify_reachability":
             return await self._execute_verify_reachability_pipeline(
@@ -4490,7 +4519,7 @@ class BaseAgent(ABC):
                 fallback_depth=_fallback_depth,
             )
 
-        alias_used: Optional[str] = None
+        alias_used: str | None = None
         if disable_virtual_routing:
             resolved_tool_name = requested_tool_name
         else:
@@ -4512,7 +4541,7 @@ class BaseAgent(ABC):
             and hasattr(tool_runtime, "router")
             and getattr(tool_runtime, "router", None)
             and hasattr(getattr(tool_runtime, "router", None), "can_route")
-            and getattr(tool_runtime, "router").can_route(resolved_tool_name)
+            and tool_runtime.router.can_route(resolved_tool_name)
         )
         runtime_can_handle = bool(
             tool_runtime
@@ -4585,12 +4614,39 @@ class BaseAgent(ABC):
         if auto_repaired_file_path:
             runtime_policy_metadata["auto_repaired_file_path"] = auto_repaired_file_path
 
+        validation_error: str | None = None
+
         if local_tool_available and missing_required:
             missing_required = [
                 name
                 for name in missing_required
                 if repaired_input.get(name) in (None, "", [])
             ]
+
+        if local_tool_available:
+            (
+                repaired_input,
+                repaired_changes,
+                strict_read_scope_error,
+                strict_read_scope_metadata,
+            ) = await self._apply_strict_read_scope_policy(
+                requested_tool_name=resolved_tool_name,
+                repaired_input=repaired_input,
+                repaired_changes=repaired_changes,
+                raw_input_text=self._extract_raw_input_text(raw_tool_input, repaired_input),
+                fallback_depth=_fallback_depth,
+            )
+            if strict_read_scope_metadata:
+                runtime_policy_metadata = {**runtime_policy_metadata, **strict_read_scope_metadata}
+            if strict_read_scope_error:
+                missing_required = []
+                validation_error = strict_read_scope_error
+            elif missing_required:
+                missing_required = [
+                    name
+                    for name in missing_required
+                    if repaired_input.get(name) in (None, "", [])
+                ]
 
         repaired_input, write_scope_metadata, write_scope_error = self._enforce_write_scope(
             resolved_tool_name,
@@ -4624,7 +4680,6 @@ class BaseAgent(ABC):
             else 0
         )
 
-        validation_error: Optional[str] = None
         if missing_required:
             validation_error = (
                 f"工具参数缺失，必填字段: {', '.join(missing_required)}。"
@@ -4701,7 +4756,7 @@ class BaseAgent(ABC):
                 )
                 if last_error:
                     short_circuit_msg += f" 最近错误: {last_error}"
-                short_circuit_metadata: Dict[str, Any] = {
+                short_circuit_metadata: dict[str, Any] = {
                     **(write_scope_metadata or {}),
                     "retry_suppressed": True,
                     "deterministic_failure_count": deterministic_fail_count,
@@ -4742,6 +4797,9 @@ class BaseAgent(ABC):
                     "runtime_used": False,
                     "runtime_dispatch_skipped": True,
                     "runtime_dispatch_skip_reason": "validation_error",
+                    "mcp_used": False,
+                    "mcp_dispatch_skipped": True,
+                    "mcp_dispatch_skip_reason": "validation_error",
                 }
                 await self.emit_tool_result(
                     resolved_tool_name,
@@ -4755,8 +4813,8 @@ class BaseAgent(ABC):
                     extra_metadata=validation_metadata or None,
                 )
                 #  为缺失字段生成更详细的示例
-                example_dict: Dict[str, Any] = {}
-                
+                example_dict: dict[str, Any] = {}
+
                 # 特殊处理 save_verification_result 工具
                 if str(resolved_tool_name or "").strip().lower() == "save_verification_result":
                     example_dict = {
@@ -4788,7 +4846,7 @@ class BaseAgent(ABC):
                     # 尝试从工具的 args_schema 获取字段类型和描述
                     args_schema = getattr(tool, "args_schema", None)
                     model_fields = getattr(args_schema, "model_fields", None)
-                    
+
                     if isinstance(model_fields, dict):
                         # Pydantic v2
                         for field_name in missing_required:
@@ -4796,7 +4854,7 @@ class BaseAgent(ABC):
                             if field_info:
                                 annotation = getattr(field_info, "annotation", None)
                                 description = getattr(field_info, "description", "")
-                                
+
                                 # 生成类型提示的示例值
                                 type_name = getattr(annotation, "__name__", None) or str(annotation)
                                 if "List" in str(annotation) or "list" in type_name.lower():
@@ -4811,7 +4869,7 @@ class BaseAgent(ABC):
                                     example_val = "true"
                                 else:
                                     example_val = f"<{type_name}>"
-                                
+
                                 # 如果有描述，添加注释
                                 if description and len(description) < 80:
                                     example_dict[field_name] = f'{example_val}  # {description[:80]}'
@@ -4838,7 +4896,7 @@ class BaseAgent(ABC):
                     # 无工具对象，使用简单占位符
                     for field_name in missing_required:
                         example_dict[field_name] = "<value>"
-                
+
                 # 格式化示例
                 if example_dict:
                     example_json = json.dumps(example_dict, ensure_ascii=False, indent=2)
@@ -4846,7 +4904,7 @@ class BaseAgent(ABC):
                 else:
                     example_fields = ", ".join(f'"{name}": "..."' for name in missing_required)
                     example_str = f"{{{example_fields}}}"
-                
+
                 failure_output = (
                     "工具参数校验失败\n\n"
                     f"**请求工具**: {requested_tool_name}\n"
@@ -4857,7 +4915,7 @@ class BaseAgent(ABC):
                 )
                 return failure_output
 
-            strict_local_fallback_metadata: Dict[str, Any] = {}
+            strict_local_fallback_metadata: dict[str, Any] = {}
             if strict_mode:
                 strict_metadata = {
                     **write_scope_metadata,
@@ -4867,8 +4925,8 @@ class BaseAgent(ABC):
                 def _build_strict_failure_metadata(
                     *,
                     strict_error: str,
-                    base_metadata: Optional[Dict[str, Any]] = None,
-                ) -> Dict[str, Any]:
+                    base_metadata: dict[str, Any] | None = None,
+                ) -> dict[str, Any]:
                     error_class = self._classify_strict_error(strict_error)
                     non_transient = self._is_non_transient_runtime_error_class(error_class)
                     current_count = 0
@@ -5076,9 +5134,22 @@ class BaseAgent(ABC):
                         hasattr(tool_runtime, "should_prefer_runtime")
                         and tool_runtime.should_prefer_runtime()
                     )
+                    or (
+                        hasattr(tool_runtime, "should_prefer_mcp")
+                        and tool_runtime.should_prefer_mcp()
+                    )
                 )
             )
-            runtime_fallback_metadata: Dict[str, Any] = dict(strict_local_fallback_metadata)
+            runtime_fallback_metadata: dict[str, Any] = dict(strict_local_fallback_metadata)
+
+            def _legacy_mcp_metadata(*, used: bool, fallback_used: bool = False) -> dict[str, Any]:
+                if not self._runtime_metadata().get("mcp_runtime_alias"):
+                    return {}
+                metadata = {"mcp_used": bool(used)}
+                if fallback_used:
+                    metadata["mcp_fallback_used"] = True
+                return metadata
+
             if use_runtime_first and tool_runtime:
                 runtime_result = await tool_runtime.execute_tool(
                     tool_name=resolved_tool_name,
@@ -5091,7 +5162,11 @@ class BaseAgent(ABC):
                     if isinstance(runtime_result.metadata, dict)
                     else {}
                 )
-                runtime_meta = {**write_scope_metadata, "runtime_used": True}
+                runtime_meta = {
+                    **write_scope_metadata,
+                    "runtime_used": True,
+                    **_legacy_mcp_metadata(used=True),
+                }
 
                 if runtime_result.handled:
                     runtime_output = str(runtime_result.data or runtime_result.error or "")
@@ -5112,7 +5187,7 @@ class BaseAgent(ABC):
                             tool_input=repaired_input,
                             tool_metadata=runtime_result_meta,
                         )
-                        
+
                         #  工具运行时成功执行后追踪关键工具调用
                         critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                         if resolved_tool_name in critical_tools:
@@ -5121,12 +5196,12 @@ class BaseAgent(ABC):
                             self._critical_tool_calls.append({
                                 "tool_name": resolved_tool_name,
                                 "tool_input": repaired_input,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "timestamp": datetime.now(UTC).isoformat(),
                                 "success": True,
                                 "via": "runtime",
                             })
                             logger.info(f"[{self.name}] 关键工具成功执行 (runtime): {resolved_tool_name}")
-                        
+
                         if not is_write_tool and not cache_bypass:
                             self._tool_success_cache[tool_call_key] = runtime_output
                             if len(self._tool_success_cache) > 500:
@@ -5149,6 +5224,7 @@ class BaseAgent(ABC):
                             "runtime_fallback_from": runtime_result_meta.get("runtime_domain"),
                             "runtime_soft_fallback": True,
                             "runtime_soft_fallback_target": fallback_tool_name,
+                            **_legacy_mcp_metadata(used=True, fallback_used=True),
                         }
                         await self.emit_tool_result(
                             resolved_tool_name,
@@ -5161,7 +5237,7 @@ class BaseAgent(ABC):
                             evidence_metadata=fallback_evidence_metadata,
                             extra_metadata=merged_fallback_metadata or None,
                         )
-                        
+
                         #  工具运行时 fallback 成功执行后追踪关键工具调用
                         critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                         if resolved_tool_name in critical_tools:
@@ -5170,12 +5246,12 @@ class BaseAgent(ABC):
                             self._critical_tool_calls.append({
                                 "tool_name": resolved_tool_name,
                                 "tool_input": repaired_input,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "timestamp": datetime.now(UTC).isoformat(),
                                 "success": True,
                                 "via": "runtime_fallback",
                             })
                             logger.info(f"[{self.name}] 关键工具成功执行 (runtime fallback): {resolved_tool_name}")
-                        
+
                         if not is_write_tool and not cache_bypass:
                             self._tool_success_cache[tool_call_key] = fallback_output
                             if len(self._tool_success_cache) > 500:
@@ -5189,6 +5265,7 @@ class BaseAgent(ABC):
                             "runtime_fallback_used": True,
                             "runtime_fallback_error": runtime_result.error or "unknown",
                             "runtime_fallback_from": runtime_result_meta.get("runtime_domain"),
+                            **_legacy_mcp_metadata(used=True, fallback_used=True),
                         }
                     elif not runtime_result.should_fallback:
                         await self.emit_tool_result(
@@ -5288,7 +5365,7 @@ class BaseAgent(ABC):
                                 asyncio.shield(execute_task),
                                 timeout=0.5  # 每0.5秒检查一次取消状态
                             )
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             continue  # 继续循环检查
 
                     return await execute_task
@@ -5311,7 +5388,7 @@ class BaseAgent(ABC):
                         execute_with_cancel_check(),
                         timeout=timeout
                     )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 duration_ms = int((time.time() - start) * 1000)
                 await self.emit_tool_result(
                     resolved_tool_name,
@@ -5402,7 +5479,7 @@ class BaseAgent(ABC):
                     tool_input=repaired_input,
                     tool_metadata=metadata_dict,
                 )
-                
+
                 #  仅在工具成功执行后才追踪关键工具调用（push/save）
                 critical_tools = {"push_finding_to_queue", "save_verification_result", "update_vulnerability_finding"}
                 if resolved_tool_name in critical_tools:
@@ -5411,12 +5488,12 @@ class BaseAgent(ABC):
                     self._critical_tool_calls.append({
                         "tool_name": resolved_tool_name,
                         "tool_input": repaired_input,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "success": True,
                     })
                     logger.info(f"[{self.name}] 关键工具成功执行: {resolved_tool_name}")
-                
-                if hasattr(result, "to_string") and callable(getattr(result, "to_string")):
+
+                if hasattr(result, "to_string") and callable(result.to_string):
                     output = result.to_string(max_length=MAX_EVENT_PAYLOAD_CHARS)
                 else:
                     output = str(result.data)
@@ -5462,19 +5539,19 @@ class BaseAgent(ABC):
                         "\n\n同一输入已连续出现确定性失败。"
                         "后续相同输入将被系统短路，请修改参数或改用其他工具。"
                     )
-                
+
                 # 构建错误消息，优先显示完整的 data（包含格式化的输出）
                 error_details = []
                 if result.data:
                     # data 字段通常包含格式化的完整输出（stdout + stderr）
                     error_details.append(str(result.data))
-                
+
                 # 如果 error 字段有额外信息且不在 data 中，也添加
                 if result.error and (not result.data or str(result.error) not in str(result.data)):
                     error_details.append(f"\n**错误详情**: {result.error}")
-                
+
                 error_output = "\n".join(error_details) if error_details else "未知错误"
-                
+
                 error_msg = f"""工具执行失败
 
 **请求工具**: {requested_tool_name}
@@ -5527,7 +5604,7 @@ class BaseAgent(ABC):
 2. 尝试使用其他工具
 3. 如果是权限或资源问题，跳过该操作"""
             return error_msg
-    
+
     def get_tools_description(self) -> str:
         """生成工具描述文本（用于 prompt）"""
         tools_info = []
@@ -5537,30 +5614,30 @@ class BaseAgent(ABC):
             desc = f"- {name}: {getattr(tool, 'description', 'No description')}"
             tools_info.append(desc)
         return "\n".join(tools_info)
-    
+
     async def _fallback_check_and_save(
         self,
-        conversation_history: List[Dict[str, str]],
+        conversation_history: list[dict[str, str]],
         expected_tool: str,
         agent_type: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         兜底机制：使用 LLM 分析对话记录，判断是否需要补救性保存
-        
+
         Args:
             conversation_history: 对话记录
             expected_tool: 预期的工具名称 (push_finding_to_queue | save_verification_result)
             agent_type: Agent 类型 (analysis | verification)
-        
+
         Returns:
             如果补救成功返回结果，否则返回 None
         """
         if self._critical_tool_called:
             logger.info(f"[{self.name}] 已调用关键工具 {self._critical_tool_name}，无需兜底")
             return None
-        
+
         logger.warning(f"[{self.name}] 未检测到 {expected_tool} 成功调用，启动兜底分析...")
-        
+
         # 根据 agent_type 构建不同的输出格式示例
         if agent_type == "analysis":
             output_example = """{{
@@ -5617,7 +5694,7 @@ class BaseAgent(ABC):
         "findings": []
     }}
 }}"""
-        
+
         # 构建分析提示词
         analysis_prompt = f"""你是一个严格的对话分析助手。请分析以下对话记录，判断 {agent_type} Agent 是否发现了需要保存的结果但未成功调用 `{expected_tool}` 工具。
 
@@ -5704,7 +5781,7 @@ user: Observation: 数据库连接失败
 
 **请现在开始分析，严格输出 JSON 格式，不要有任何额外文本。**
 """
-        
+
         try:
             # 调用 LLM 分析
             analysis_history = [
@@ -5716,55 +5793,55 @@ user: Observation: 数据库连接失败
                 },
                 {"role": "user", "content": analysis_prompt}
             ]
-            
+
             logger.info(f"[{self.name}] 正在调用 LLM 进行兜底分析...")
             llm_response, tokens = await self.stream_llm_call(
                 analysis_history,
                 # 使用较低的 temperature 确保一致性
             )
-            
+
             if not llm_response or not llm_response.strip():
                 logger.warning(f"[{self.name}] LLM 兜底分析返回空响应")
                 return None
-            
+
             # 解析 LLM 响应
             analysis_result = self._parse_fallback_analysis(llm_response)
-            
+
             if not analysis_result or not analysis_result.get("needs_fallback"):
                 logger.info(f"[{self.name}] LLM 判断不需要兜底: {analysis_result.get('reason', '未提供理由')}")
                 return None
-            
+
             logger.warning(f"[{self.name}] LLM 判断需要兜底保存: {analysis_result.get('reason')}")
-            
+
             # 执行补救操作
             fallback_result = await self._execute_fallback_save(
                 analysis_result,
                 expected_tool,
                 agent_type,
             )
-            
+
             return fallback_result
-            
+
         except Exception as e:
             logger.error(f"[{self.name}] 兜底分析失败: {e}", exc_info=True)
             return None
-    
-    def _format_conversation_for_analysis(self, conversation: List[Dict[str, str]]) -> str:
+
+    def _format_conversation_for_analysis(self, conversation: list[dict[str, str]]) -> str:
         """格式化对话记录用于分析"""
         formatted = []
         for i, msg in enumerate(conversation):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
-            
+
             # 截断过长的内容
             if len(content) > 2000:
                 content = content[:2000] + "\n... [内容已截断]"
-            
+
             formatted.append(f"### 轮次 {i + 1} - {role.upper()}\n{content}\n")
-        
+
         return "\n".join(formatted)
-    
-    def _parse_fallback_analysis(self, llm_response: str) -> Optional[Dict[str, Any]]:
+
+    def _parse_fallback_analysis(self, llm_response: str) -> dict[str, Any] | None:
         """解析 LLM 的兜底分析结果"""
         try:
             # 移除可能的 markdown 代码块标记
@@ -5776,16 +5853,16 @@ user: Observation: 数据库连接失败
             if cleaned.endswith("```"):
                 cleaned = cleaned[:-3]
             cleaned = cleaned.strip()
-            
+
             # 解析 JSON
             result = json.loads(cleaned)
-            
+
             if not isinstance(result, dict):
                 logger.warning(f"[{self.name}] 兜底分析结果不是字典: {type(result)}")
                 return None
-            
+
             return result
-            
+
         except json.JSONDecodeError as e:
             logger.warning(f"[{self.name}] 无法解析兜底分析 JSON: {e}")
             logger.debug(f"原始响应: {llm_response[:500]}")
@@ -5793,13 +5870,13 @@ user: Observation: 数据库连接失败
         except Exception as e:
             logger.error(f"[{self.name}] 解析兜底分析失败: {e}")
             return None
-    
+
     async def _execute_fallback_save(
         self,
-        analysis_result: Dict[str, Any],
+        analysis_result: dict[str, Any],
         expected_tool: str,
         agent_type: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """执行补救性保存操作"""
         try:
             if agent_type == "analysis" and expected_tool == "push_finding_to_queue":
@@ -5808,7 +5885,7 @@ user: Observation: 数据库连接失败
                 if not findings:
                     logger.warning(f"[{self.name}] 兜底分析未提取到 findings")
                     return None
-                
+
                 logger.info(f"[{self.name}] 开始补救推送 {len(findings)} 个 findings")
                 await self.emit_event(
                     "info",
@@ -5816,7 +5893,7 @@ user: Observation: 数据库连接失败
                     metadata={"agent_type": agent_type, "total_findings": len(findings)},
                 )
                 pushed_count = 0
-                
+
                 for finding in findings:
                     try:
                         result = await self.execute_tool("push_finding_to_queue", finding)
@@ -5825,7 +5902,7 @@ user: Observation: 数据库连接失败
                             logger.info(f"[{self.name}] 补救推送成功: {finding.get('title', 'N/A')}")
                     except Exception as e:
                         logger.error(f"[{self.name}] 补救推送失败: {e}")
-                
+
                 await self.emit_event(
                     "success" if pushed_count > 0 else "warning",
                     f"兜底机制完成：成功补救推送 {pushed_count}/{len(findings)} 个漏洞",
@@ -5837,14 +5914,14 @@ user: Observation: 数据库连接失败
                         "success_rate": f"{pushed_count}/{len(findings)}",
                     },
                 )
-                
+
                 return {
                     "fallback_executed": True,
                     "tool": expected_tool,
                     "pushed_count": pushed_count,
                     "total_findings": len(findings),
                 }
-            
+
             elif agent_type == "verification" and expected_tool == "save_verification_result":
                 # Verification Agent: 保存验证结果（逐个保存）
                 verification_results = analysis_result.get("verification_results", {})
@@ -5852,14 +5929,14 @@ user: Observation: 数据库连接失败
                 if not findings:
                     logger.warning(f"[{self.name}] 兜底分析未提取到 verification findings")
                     return None
-                
+
                 logger.info(f"[{self.name}] 开始补救保存验证结果（共 {len(findings)} 条）")
                 await self.emit_event(
                     "info",
                     f"兜底机制启动：开始补救保存 {len(findings)} 个验证结果",
                     metadata={"agent_type": agent_type, "total_findings": len(findings)},
                 )
-                
+
                 saved_count = 0
                 for idx, finding in enumerate(findings):
                     try:
@@ -5915,7 +5992,7 @@ user: Observation: 数据库连接失败
                             logger.warning(f"[{self.name}] 补救保存第 {idx+1}/{len(findings)} 条结果未能确认成功: {result_str[:100]}")
                     except Exception as e:
                         logger.error(f"[{self.name}] 补救保存第 {idx+1} 条验证结果失败: {e}")
-                
+
                 if saved_count > 0:
                     logger.info(f"[{self.name}] 补救保存完成：{saved_count}/{len(findings)} 条成功")
                     await self.emit_event(
@@ -5942,7 +6019,7 @@ user: Observation: 数据库连接失败
                         metadata={"agent_type": agent_type, "total_findings": len(findings)},
                     )
                     return None
-            
+
             else:
                 logger.warning(f"[{self.name}] 不支持的兜底类型: {agent_type}/{expected_tool}")
                 await self.emit_event(
@@ -5951,7 +6028,7 @@ user: Observation: 数据库连接失败
                     metadata={"agent_type": agent_type, "expected_tool": expected_tool},
                 )
                 return None
-                
+
         except Exception as e:
             logger.error(f"[{self.name}] 执行补救保存失败: {e}", exc_info=True)
             await self.emit_event(

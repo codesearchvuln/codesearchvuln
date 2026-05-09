@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import shutil
@@ -9,19 +8,19 @@ import tempfile
 import threading
 import time
 import zipfile
-from datetime import datetime, timedelta, timezone
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
-from app.api import deps
+from app.api import deps as deps
 from app.core.config import settings
-from app.db.session import async_session_factory, get_db
+from app.db.session import async_session_factory as async_session_factory
+from app.db.session import get_db as get_db
 from app.models.opengrep import OpengrepRule
-from app.models.user_config import UserConfig
 from app.services.backend_venv import (
     build_backend_venv_env,
     resolve_backend_venv_executable,
@@ -33,7 +32,7 @@ from app.services.yasa_runtime_config import get_cached_global_yasa_runtime_conf
 logger = logging.getLogger(__name__)
 SCAN_PROGRESS_MAX_LOGS = 120
 SCAN_PROGRESS_TERMINAL_STATUSES = {"completed", "failed", "interrupted", "cancelled"}
-_scan_progress_store: Dict[str, Dict[str, Any]] = {}
+_scan_progress_store: dict[str, dict[str, Any]] = {}
 
 
 def _scan_workspace_root() -> Path:
@@ -41,11 +40,11 @@ def _scan_workspace_root() -> Path:
     return Path(configured or "/tmp/vulhunter/scans")
 
 
-def _build_backend_venv_env(base_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def _build_backend_venv_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     return build_backend_venv_env(base_env)
 
 
-def _resolve_backend_venv_executable(name: str, *, required: bool = True) -> Optional[str]:
+def _resolve_backend_venv_executable(name: str, *, required: bool = True) -> str | None:
     return resolve_backend_venv_executable(name, required=required)
 
 
@@ -82,7 +81,7 @@ def cleanup_scan_workspace(scan_type: str, task_id: str) -> None:
     shutil.rmtree(workspace, ignore_errors=True)
 
 
-_CORE_AUDIT_EXCLUDE_PATTERNS: List[str] = [
+_CORE_AUDIT_EXCLUDE_PATTERNS: list[str] = [
     # 测试相关
     "test/**",
     "tests/**",
@@ -238,9 +237,9 @@ _CORE_AUDIT_EXCLUDE_PATTERNS: List[str] = [
 
 
 def _build_core_audit_exclude_patterns(
-    user_patterns: Optional[List[str]],
-) -> List[str]:
-    merged: List[str] = []
+    user_patterns: list[str] | None,
+) -> list[str]:
+    merged: list[str] = []
     seen: set[str] = set()
     raw_patterns = list(user_patterns or []) + _CORE_AUDIT_EXCLUDE_PATTERNS
     for raw in raw_patterns:
@@ -268,14 +267,14 @@ def _normalize_scan_path(path: str) -> str:
     return normalized
 
 
-def _path_components(path: str) -> List[str]:
+def _path_components(path: str) -> list[str]:
     normalized = _normalize_scan_path(path)
     if not normalized:
         return []
     return [part for part in normalized.split("/") if part not in {"", ".", ".."}]
 
 
-def _match_exclude_patterns(path: str, patterns: Optional[List[str]]) -> bool:
+def _match_exclude_patterns(path: str, patterns: list[str] | None) -> bool:
     import fnmatch
 
     normalized = _normalize_scan_path(path)
@@ -293,7 +292,7 @@ def _match_exclude_patterns(path: str, patterns: Optional[List[str]]) -> bool:
 
 def _is_core_ignored_path(
     path: str,
-    exclude_patterns: Optional[List[str]] = None,
+    exclude_patterns: list[str] | None = None,
 ) -> bool:
     normalized = _normalize_scan_path(path)
     if not normalized:
@@ -325,7 +324,7 @@ def copy_project_tree_to_scan_dir(
     project_root: str | Path,
     project_dir: str | Path,
     *,
-    exclude_matcher: Optional[Callable[[str], bool]] = None,
+    exclude_matcher: Callable[[str], bool] | None = None,
 ) -> None:
     src_root = Path(project_root).resolve()
     dst_root = Path(project_dir).resolve()
@@ -370,7 +369,7 @@ def _is_test_like_directory(name: str) -> bool:
 async def _cleanup_incorrect_rules(db: AsyncSession) -> None:
     """移除 correct=false 的规则记录。"""
     try:
-        await db.execute(delete(OpengrepRule).where(OpengrepRule.correct == False))
+        await db.execute(delete(OpengrepRule).where(not OpengrepRule.correct))
         await db.commit()
     except Exception as e:
         logger.warning(f"Failed to cleanup incorrect rules: {e}")
@@ -394,7 +393,7 @@ def _prune_test_directories(scan_root: str) -> int:
     return removed_count
 
 
-async def _get_project_root(project_id: str) -> Optional[str]:
+async def _get_project_root(project_id: str) -> str | None:
     """
     获取项目根目录
 
@@ -471,10 +470,10 @@ async def _get_project_root(project_id: str) -> Optional[str]:
 
 
 _static_scan_process_lock = threading.Lock()
-_static_running_scan_processes: Dict[str, subprocess.Popen] = {}
-_static_running_scan_containers: Dict[str, str] = {}
+_static_running_scan_processes: dict[str, subprocess.Popen] = {}
+_static_running_scan_containers: dict[str, str] = {}
 _static_cancelled_scan_tasks: set[str] = set()
-_static_background_jobs: Dict[str, asyncio.Task] = {}
+_static_background_jobs: dict[str, asyncio.Task] = {}
 
 
 def _ensure_opengrep_xdg_dirs() -> None:
@@ -500,11 +499,11 @@ def _register_static_background_job(
     _static_background_jobs[_scan_task_key(scan_type, task_id)] = job
 
 
-def _pop_static_background_job(scan_type: str, task_id: str) -> Optional[asyncio.Task]:
+def _pop_static_background_job(scan_type: str, task_id: str) -> asyncio.Task | None:
     return _static_background_jobs.pop(_scan_task_key(scan_type, task_id), None)
 
 
-def _get_static_background_job(scan_type: str, task_id: str) -> Optional[asyncio.Task]:
+def _get_static_background_job(scan_type: str, task_id: str) -> asyncio.Task | None:
     return _static_background_jobs.get(_scan_task_key(scan_type, task_id))
 
 
@@ -583,7 +582,7 @@ def _register_scan_container(scan_type: str, task_id: str, container_id: str) ->
         _static_running_scan_containers[key] = container_id
 
 
-def _pop_scan_container(scan_type: str, task_id: str) -> Optional[str]:
+def _pop_scan_container(scan_type: str, task_id: str) -> str | None:
     key = _scan_task_key(scan_type, task_id)
     with _static_scan_process_lock:
         return _static_running_scan_containers.pop(key, None)
@@ -646,11 +645,11 @@ def _is_scan_process_active(scan_type: str, task_id: str) -> bool:
 
 
 def _terminate_scan_process(
-    process: Optional[subprocess.Popen],
+    process: subprocess.Popen | None,
     scan_type: str,
     task_id: str,
     *,
-    grace_seconds: Optional[int] = None,
+    grace_seconds: int | None = None,
 ) -> None:
     if process is None or process.poll() is not None:
         return
@@ -705,14 +704,14 @@ def _terminate_scan_process(
 def _run_subprocess_with_tracking(
     scan_type: str,
     task_id: str,
-    cmd: List[str],
+    cmd: list[str],
     *,
-    env: Optional[Dict[str, str]] = None,
-    timeout: Optional[int] = 600,
+    env: dict[str, str] | None = None,
+    timeout: int | None = 600,
 ) -> subprocess.CompletedProcess[str]:
     """执行外部命令并记录进程句柄，便于用户中止时杀掉进程。"""
     key = _scan_task_key(scan_type, task_id)
-    process: Optional[subprocess.Popen] = None
+    process: subprocess.Popen | None = None
 
     try:
         process = subprocess.Popen(
@@ -752,12 +751,12 @@ def _run_subprocess_with_tracking(
 
 def _collect_yasa_process_pids(
     *,
-    task_id: Optional[str] = None,
-    report_dir: Optional[str] = None,
-    source_path: Optional[str] = None,
-) -> List[int]:
+    task_id: str | None = None,
+    report_dir: str | None = None,
+    source_path: str | None = None,
+) -> list[int]:
     """按任务特征收集 YASA 相关进程 PID（避免误杀无关进程）。"""
-    indicators: List[str] = []
+    indicators: list[str] = []
     if task_id:
         indicators.append(str(task_id))
         indicators.append(f"/tmp/yasa_report_{task_id}_")
@@ -805,11 +804,11 @@ def _collect_yasa_process_pids(
 
 def _force_cleanup_yasa_processes(
     *,
-    task_id: Optional[str] = None,
-    report_dir: Optional[str] = None,
-    source_path: Optional[str] = None,
-    grace_seconds: Optional[int] = None,
-) -> Dict[str, int]:
+    task_id: str | None = None,
+    report_dir: str | None = None,
+    source_path: str | None = None,
+    grace_seconds: int | None = None,
+) -> dict[str, int]:
     """兜底清理脱链的 YASA 进程。"""
     pids = _collect_yasa_process_pids(
         task_id=task_id,
@@ -884,28 +883,28 @@ def _force_cleanup_yasa_processes(
     return {"matched": len(pids), "terminated": terminated, "killed": killed}
 
 
-def _as_utc_datetime(value: Optional[datetime]) -> Optional[datetime]:
+def _as_utc_datetime(value: datetime | None) -> datetime | None:
     if not isinstance(value, datetime):
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _calc_scan_duration_ms_from_created_at(
-    created_at: Optional[datetime],
-    finished_at: Optional[datetime] = None,
+    created_at: datetime | None,
+    finished_at: datetime | None = None,
 ) -> int:
     start_at = _as_utc_datetime(created_at)
     if start_at is None:
         return 0
 
-    end_at = _as_utc_datetime(finished_at) or datetime.now(timezone.utc)
+    end_at = _as_utc_datetime(finished_at) or datetime.now(UTC)
     duration_ms = int((end_at - start_at).total_seconds() * 1000)
     return max(0, duration_ms)
 
 
-def _sync_task_scan_duration(task: Any, finished_at: Optional[datetime] = None) -> None:
+def _sync_task_scan_duration(task: Any, finished_at: datetime | None = None) -> None:
     task.scan_duration_ms = _calc_scan_duration_ms_from_created_at(
         getattr(task, "created_at", None),
         finished_at=finished_at,
@@ -913,17 +912,17 @@ def _sync_task_scan_duration(task: Any, finished_at: Optional[datetime] = None) 
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _parse_progress_timestamp(value: Any) -> Optional[datetime]:
+def _parse_progress_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
     text = value.strip()
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC)
     except ValueError:
         return None
 
@@ -934,8 +933,8 @@ def _clear_scan_progress(task_id: str) -> bool:
 
 def prune_scan_progress_store(
     *,
-    ttl_seconds: Optional[int] = None,
-    now: Optional[datetime] = None,
+    ttl_seconds: int | None = None,
+    now: datetime | None = None,
 ) -> int:
     ttl = max(
         1,
@@ -944,7 +943,7 @@ def prune_scan_progress_store(
         ),
     )
     reference_time = (
-        now.astimezone(timezone.utc) if isinstance(now, datetime) else datetime.now(timezone.utc)
+        now.astimezone(UTC) if isinstance(now, datetime) else datetime.now(UTC)
     )
     cutoff = reference_time - timedelta(seconds=ttl)
     expired_task_ids: list[str] = []
@@ -960,7 +959,7 @@ def prune_scan_progress_store(
     return len(expired_task_ids)
 
 
-def _dt_to_iso(dt: Optional[datetime]) -> Optional[str]:
+def _dt_to_iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -971,10 +970,10 @@ def _dt_to_iso(dt: Optional[datetime]) -> Optional[str]:
 def _record_scan_progress(
     task_id: str,
     *,
-    status: Optional[str] = None,
-    progress: Optional[float] = None,
-    stage: Optional[str] = None,
-    message: Optional[str] = None,
+    status: str | None = None,
+    progress: float | None = None,
+    stage: str | None = None,
+    message: str | None = None,
     level: str = "info",
 ) -> None:
     state = _scan_progress_store.get(task_id) or {
@@ -1013,7 +1012,7 @@ def _record_scan_progress(
         _clear_scan_progress(task_id)
 
 
-async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional[Dict[str, Any]]:
+async def _get_user_config(db: AsyncSession, user_id: str | None) -> dict[str, Any] | None:
     """获取用户配置（与 agent_tasks 一致）"""
     if not user_id:
         return None
@@ -1042,6 +1041,6 @@ def _is_llm_config_error(exc: Exception) -> bool:
     return "LLM配置错误" in msg or "llmModel" in msg or "llmBaseUrl" in msg or "llmApiKey" in msg
 
 
-def _validate_user_llm_config(user_config: Optional[Dict[str, Any]]) -> None:
+def _validate_user_llm_config(user_config: dict[str, Any] | None) -> None:
     llm_service = LLMService(user_config=user_config or {})
     _ = llm_service.config

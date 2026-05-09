@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
-from app.api.v1.endpoints.agent_tasks import _snapshot_runtime_stats_to_task
-from app.models.agent_task import AgentTask
 import app.models.gitleaks  # noqa: F401
 import app.models.opengrep  # noqa: F401
+from app.api.v1.endpoints.agent_tasks import _snapshot_runtime_stats_to_task
+from app.models.agent_task import AgentTask
 
 
 class _StubAgent:

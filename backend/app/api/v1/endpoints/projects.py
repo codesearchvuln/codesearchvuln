@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import projects_crud as _crud
 from app.api.v1.endpoints import projects_chat2rule as _chat2rule
+from app.api.v1.endpoints import projects_crud as _crud
 from app.api.v1.endpoints import projects_files as _files
 from app.api.v1.endpoints import projects_insights as _insights
 from app.api.v1.endpoints import projects_transfer as _transfer

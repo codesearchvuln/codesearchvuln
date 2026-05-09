@@ -4,7 +4,8 @@ import copy
 import logging
 import time
 import uuid
-from typing import Any, Dict, Iterable, List
+from collections.abc import Iterable
+from typing import Any
 
 from .context import ToolCallContext, ToolFailureState
 from .contracts import ToolContractViolation, ToolInputContractRegistry, ToolOutputContractRegistry
@@ -16,9 +17,9 @@ from .hooks import (
     LocatorConfidenceHook,
     LocatorInputCanonicalizationHook,
     LocatorOutputContractHook,
-    PushFindingInputCanonicalizationHook,
     ProjectPathNormalizeHook,
     ProjectScopeGuardHook,
+    PushFindingInputCanonicalizationHook,
     ReasoningPreflightHook,
     RunReconSubAgentInputCanonicalizationHook,
     StableErrorCodeHook,
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 class ToolExecutionCoordinator:
     def __init__(self) -> None:
-        self._global_hooks: List[ToolHook] = [
+        self._global_hooks: list[ToolHook] = [
             ProjectPathNormalizeHook(),
             StrictUnknownFieldHook(),
             StableErrorCodeHook(),
@@ -42,7 +43,7 @@ class ToolExecutionCoordinator:
             ToolPresentationHook(),
             FailureReflectionHook(),
         ]
-        self._family_hooks: Dict[str, List[ToolHook]] = {
+        self._family_hooks: dict[str, list[ToolHook]] = {
             "code_lookup": [
                 ProjectScopeGuardHook(),
                 EvidenceMetadataHook(),
@@ -50,7 +51,7 @@ class ToolExecutionCoordinator:
             ],
             "reasoning": [],
         }
-        self._tool_hooks: Dict[str, List[ToolHook]] = {
+        self._tool_hooks: dict[str, list[ToolHook]] = {
             "locate_enclosing_function": [
                 LocatorInputCanonicalizationHook(),
                 LocatorOutputContractHook(),
@@ -86,7 +87,7 @@ class ToolExecutionCoordinator:
         ]
 
     @staticmethod
-    def _expected_args(tool: Any) -> Dict[str, Any] | None:
+    def _expected_args(tool: Any) -> dict[str, Any] | None:
         builder = getattr(tool, "_build_expected_args", None)
         if callable(builder):
             return builder()
@@ -101,7 +102,7 @@ class ToolExecutionCoordinator:
         error_code: str,
         diagnostics: list[str] | None = None,
         data: Any = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         from ..base import ToolResult
 
@@ -131,7 +132,7 @@ class ToolExecutionCoordinator:
             return False
 
     @staticmethod
-    def _raise_for_stage_rejection(stage: str, outputs: List[ToolHookResult]) -> None:
+    def _raise_for_stage_rejection(stage: str, outputs: list[ToolHookResult]) -> None:
         for item in outputs:
             if item.continue_execution:
                 continue
@@ -201,8 +202,8 @@ class ToolExecutionCoordinator:
         context: ToolCallContext,
         result: Any = None,
         error: Exception | None = None,
-    ) -> List[ToolHookResult]:
-        outputs: List[ToolHookResult] = []
+    ) -> list[ToolHookResult]:
+        outputs: list[ToolHookResult] = []
         for hook in self._hooks_for(context.tool_name):
             method = getattr(hook, stage)
             hook_result = await method(
@@ -222,7 +223,7 @@ class ToolExecutionCoordinator:
                 break
         return outputs
 
-    async def execute(self, tool: Any, payload: Dict[str, Any]) -> Any:
+    async def execute(self, tool: Any, payload: dict[str, Any]) -> Any:
         from ..base import ToolResult
 
         started_at = time.time()

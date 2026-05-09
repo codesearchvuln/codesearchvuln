@@ -4,12 +4,11 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from test_dashboard_snapshot_v2 import _build_execute_side_effect
 
 from app.api import deps
 from app.api.v1.endpoints import projects, projects_insights
 from app.db.session import get_db
-
-from test_dashboard_snapshot_v2 import _build_execute_side_effect
 
 
 def _build_test_client():

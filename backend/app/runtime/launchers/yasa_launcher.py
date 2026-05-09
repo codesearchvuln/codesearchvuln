@@ -5,7 +5,6 @@ import os
 import sys
 from pathlib import Path
 
-
 engine_root = Path("/opt/yasa/engine")
 engine = Path("/opt/yasa/bin/yasa-engine")
 if not engine.exists():

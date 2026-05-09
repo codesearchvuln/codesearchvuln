@@ -12,9 +12,8 @@ import asyncio
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from app.api.v1.endpoints.static_tasks_shared import (
@@ -32,10 +31,9 @@ from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 from .base import (
     StaticBootstrapFinding,
-    StaticBootstrapScanResult,
     StaticBootstrapScanner,
+    StaticBootstrapScanResult,
 )
-
 
 # PHPStan security filter: 五类核心 + 高危词兜底（与静态任务口径保持一致）。
 _PHPSTAN_SECURITY_CORE_KEYWORDS = (
@@ -99,14 +97,14 @@ _PHPSTAN_NO_FILES_PATTERNS = (
 )
 
 
-def _is_no_files_to_analyse_output(*texts: Optional[str]) -> bool:
+def _is_no_files_to_analyse_output(*texts: str | None) -> bool:
     combined = "\n".join(str(text or "") for text in texts).lower()
     if not combined.strip():
         return False
     return any(pattern in combined for pattern in _PHPSTAN_NO_FILES_PATTERNS)
 
 
-def _parse_output(output_text: str) -> Dict[str, Any]:
+def _parse_output(output_text: str) -> dict[str, Any]:
     text = str(output_text or "").strip()
     if not text:
         return {}
@@ -117,7 +115,7 @@ def _parse_output(output_text: str) -> Dict[str, Any]:
         parse_targets.append(text[first_object_index:])
 
     decoder = json.JSONDecoder()
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for candidate in parse_targets:
         try:
             output, _ = decoder.raw_decode(candidate)
@@ -131,7 +129,7 @@ def _parse_output(output_text: str) -> Dict[str, Any]:
     raise ValueError(f"Invalid phpstan JSON output: {last_error}")
 
 
-def _is_security_message(message: Dict[str, Any]) -> bool:
+def _is_security_message(message: dict[str, Any]) -> bool:
     text = " ".join(
         [
             str(message.get("message") or ""),
@@ -146,8 +144,8 @@ def _is_security_message(message: Dict[str, Any]) -> bool:
     return any(keyword in text for keyword in _PHPSTAN_SECURITY_FALLBACK_KEYWORDS)
 
 
-def _collect_raw_messages(files_map: Dict[str, Any]) -> List[Dict[str, Any]]:
-    messages: List[Dict[str, Any]] = []
+def _collect_raw_messages(files_map: dict[str, Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
     for file_data in files_map.values():
         if not isinstance(file_data, dict):
             continue
@@ -160,7 +158,7 @@ def _collect_raw_messages(files_map: Dict[str, Any]) -> List[Dict[str, Any]]:
     return messages
 
 
-def _parse_plaintext_output_fallback(output_text: str) -> Dict[str, Any]:
+def _parse_plaintext_output_fallback(output_text: str) -> dict[str, Any]:
     """Best-effort fallback for non-JSON phpstan output.
 
     Supports common line formats like:
@@ -171,7 +169,7 @@ def _parse_plaintext_output_fallback(output_text: str) -> Dict[str, Any]:
     if not text.strip():
         return {}
 
-    files: Dict[str, Dict[str, Any]] = {}
+    files: dict[str, dict[str, Any]] = {}
 
     def _append(file_path: str, line: int, message: str) -> None:
         normalized_file = str(file_path or "").strip()
@@ -232,9 +230,9 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
 
     def _normalize_findings(
         self,
-        files_map: Dict[str, Any],
-    ) -> List[StaticBootstrapFinding]:
-        normalized: List[StaticBootstrapFinding] = []
+        files_map: dict[str, Any],
+    ) -> list[StaticBootstrapFinding]:
+        normalized: list[StaticBootstrapFinding] = []
         index = 0
         for file_path, file_data in files_map.items():
             if not isinstance(file_data, dict):
@@ -340,8 +338,8 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
                     errors="ignore",
                 )
 
-            parse_error: Optional[Exception] = None
-            payload: Dict[str, Any] = {}
+            parse_error: Exception | None = None
+            payload: dict[str, Any] = {}
             try:
                 payload = _parse_output(stdout_text)
             except Exception as exc:  # noqa: BLE001
@@ -368,7 +366,7 @@ class PhpstanBootstrapScanner(StaticBootstrapScanner):
                     parse_error = None
 
             files_payload = payload.get("files")
-            files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
+            files_map: dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
             raw_findings = _collect_raw_messages(files_map)
             no_files_to_analyse = (
                 process_result.exit_code in {0, 1}

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -43,7 +43,7 @@ def _build_agent_finding(
     task_id: str,
     status: str = "verified",
 ):
-    now = datetime(2026, 3, 5, 10, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 5, 10, 0, 0, tzinfo=UTC)
     verification_result = {
         "authenticity": "confirmed" if status != "false_positive" else "false_positive",
         "reachability": "reachable",

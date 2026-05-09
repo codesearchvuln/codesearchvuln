@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
 import httpx
-
 
 _HTTP_HEALTH_STATUS_FALLBACK = {404, 405, 501}
 
@@ -31,7 +29,7 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
-def _candidate_probe_urls(endpoint: str) -> List[str]:
+def _candidate_probe_urls(endpoint: str) -> list[str]:
     parsed = urlparse(endpoint)
     candidates = [
         urlunparse(parsed._replace(path="/health", params="", query="", fragment="")),
@@ -39,7 +37,7 @@ def _candidate_probe_urls(endpoint: str) -> List[str]:
         endpoint,
     ]
     seen = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for item in candidates:
         key = str(item or "").strip()
         if not key or key in seen:
@@ -49,7 +47,7 @@ def _candidate_probe_urls(endpoint: str) -> List[str]:
     return ordered
 
 
-def _tcp_reachable(endpoint: str, *, timeout: float) -> Tuple[bool, Optional[str]]:
+def _tcp_reachable(endpoint: str, *, timeout: float) -> tuple[bool, str | None]:
     parsed = urlparse(endpoint)
     host = str(parsed.hostname or "").strip()
     if not host:
@@ -63,11 +61,11 @@ def _tcp_reachable(endpoint: str, *, timeout: float) -> Tuple[bool, Optional[str
 
 
 def probe_endpoint_readiness(
-    endpoint: Optional[str],
+    endpoint: str | None,
     *,
     timeout: float = 1.5,
-    headers: Optional[Dict[str, str]] = None,
-) -> Tuple[bool, Optional[str]]:
+    headers: dict[str, str] | None = None,
+) -> tuple[bool, str | None]:
     url = str(endpoint or "").strip()
     if not url:
         return False, "missing_endpoint"
@@ -84,8 +82,8 @@ def probe_endpoint_readiness(
         if tcp_ok:
             return True, None
 
-    first_hard_failure: Optional[str] = None
-    first_exception: Optional[Tuple[str, BaseException]] = None
+    first_hard_failure: str | None = None
+    first_exception: tuple[str, BaseException] | None = None
 
     try:
         with httpx.Client(timeout=timeout_sec, follow_redirects=True) as client:

@@ -4,7 +4,7 @@ import asyncio
 import copy
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord
 from .recon_models import (
@@ -38,7 +38,7 @@ class ReconModuleExecutor:
 
     def __init__(
         self,
-        orchestrator: "OrchestratorAgent",
+        orchestrator: OrchestratorAgent,
         max_workers: int,
         enable_parallel: bool = True,
     ) -> None:
@@ -52,7 +52,7 @@ class ReconModuleExecutor:
         self,
         tool_name: str,
         tool_obj: Any,
-        module_files: List[str],
+        module_files: list[str],
     ) -> Any:
         clone_method = getattr(tool_obj, "clone_for_worker", None)
         if callable(clone_method):
@@ -77,7 +77,7 @@ class ReconModuleExecutor:
             cloned._project_scope_index = None
         return cloned
 
-    def _build_worker_tools(self, base_tools: Any, module_files: List[str]) -> Any:
+    def _build_worker_tools(self, base_tools: Any, module_files: list[str]) -> Any:
         if not isinstance(base_tools, dict):
             return base_tools
         return {
@@ -91,7 +91,7 @@ class ReconModuleExecutor:
         *,
         worker_id: int,
         descriptor: ReconModuleDescriptor,
-    ) -> "BaseAgent":
+    ) -> BaseAgent:
         base_agent = self.orchestrator.sub_agents.get("recon_subagent")
         if base_agent is None:
             raise RuntimeError("Recon sub-agent is not registered")
@@ -191,7 +191,7 @@ class ReconModuleExecutor:
         task_id: str,
         project_model: ProjectReconModel,
         descriptor: ReconModuleDescriptor,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         runtime_context = getattr(self.orchestrator, "_runtime_context", {}) or {}
         project_info = (
             dict(runtime_context.get("project_info", {}))
@@ -401,7 +401,7 @@ class ReconModuleExecutor:
         state: WorkflowState,
         task_id: str,
         project_model: ProjectReconModel,
-    ) -> List[ReconModuleResult]:
+    ) -> list[ReconModuleResult]:
         modules = list(project_model.module_descriptors)
         state.recon_modules_total = len(modules)
         if not modules:
@@ -415,7 +415,7 @@ class ReconModuleExecutor:
         )
 
         if not self.enable_parallel or self.max_workers <= 1:
-            results: List[ReconModuleResult] = []
+            results: list[ReconModuleResult] = []
             for index, descriptor in enumerate(modules):
                 results.append(
                     await self._run_single_module(

@@ -3,31 +3,25 @@
 """
 
 import asyncio
-from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from pydantic import BaseModel, ConfigDict, Field
 import json
 import os
-import shlex
-import shutil
-import subprocess
-import tempfile
 import time
 import zipfile
+from typing import Any
+
 import httpx
-import uuid
-import base64
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.api import deps
-from app.db.session import get_db
-from app.models.user_config import UserConfig
-from app.models.user import User
-from app.models.project import Project
 from app.core.config import settings
-from app.core.encryption import encrypt_sensitive_data, decrypt_sensitive_data
-from app.services.agent.skills.scan_core import build_scan_core_skill_availability
+from app.core.encryption import decrypt_sensitive_data, encrypt_sensitive_data
+from app.db.session import get_db
+from app.models.project import Project
+from app.models.user import User
+from app.models.user_config import UserConfig
 from app.services.agent.workflow.user_runtime_config import (
     AgentWorkflowConfigSource,
     load_user_agent_workflow_config,
@@ -39,6 +33,8 @@ from app.services.llm.config_utils import (
 )
 from app.services.llm.provider_registry import (
     build_llm_provider_catalog as build_provider_catalog,
+)
+from app.services.llm.provider_registry import (
     resolve_llm_runtime_provider as resolve_provider_runtime,
 )
 from app.services.llm.types import LLMProvider
@@ -80,7 +76,7 @@ LLM_CONNECTION_CONFIG_KEYS = (
 AGENT_TASK_PREFLIGHT_TIMEOUT_SECONDS = 10
 
 
-def _resolve_llm_runtime_provider(provider: Any) -> tuple[str, Optional[LLMProvider]]:
+def _resolve_llm_runtime_provider(provider: Any) -> tuple[str, LLMProvider | None]:
     return resolve_provider_runtime(provider)
 
 
@@ -266,14 +262,14 @@ def _iter_model_items_from_payload(payload: Any) -> list[dict[str, Any]]:
                         items.append(item)
     return items
 
-def _parse_positive_int(value: Any) -> Optional[int]:
+def _parse_positive_int(value: Any) -> int | None:
     try:
         parsed = int(float(value))
     except Exception:
         return None
     return parsed if parsed > 0 else None
 
-def _extract_int_from_paths(payload: dict[str, Any], paths: list[tuple[str, ...]]) -> Optional[int]:
+def _extract_int_from_paths(payload: dict[str, Any], paths: list[tuple[str, ...]]) -> int | None:
     for path in paths:
         cursor: Any = payload
         ok = True
@@ -289,7 +285,7 @@ def _extract_int_from_paths(payload: dict[str, Any], paths: list[tuple[str, ...]
             return parsed
     return None
 
-def _recommend_tokens_from_static_map(model_name: str) -> Optional[int]:
+def _recommend_tokens_from_static_map(model_name: str) -> int | None:
     normalized = str(model_name or "").strip().lower()
     if not normalized:
         return None
@@ -328,8 +324,8 @@ def _recommend_tokens_from_static_map(model_name: str) -> Optional[int]:
         return 8192
     return None
 
-def _extract_model_metadata_from_payload(payload: Any) -> dict[str, dict[str, Optional[int] | str]]:
-    metadata: dict[str, dict[str, Optional[int] | str]] = {}
+def _extract_model_metadata_from_payload(payload: Any) -> dict[str, dict[str, int | None | str]]:
+    metadata: dict[str, dict[str, int | None | str]] = {}
     items = _iter_model_items_from_payload(payload)
     for item in items:
         model_name = item.get("id") or item.get("name") or item.get("model")
@@ -386,8 +382,8 @@ def _extract_model_metadata_from_payload(payload: Any) -> dict[str, dict[str, Op
         }
     return metadata
 
-def _build_static_model_metadata(models: list[str]) -> dict[str, dict[str, Optional[int] | str]]:
-    metadata: dict[str, dict[str, Optional[int] | str]] = {}
+def _build_static_model_metadata(models: list[str]) -> dict[str, dict[str, int | None | str]]:
+    metadata: dict[str, dict[str, int | None | str]] = {}
     for model in models:
         model_name = str(model or "").strip()
         if not model_name:
@@ -403,7 +399,7 @@ def _build_static_model_metadata(models: list[str]) -> dict[str, dict[str, Optio
 
 def _merge_http_headers(
     default_headers: dict[str, str],
-    custom_headers: Optional[dict[str, str]] = None,
+    custom_headers: dict[str, str] | None = None,
 ) -> dict[str, str]:
     merged = {key: value for key, value in default_headers.items() if value}
     if custom_headers:
@@ -413,8 +409,8 @@ def _merge_http_headers(
 async def _fetch_models_openai_compatible(
     base_url: str,
     api_key: str,
-    custom_headers: Optional[dict[str, str]] = None,
-) -> tuple[list[str], dict[str, dict[str, Optional[int] | str]]]:
+    custom_headers: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, dict[str, int | None | str]]]:
     headers = _merge_http_headers(
         {"Authorization": f"Bearer {api_key}" if api_key else ""},
         custom_headers,
@@ -428,8 +424,8 @@ async def _fetch_models_openai_compatible(
 async def _fetch_models_anthropic(
     base_url: str,
     api_key: str,
-    custom_headers: Optional[dict[str, str]] = None,
-) -> tuple[list[str], dict[str, dict[str, Optional[int] | str]]]:
+    custom_headers: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, dict[str, int | None | str]]]:
     headers = _merge_http_headers(
         {
             "x-api-key": api_key,
@@ -446,8 +442,8 @@ async def _fetch_models_anthropic(
 async def _fetch_models_azure_openai(
     base_url: str,
     api_key: str,
-    custom_headers: Optional[dict[str, str]] = None,
-) -> tuple[list[str], dict[str, dict[str, Optional[int] | str]]]:
+    custom_headers: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, dict[str, int | None | str]]]:
     api_version = "2024-10-21"
     clean_base = base_url.rstrip("/")
     attempt_urls = [
@@ -458,7 +454,7 @@ async def _fetch_models_azure_openai(
     headers = _merge_http_headers({"api-key": api_key}, custom_headers)
 
     async with httpx.AsyncClient(timeout=15) as client:
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for url in unique_attempt_urls:
             try:
                 response = await client.get(url, headers=headers)
@@ -525,10 +521,10 @@ async def _resolve_verify_project(
     preferred_candidates = list(preferred_result.scalars().all())
 
     fallback_used = False
-    selected_project: Optional[Project] = None
-    selected_zip_path: Optional[str] = None
+    selected_project: Project | None = None
+    selected_zip_path: str | None = None
 
-    async def _first_usable_zip(projects: list[Project]) -> tuple[Optional[Project], Optional[str]]:
+    async def _first_usable_zip(projects: list[Project]) -> tuple[Project | None, str | None]:
         for project in projects:
             zip_path = await load_project_zip(project.id)
             if not zip_path or not os.path.exists(zip_path):
@@ -589,45 +585,45 @@ def decrypt_config(config: dict, sensitive_fields: list) -> dict:
 
 class LLMConfigSchema(BaseModel):
     """LLM配置Schema"""
-    llmProvider: Optional[str] = None
-    llmApiKey: Optional[str] = None
-    llmModel: Optional[str] = None
-    llmBaseUrl: Optional[str] = None
-    llmTimeout: Optional[int] = None
-    llmTemperature: Optional[float] = None
-    llmMaxTokens: Optional[int] = None
-    llmCustomHeaders: Optional[str] = None
+    llmProvider: str | None = None
+    llmApiKey: str | None = None
+    llmModel: str | None = None
+    llmBaseUrl: str | None = None
+    llmTimeout: int | None = None
+    llmTemperature: float | None = None
+    llmMaxTokens: int | None = None
+    llmCustomHeaders: str | None = None
 
     # Agent超时配置
-    llmFirstTokenTimeout: Optional[int] = None  # 首Token超时（秒）
-    llmStreamTimeout: Optional[int] = None  # 流式超时（秒）
-    agentTimeout: Optional[int] = None  # Agent总超时（秒）
-    subAgentTimeout: Optional[int] = None  # 子Agent超时（秒）
-    toolTimeout: Optional[int] = None  # 工具执行超时（秒）
+    llmFirstTokenTimeout: int | None = None  # 首Token超时（秒）
+    llmStreamTimeout: int | None = None  # 流式超时（秒）
+    agentTimeout: int | None = None  # Agent总超时（秒）
+    subAgentTimeout: int | None = None  # 子Agent超时（秒）
+    toolTimeout: int | None = None  # 工具执行超时（秒）
 
     # 平台专用配置
-    geminiApiKey: Optional[str] = None
-    openaiApiKey: Optional[str] = None
-    claudeApiKey: Optional[str] = None
-    qwenApiKey: Optional[str] = None
-    deepseekApiKey: Optional[str] = None
-    zhipuApiKey: Optional[str] = None
-    moonshotApiKey: Optional[str] = None
-    baiduApiKey: Optional[str] = None
-    minimaxApiKey: Optional[str] = None
-    doubaoApiKey: Optional[str] = None
-    ollamaBaseUrl: Optional[str] = None
+    geminiApiKey: str | None = None
+    openaiApiKey: str | None = None
+    claudeApiKey: str | None = None
+    qwenApiKey: str | None = None
+    deepseekApiKey: str | None = None
+    zhipuApiKey: str | None = None
+    moonshotApiKey: str | None = None
+    baiduApiKey: str | None = None
+    minimaxApiKey: str | None = None
+    doubaoApiKey: str | None = None
+    ollamaBaseUrl: str | None = None
 
 class OtherConfigSchema(BaseModel):
     """其他配置Schema"""
-    maxAnalyzeFiles: Optional[int] = None
-    llmConcurrency: Optional[int] = None
-    llmGapMs: Optional[int] = None
+    maxAnalyzeFiles: int | None = None
+    llmConcurrency: int | None = None
+    llmGapMs: int | None = None
 
 class UserConfigRequest(BaseModel):
     """用户配置请求"""
-    llmConfig: Optional[LLMConfigSchema] = None
-    otherConfig: Optional[OtherConfigSchema] = None
+    llmConfig: LLMConfigSchema | None = None
+    otherConfig: OtherConfigSchema | None = None
 
 class UserConfigResponse(BaseModel):
     """用户配置响应"""
@@ -636,7 +632,7 @@ class UserConfigResponse(BaseModel):
     llmConfig: dict
     otherConfig: dict
     created_at: str
-    updated_at: Optional[str] = None
+    updated_at: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -738,7 +734,7 @@ async def get_my_config(
         select(UserConfig).where(UserConfig.user_id == current_user.id)
     )
     config = result.scalar_one_or_none()
-    
+
     if not config:
         default_config = get_default_config()
         print(f"[Config] 用户 {current_user.id} 没有保存的配置，返回默认配置")
@@ -750,7 +746,7 @@ async def get_my_config(
             otherConfig=default_config["otherConfig"],
             created_at="",
         )
-    
+
     (
         user_llm_config,
         user_other_config,
@@ -760,7 +756,7 @@ async def get_my_config(
         db=db,
         user_id=current_user.id,
     )
-    
+
     print(f"[Config] 用户 {current_user.id} 的保存配置:")
     print(f"  - llmProvider: {user_llm_config.get('llmProvider')}")
     print(f"  - llmApiKey: {'***' + user_llm_config.get('llmApiKey', '')[-4:] if user_llm_config.get('llmApiKey') else '(空)'}")
@@ -786,7 +782,7 @@ async def update_my_config(
         select(UserConfig).where(UserConfig.user_id == current_user.id)
     )
     config = result.scalar_one_or_none()
-    
+
     # 准备要保存的配置数据（加密敏感字段）
     llm_data = config_in.llmConfig.model_dump(exclude_none=True) if config_in.llmConfig else {}
     other_data = (
@@ -815,11 +811,11 @@ async def update_my_config(
     if other_data:
         # Tool runtime config is server-controlled; ignore frontend payload.
         other_data = _strip_runtime_config(other_data)
-    
+
     # 加密敏感字段
     llm_data_encrypted = encrypt_config(llm_data, SENSITIVE_LLM_FIELDS)
     other_data_encrypted = encrypt_config(other_data, SENSITIVE_OTHER_FIELDS)
-    
+
     if not config:
         # 创建新配置
         config = UserConfig(
@@ -836,7 +832,7 @@ async def update_my_config(
             existing_llm = decrypt_config(existing_llm, SENSITIVE_LLM_FIELDS)
             existing_llm.update(llm_data)  # 使用未加密的新数据合并
             config.llm_config = json.dumps(encrypt_config(existing_llm, SENSITIVE_LLM_FIELDS))
-        
+
         if config_in.otherConfig:
             existing_other = json.loads(config.other_config) if config.other_config else {}
             # 先解密现有数据，再合并新数据，最后加密
@@ -845,25 +841,25 @@ async def update_my_config(
             existing_other.update(other_data)  # 使用未加密的新数据合并
             existing_other = _strip_runtime_config(existing_other)
             config.other_config = json.dumps(encrypt_config(existing_other, SENSITIVE_OTHER_FIELDS))
-    
+
     await db.commit()
     await db.refresh(config)
-    
+
     # 获取系统默认配置并合并（与 get_my_config 保持一致）
     default_config = get_default_config()
     user_llm_config = json.loads(config.llm_config) if config.llm_config else {}
     user_other_config = json.loads(config.other_config) if config.other_config else {}
-    
+
     # 解密后返回给前端
     user_llm_config = decrypt_config(user_llm_config, SENSITIVE_LLM_FIELDS)
     user_other_config = decrypt_config(user_other_config, SENSITIVE_OTHER_FIELDS)
     user_other_config = _strip_runtime_config(user_other_config)
-    
+
     merged_llm_config = {**default_config["llmConfig"], **user_llm_config}
     merged_other_config = _sanitize_other_config(
         {**default_config["otherConfig"], **user_other_config}
     )
-    
+
     return UserConfigResponse(
         id=config.id,
         user_id=config.user_id,
@@ -883,29 +879,29 @@ async def delete_my_config(
         select(UserConfig).where(UserConfig.user_id == current_user.id)
     )
     config = result.scalar_one_or_none()
-    
+
     if config:
         await db.delete(config)
         await db.commit()
-    
+
     return {"message": "配置已删除"}
 
 class LLMTestRequest(BaseModel):
     """LLM测试请求"""
     provider: str
-    apiKey: Optional[str] = None
-    model: Optional[str] = None
-    baseUrl: Optional[str] = None
-    customHeaders: Optional[str] = None
+    apiKey: str | None = None
+    model: str | None = None
+    baseUrl: str | None = None
+    customHeaders: str | None = None
 
 class LLMTestResponse(BaseModel):
     """LLM测试响应"""
     success: bool
     message: str
-    model: Optional[str] = None
-    response: Optional[str] = None
+    model: str | None = None
+    response: str | None = None
     # 调试信息
-    debug: Optional[dict] = None
+    debug: dict | None = None
 
 
 class LLMQuickConfigSnapshot(BaseModel):
@@ -917,19 +913,19 @@ class LLMQuickConfigSnapshot(BaseModel):
 
 class AgentTaskLLMPreflightResponse(BaseModel):
     ok: bool
-    stage: Optional[str] = None
+    stage: str | None = None
     message: str
-    reasonCode: Optional[str] = None
-    missingFields: Optional[list[str]] = None
+    reasonCode: str | None = None
+    missingFields: list[str] | None = None
     effectiveConfig: LLMQuickConfigSnapshot
-    savedConfig: Optional[LLMQuickConfigSnapshot] = None
+    savedConfig: LLMQuickConfigSnapshot | None = None
 
 class LLMFetchModelsRequest(BaseModel):
     """按提供商拉取模型列表请求"""
     provider: str
     apiKey: str
-    baseUrl: Optional[str] = None
-    customHeaders: Optional[str] = None
+    baseUrl: str | None = None
+    customHeaders: str | None = None
 
 class LLMFetchModelsResponse(BaseModel):
     """按提供商拉取模型列表响应"""
@@ -940,21 +936,27 @@ class LLMFetchModelsResponse(BaseModel):
     models: list[str]
     defaultModel: str
     source: str
-    baseUrlUsed: Optional[str] = None
-    modelMetadata: Optional[dict[str, dict[str, Optional[int] | str]]] = None
-    tokenRecommendationSource: Optional[str] = None
+    baseUrlUsed: str | None = None
+    modelMetadata: dict[str, dict[str, int | None | str]] | None = None
+    tokenRecommendationSource: str | None = None
 
 
 async def _execute_llm_test_request(
     request: LLMTestRequest,
     *,
-    saved_llm_config: Optional[dict[str, Any]] = None,
-    saved_other_config: Optional[dict[str, Any]] = None,
+    saved_llm_config: dict[str, Any] | None = None,
+    saved_other_config: dict[str, Any] | None = None,
 ) -> LLMTestResponse:
-    from app.services.llm.factory import NATIVE_ONLY_PROVIDERS
-    from app.services.llm.adapters import LiteLLMAdapter, BaiduAdapter, MinimaxAdapter, DoubaoAdapter
-    from app.services.llm.types import LLMConfig, LLMProvider, LLMRequest, LLMMessage
     import traceback
+
+    from app.services.llm.adapters import (
+        BaiduAdapter,
+        DoubaoAdapter,
+        LiteLLMAdapter,
+        MinimaxAdapter,
+    )
+    from app.services.llm.factory import NATIVE_ONLY_PROVIDERS
+    from app.services.llm.types import LLMConfig, LLMMessage, LLMProvider, LLMRequest
 
     start_time = time.time()
     adapter = None
@@ -1239,7 +1241,7 @@ async def agent_task_llm_preflight(
             ),
             timeout=AGENT_TASK_PREFLIGHT_TIMEOUT_SECONDS,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return AgentTaskLLMPreflightResponse(
             ok=False,
             stage="llm_test",

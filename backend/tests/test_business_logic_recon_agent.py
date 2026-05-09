@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -33,8 +33,8 @@ async def test_business_logic_recon_counts_only_confirmed_queue_pushes():
         event_emitter=None,
     )
 
-    emitted_thoughts: List[str] = []
-    emitted_events: List[Dict[str, Any]] = []
+    emitted_thoughts: list[str] = []
+    emitted_events: list[dict[str, Any]] = []
     steps = [
         BLReconStep(
             thought="准备推送 1 个业务逻辑风险点",

@@ -5,7 +5,7 @@ import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -30,14 +30,14 @@ EXPECTED_FINDINGS = 4
 
 class _RecordingEventEmitter:
     def __init__(self) -> None:
-        self.events: List[Any] = []
+        self.events: list[Any] = []
 
     async def emit(self, event: Any) -> None:
         self.events.append(event)
 
 
 class _FakeLLMService:
-    def get_agent_timeout_config(self) -> Dict[str, int]:
+    def get_agent_timeout_config(self) -> dict[str, int]:
         return {
             "sub_agent_timeout": 60,
             "tool_timeout": 30,
@@ -63,7 +63,7 @@ class ParallelStubAgent:
         self._agent_id = f"{self.name}-{id(self)}"
         self.parent_id = None
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         if callable(self._run_impl):
             return await self._run_impl(self, input_data)
         return AgentResult(success=True)
@@ -79,10 +79,10 @@ class ParallelStubAgent:
         self._registered = True
 
 
-def _load_vulnerable_points() -> List[Dict[str, Any]]:
+def _load_vulnerable_points() -> list[dict[str, Any]]:
     source = VULNERABLE_FILE.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(VULNERABLE_FILE))
-    points: List[Dict[str, Any]] = []
+    points: list[dict[str, Any]] = []
     severity_map = {
         "sql_injection": "critical",
         "command_injection": "high",
@@ -117,8 +117,8 @@ def _extract_worker_index(worker_name: str) -> int:
     return 0
 
 
-def _build_recon_run(ctx: Dict[str, Any]):
-    async def _run(agent: ParallelStubAgent, _input_data: Dict[str, Any]) -> AgentResult:
+def _build_recon_run(ctx: dict[str, Any]):
+    async def _run(agent: ParallelStubAgent, _input_data: dict[str, Any]) -> AgentResult:
         queue: InMemoryReconRiskQueue = ctx["recon_queue"]
         task_id: str = ctx["task_id"]
         queue.clear(task_id)
@@ -131,8 +131,8 @@ def _build_recon_run(ctx: Dict[str, Any]):
     return _run
 
 
-def _build_analysis_run(ctx: Dict[str, Any]):
-    async def _run(agent: ParallelStubAgent, agent_input: Dict[str, Any]) -> AgentResult:
+def _build_analysis_run(ctx: dict[str, Any]):
+    async def _run(agent: ParallelStubAgent, agent_input: dict[str, Any]) -> AgentResult:
         risk_point = agent_input.get("risk_point")
         if not risk_point:
             risk_point = json.loads(agent_input.get("context", "{}"))
@@ -164,8 +164,8 @@ def _build_analysis_run(ctx: Dict[str, Any]):
     return _run
 
 
-def _build_verification_run(ctx: Dict[str, Any]):
-    async def _run(agent: ParallelStubAgent, agent_input: Dict[str, Any]) -> AgentResult:
+def _build_verification_run(ctx: dict[str, Any]):
+    async def _run(agent: ParallelStubAgent, agent_input: dict[str, Any]) -> AgentResult:
         finding_payload = json.loads(agent_input.get("context", "{}"))
         worker_name = agent.name
         start = time.perf_counter()
@@ -185,8 +185,8 @@ def _build_verification_run(ctx: Dict[str, Any]):
     return _run
 
 
-def _build_report_run(ctx: Dict[str, Any]):
-    async def _run(agent: ParallelStubAgent, input_data: Dict[str, Any]) -> AgentResult:
+def _build_report_run(ctx: dict[str, Any]):
+    async def _run(agent: ParallelStubAgent, input_data: dict[str, Any]) -> AgentResult:
         finding = input_data.get("finding") or {}
         worker_name = agent.name
         start = time.perf_counter()
@@ -211,8 +211,8 @@ def _build_report_run(ctx: Dict[str, Any]):
     return _run
 
 
-def _max_parallelism(events: List[Dict[str, Any]]) -> int:
-    timeline: List[tuple[float, int]] = []
+def _max_parallelism(events: list[dict[str, Any]]) -> int:
+    timeline: list[tuple[float, int]] = []
     for event in events:
         start = event.get("start")
         end = event.get("end")
@@ -230,7 +230,7 @@ def _max_parallelism(events: List[Dict[str, Any]]) -> int:
 
 
 @pytest.fixture
-def instrumentation() -> Dict[str, List[Dict[str, Any]]]:
+def instrumentation() -> dict[str, list[dict[str, Any]]]:
     return {"analysis_events": [], "verification_events": [], "report_events": []}
 
 

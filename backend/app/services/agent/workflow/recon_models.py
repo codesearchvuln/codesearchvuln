@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 import fnmatch
 import os
 import posixpath
 import re
-from typing import Any, Dict, Iterable, List, Sequence
-
+from collections.abc import Iterable, Sequence
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 _LANGUAGE_BY_EXT = {
     ".py": "Python",
@@ -188,10 +188,10 @@ def derive_module_root_directories(
     paths: Sequence[str] | None = None,
     *,
     target_files: Sequence[str] | None = None,
-) -> List[str]:
+) -> list[str]:
     """Collapse a module scope to the highest useful directory roots."""
 
-    candidates: List[str] = []
+    candidates: list[str] = []
     for file_path in target_files or []:
         normalized = _normalize_rel_path(str(file_path or ""))
         if not normalized:
@@ -234,7 +234,7 @@ def derive_module_root_directories(
     if shared_root and shared_root != ".":
         return [shared_root]
 
-    highest_roots: List[str] = []
+    highest_roots: list[str] = []
     for candidate in normalized_candidates:
         top_level = candidate.split("/", 1)[0].strip()
         root = top_level or "."
@@ -248,8 +248,8 @@ def _slugify(value: str) -> str:
     return slug.strip("_") or "root"
 
 
-def _normalize_patterns(patterns: Sequence[str] | None) -> List[str]:
-    normalized: List[str] = []
+def _normalize_patterns(patterns: Sequence[str] | None) -> list[str]:
+    normalized: list[str] = []
     for pattern in patterns or []:
         text = str(pattern or "").strip().replace("\\", "/")
         if text:
@@ -280,7 +280,7 @@ def _iter_project_files(
     project_root: str,
     exclude_patterns: Sequence[str] | None = None,
     target_files: Sequence[str] | None = None,
-) -> List[str]:
+) -> list[str]:
     normalized_targets = {
         _normalize_rel_path(path)
         for path in (target_files or [])
@@ -289,7 +289,7 @@ def _iter_project_files(
     if normalized_targets:
         return sorted(path for path in normalized_targets if not _should_exclude(path, exclude_patterns))
 
-    files: List[str] = []
+    files: list[str] = []
     for root, dirs, filenames in os.walk(project_root):
         rel_dir = _normalize_rel_path(os.path.relpath(root, project_root))
         if rel_dir == ".":
@@ -312,9 +312,9 @@ def _iter_project_files(
     return sorted(files)
 
 
-def _detect_frameworks(files: Sequence[str]) -> List[str]:
+def _detect_frameworks(files: Sequence[str]) -> list[str]:
     lowered = {path.lower() for path in files}
-    frameworks: List[str] = []
+    frameworks: list[str] = []
     for hint_file, label in _FRAMEWORK_FILE_HINTS:
         if hint_file.lower() in lowered and label not in frameworks:
             frameworks.append(label)
@@ -325,8 +325,8 @@ def _detect_frameworks(files: Sequence[str]) -> List[str]:
     return frameworks
 
 
-def _detect_languages(files: Sequence[str]) -> List[str]:
-    languages: List[str] = []
+def _detect_languages(files: Sequence[str]) -> list[str]:
+    languages: list[str] = []
     for path in files:
         ext = os.path.splitext(path)[1].lower()
         language = _LANGUAGE_BY_EXT.get(ext)
@@ -377,34 +377,34 @@ class ReconModuleDescriptor:
     module_id: str
     name: str
     module_type: str
-    paths: List[str] = field(default_factory=list)
+    paths: list[str] = field(default_factory=list)
     description: str = ""
-    entrypoints: List[str] = field(default_factory=list)
-    language_hints: List[str] = field(default_factory=list)
-    framework_hints: List[str] = field(default_factory=list)
-    risk_focus: List[str] = field(default_factory=list)
+    entrypoints: list[str] = field(default_factory=list)
+    language_hints: list[str] = field(default_factory=list)
+    framework_hints: list[str] = field(default_factory=list)
+    risk_focus: list[str] = field(default_factory=list)
     priority: int = 0
     estimated_size: int = 0
-    target_files: List[str] = field(default_factory=list)
+    target_files: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class ProjectReconModel:
     project_root: str
-    languages: List[str] = field(default_factory=list)
-    frameworks: List[str] = field(default_factory=list)
-    entry_points: List[str] = field(default_factory=list)
-    key_directories: List[str] = field(default_factory=list)
-    module_descriptors: List[ReconModuleDescriptor] = field(default_factory=list)
-    global_risk_themes: List[str] = field(default_factory=list)
-    cross_cutting_paths: List[str] = field(default_factory=list)
-    target_files: List[str] = field(default_factory=list)
+    languages: list[str] = field(default_factory=list)
+    frameworks: list[str] = field(default_factory=list)
+    entry_points: list[str] = field(default_factory=list)
+    key_directories: list[str] = field(default_factory=list)
+    module_descriptors: list[ReconModuleDescriptor] = field(default_factory=list)
+    global_risk_themes: list[str] = field(default_factory=list)
+    cross_cutting_paths: list[str] = field(default_factory=list)
+    target_files: list[str] = field(default_factory=list)
     scope_limited: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["module_descriptors"] = [item.to_dict() for item in self.module_descriptors]
         return payload
@@ -414,28 +414,28 @@ class ProjectReconModel:
 class ReconModuleResult:
     module_id: str
     success: bool
-    risk_points: List[Dict[str, Any]] = field(default_factory=list)
+    risk_points: list[dict[str, Any]] = field(default_factory=list)
     risk_points_pushed: int = 0
-    files_read: List[str] = field(default_factory=list)
-    files_discovered: List[str] = field(default_factory=list)
-    directories_scanned: List[str] = field(default_factory=list)
-    input_surfaces: List[str] = field(default_factory=list)
-    trust_boundaries: List[str] = field(default_factory=list)
-    target_files: List[str] = field(default_factory=list)
+    files_read: list[str] = field(default_factory=list)
+    files_discovered: list[str] = field(default_factory=list)
+    directories_scanned: list[str] = field(default_factory=list)
+    input_surfaces: list[str] = field(default_factory=list)
+    trust_boundaries: list[str] = field(default_factory=list)
+    target_files: list[str] = field(default_factory=list)
     summary: str = ""
     error: str | None = None
     module_name: str | None = None
     module_type: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 def build_project_recon_model(
     *,
     project_root: str,
-    project_info: Dict[str, Any] | None = None,
-    config: Dict[str, Any] | None = None,
+    project_info: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> ProjectReconModel:
     config = dict(config or {})
     project_info = dict(project_info or {})
@@ -451,10 +451,10 @@ def build_project_recon_model(
         target_files=target_files,
     )
 
-    grouped: Dict[str, Dict[str, Any]] = {}
-    key_directories: List[str] = []
-    entry_points: List[str] = []
-    cross_cutting_paths: List[str] = []
+    grouped: dict[str, dict[str, Any]] = {}
+    key_directories: list[str] = []
+    entry_points: list[str] = []
+    cross_cutting_paths: list[str] = []
 
     for path in all_files:
         parts = [part for part in path.split("/") if part]
@@ -493,7 +493,7 @@ def build_project_recon_model(
         else _detect_languages(all_files)
     )
 
-    module_descriptors: List[ReconModuleDescriptor] = []
+    module_descriptors: list[ReconModuleDescriptor] = []
     for anchor, payload in grouped.items():
         module_type = str(payload.get("module_type") or "shared")
         files = sorted({_normalize_rel_path(path) for path in payload.get("files") or []})
@@ -536,7 +536,7 @@ def build_project_recon_model(
             )
         )
 
-    global_risk_themes: List[str] = []
+    global_risk_themes: list[str] = []
     for descriptor in module_descriptors:
         for theme in descriptor.risk_focus:
             if theme not in global_risk_themes:
@@ -556,7 +556,7 @@ def build_project_recon_model(
     )
 
 
-def _risk_point_fingerprint(point: Dict[str, Any]) -> str:
+def _risk_point_fingerprint(point: dict[str, Any]) -> str:
     return "|".join(
         [
             str(point.get("file_path") or "").strip().lower(),
@@ -572,8 +572,8 @@ def _risk_point_fingerprint(point: Dict[str, Any]) -> str:
     )
 
 
-def dedupe_risk_points(points: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = []
+def dedupe_risk_points(points: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     for point in points:
         if not isinstance(point, dict):
@@ -590,22 +590,22 @@ def merge_recon_module_results(
     *,
     project_model: ProjectReconModel,
     module_results: Sequence[ReconModuleResult],
-    project_info: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
+    project_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     project_info = dict(project_info or {})
     all_risk_points = dedupe_risk_points(
         point
         for result in module_results
         for point in (result.risk_points or [])
     )
-    input_surfaces: List[str] = []
-    trust_boundaries: List[str] = []
-    target_files: List[str] = []
-    files_read: List[str] = []
-    files_discovered: List[str] = []
-    directories_scanned: List[str] = []
-    summaries: List[str] = []
-    high_risk_areas: List[str] = []
+    input_surfaces: list[str] = []
+    trust_boundaries: list[str] = []
+    target_files: list[str] = []
+    files_read: list[str] = []
+    files_discovered: list[str] = []
+    directories_scanned: list[str] = []
+    summaries: list[str] = []
+    high_risk_areas: list[str] = []
 
     for result in module_results:
         for bucket, items in (

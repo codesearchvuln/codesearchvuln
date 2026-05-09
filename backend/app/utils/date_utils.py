@@ -3,8 +3,7 @@
 提供统一的日期格式化和相对时间计算功能
 """
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 def format_iso(dt: datetime) -> str:
@@ -41,7 +40,7 @@ def format_chinese(dt: datetime) -> str:
     return dt.strftime("%Y年%m月%d日 %H:%M:%S")
 
 
-def relative_time(dt: datetime, now: Optional[datetime] = None) -> str:
+def relative_time(dt: datetime, now: datetime | None = None) -> str:
     """计算相对时间（如"3小时前"）
 
     Args:
@@ -58,13 +57,13 @@ def relative_time(dt: datetime, now: Optional[datetime] = None) -> str:
         '2小时前'
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     # 确保两个时间都有时区信息
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
 
     delta = now - dt
     seconds = delta.total_seconds()

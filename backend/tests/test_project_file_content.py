@@ -1,7 +1,7 @@
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import zipfile
 
 import pytest
 from fastapi import HTTPException

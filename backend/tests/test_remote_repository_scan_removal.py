@@ -1,6 +1,6 @@
-from types import SimpleNamespace
 import sys
 import types
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,9 +29,9 @@ sys.modules.setdefault("weasyprint", weasyprint_stub)
 sys.modules.setdefault("weasyprint.text", weasyprint_text_stub)
 sys.modules.setdefault("weasyprint.text.fonts", weasyprint_fonts_stub)
 
+from app.api.v1.endpoints import projects as projects_module
 from app.api.v1.endpoints.agent_tasks import AgentTaskCreate, create_agent_task
 from app.api.v1.endpoints.config import get_default_config
-from app.api.v1.endpoints import projects as projects_module
 from app.services.report_generator import ReportGenerator
 
 

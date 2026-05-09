@@ -1,6 +1,6 @@
 import sys
 import types
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -40,8 +40,8 @@ def _make_task(task_id: str = "task-1", report: str | None = None) -> SimpleName
         id=task_id,
         project_id="project-1",
         status="completed",
-        completed_at=datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc),
-        started_at=datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 2, 12, 10, 0, 0, tzinfo=UTC),
+        started_at=datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC),
         security_score=75,
         analyzed_files=10,
         total_files=10,
@@ -83,7 +83,7 @@ def _make_finding(**overrides) -> SimpleNamespace:
         "verification_evidence": None,
         "reachability": None,
         "verdict": "confirmed",
-        "created_at": datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC),
     }
     payload.update(overrides)
     return SimpleNamespace(**payload)
@@ -137,14 +137,14 @@ async def test_generate_report_exports_project_then_each_finding_report_in_order
         severity="low",
         title="low title",
         report="# LOW report",
-        created_at=datetime(2026, 2, 12, 10, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 2, 12, 10, 0, 0, tzinfo=UTC),
     )
     high = _make_finding(
         id="finding-high",
         severity="high",
         title="high title",
         report="# HIGH report",
-        created_at=datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC),
     )
 
     db = AsyncMock()

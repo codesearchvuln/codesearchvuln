@@ -6,9 +6,8 @@ import os
 import subprocess
 import sys
 import time
-from shutil import copyfile
 from pathlib import Path
-
+from shutil import copyfile
 
 DEFAULT_PYPI_INDEX_CANDIDATES = (
     "https://mirrors.aliyun.com/pypi/simple/,"

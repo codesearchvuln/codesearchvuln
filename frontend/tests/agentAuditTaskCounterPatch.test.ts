@@ -114,13 +114,13 @@ test("buildAgentAuditTaskFindingCountersPatch 覆盖判真判假后的 task coun
 
   assert.deepEqual(patch, {
     findings_count: 2,
-    verified_count: 1,
+    verified_count: 2,
     false_positive_count: 1,
     critical_count: 1,
     high_count: 0,
     medium_count: 1,
     low_count: 0,
-    verified_critical_count: 0,
+    verified_critical_count: 1,
     verified_high_count: 0,
     verified_medium_count: 1,
     verified_low_count: 0,
@@ -135,8 +135,8 @@ test("buildAgentAuditTaskFindingCountersPatch 覆盖判真判假后的 task coun
         info: 0,
       },
       status_counts: {
-        pending: 1,
-        verified: 1,
+        pending: 0,
+        verified: 2,
         false_positive: 1,
       },
     },

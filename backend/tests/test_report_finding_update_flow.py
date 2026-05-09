@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -15,10 +15,10 @@ from app.services.agent.tools.verification_result_tools import (
 
 
 class _SequenceLLM:
-    def __init__(self, responses: List[str]) -> None:
+    def __init__(self, responses: list[str]) -> None:
         self._responses = list(responses)
 
-    async def complete(self, messages: List[Dict[str, str]], temperature: float = 0.2):
+    async def complete(self, messages: list[dict[str, str]], temperature: float = 0.2):
         if not self._responses:
             raise RuntimeError("no more llm responses")
         return {"content": self._responses.pop(0), "usage": {"total_tokens": 7}}
@@ -45,9 +45,9 @@ class _ReadFileTool(AgentTool):
 
 @pytest.mark.asyncio
 async def test_save_verification_result_generates_finding_identity():
-    buffered: List[Dict[str, Any]] = []
+    buffered: list[dict[str, Any]] = []
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         buffered.extend(findings)
         return len(findings)
 
@@ -73,9 +73,9 @@ async def test_save_verification_result_generates_finding_identity():
 
 @pytest.mark.asyncio
 async def test_save_verification_result_accepts_legacy_batch_findings_payload():
-    buffered: List[Dict[str, Any]] = []
+    buffered: list[dict[str, Any]] = []
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         buffered.extend(findings)
         return len(findings)
 
@@ -109,7 +109,7 @@ async def test_save_verification_result_accepts_legacy_batch_findings_payload():
 
 @pytest.mark.asyncio
 async def test_save_verification_result_is_saved_false_when_callback_saves_zero():
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         return 0
 
     tool = SaveVerificationResultTool(task_id="task-zero-save", save_callback=_save_callback)
@@ -136,10 +136,10 @@ async def test_save_verification_result_is_saved_false_when_callback_saves_zero(
 
 @pytest.mark.asyncio
 async def test_save_verification_result_zero_save_can_retry_same_payload():
-    saved_batches: List[List[Dict[str, Any]]] = []
+    saved_batches: list[list[dict[str, Any]]] = []
     save_results = [0, 1]
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         saved_batches.append([dict(item) for item in findings])
         return save_results.pop(0)
 
@@ -172,9 +172,9 @@ async def test_save_verification_result_zero_save_can_retry_same_payload():
 
 @pytest.mark.asyncio
 async def test_save_verification_result_clone_for_worker_resets_buffer_and_dedup_state():
-    persisted_batches: List[List[Dict[str, Any]]] = []
+    persisted_batches: list[list[dict[str, Any]]] = []
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         persisted_batches.append([dict(item) for item in findings])
         return len(findings)
 
@@ -210,9 +210,9 @@ async def test_save_verification_result_clone_for_worker_resets_buffer_and_dedup
 
 @pytest.mark.asyncio
 async def test_save_verification_result_can_buffer_without_immediate_persistence():
-    persisted_batches: List[List[Dict[str, Any]]] = []
+    persisted_batches: list[list[dict[str, Any]]] = []
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         persisted_batches.append([dict(item) for item in findings])
         return len(findings)
 
@@ -247,9 +247,9 @@ async def test_save_verification_result_can_buffer_without_immediate_persistence
 
 @pytest.mark.asyncio
 async def test_save_verification_result_normalizes_uncertain_status_to_likely_and_keeps_display_fields():
-    buffered: List[Dict[str, Any]] = []
+    buffered: list[dict[str, Any]] = []
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         buffered.extend(findings)
         return len(findings)
 
@@ -297,9 +297,9 @@ async def test_save_verification_result_normalizes_uncertain_status_to_likely_an
 
 @pytest.mark.asyncio
 async def test_save_verification_result_accepts_nested_finding_payload_and_keeps_verification_metadata():
-    buffered: List[Dict[str, Any]] = []
+    buffered: list[dict[str, Any]] = []
 
-    async def _save_callback(findings: List[Dict[str, Any]]) -> int:
+    async def _save_callback(findings: list[dict[str, Any]]) -> int:
         buffered.extend(findings)
         return len(findings)
 
@@ -414,7 +414,7 @@ def test_report_project_fallback_handles_non_numeric_confidence_text():
 
 @pytest.mark.asyncio
 async def test_update_vulnerability_finding_rejects_verdict_patch():
-    async def _update_callback(identity: str, patch: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    async def _update_callback(identity: str, patch: dict[str, Any], reason: str) -> dict[str, Any]:
         return {"finding_identity": identity, **patch}
 
     tool = UpdateVulnerabilityFindingTool(task_id="task-2", update_callback=_update_callback)
@@ -431,9 +431,9 @@ async def test_update_vulnerability_finding_rejects_verdict_patch():
 
 @pytest.mark.asyncio
 async def test_report_agent_returns_updated_finding_after_update_tool():
-    updated_findings: List[Dict[str, Any]] = []
+    updated_findings: list[dict[str, Any]] = []
 
-    async def _update_callback(identity: str, patch: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    async def _update_callback(identity: str, patch: dict[str, Any], reason: str) -> dict[str, Any]:
         updated = {
             "finding_identity": identity,
             "file_path": "app/api.py",
@@ -510,7 +510,7 @@ async def test_report_agent_returns_updated_finding_after_update_tool():
 
 @pytest.mark.asyncio
 async def test_report_agent_rejects_inconsistent_final_finding_identity():
-    async def _update_callback(identity: str, patch: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    async def _update_callback(identity: str, patch: dict[str, Any], reason: str) -> dict[str, Any]:
         return {
             "finding_identity": "fid:other",
             "title": "app/api.py中correct_func函数SQL注入漏洞",

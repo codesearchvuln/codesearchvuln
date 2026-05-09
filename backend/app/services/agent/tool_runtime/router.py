@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from ..push_finding_payload import normalize_push_finding_payload
 
@@ -11,7 +11,7 @@ from ..push_finding_payload import normalize_push_finding_payload
 class ToolRoute:
     adapter_name: str
     tool_name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
     is_write: bool = False
 
 
@@ -150,7 +150,7 @@ class ToolRouter:
     _FUNCTION_NAME_STOPWORDS = {"if", "for", "while", "switch", "catch", "return"}
 
     @classmethod
-    def _infer_function_name_from_code(cls, value: Any) -> Optional[str]:
+    def _infer_function_name_from_code(cls, value: Any) -> str | None:
         if not isinstance(value, str):
             return None
         code = value.strip()
@@ -170,7 +170,7 @@ class ToolRouter:
         return None
 
     @staticmethod
-    def _normalize_search_scope_directory(value: Any) -> Optional[str]:
+    def _normalize_search_scope_directory(value: Any) -> str | None:
         if not isinstance(value, str):
             return None
         normalized = value.strip().replace("\\", "/").strip("`'\"")
@@ -184,7 +184,7 @@ class ToolRouter:
         return normalized
 
     @staticmethod
-    def _split_path_and_line(value: Any) -> tuple[Optional[str], Optional[int]]:
+    def _split_path_and_line(value: Any) -> tuple[str | None, int | None]:
         if not isinstance(value, str):
             return None, None
         normalized = value.strip().replace("\\", "/").strip("`'\"")
@@ -205,9 +205,9 @@ class ToolRouter:
     @classmethod
     def _merge_search_file_pattern(
         cls,
-        directory: Optional[str],
-        file_pattern: Optional[str],
-    ) -> Optional[str]:
+        directory: str | None,
+        file_pattern: str | None,
+    ) -> str | None:
         normalized_directory = cls._normalize_search_scope_directory(directory)
         normalized_pattern = file_pattern.strip() if isinstance(file_pattern, str) else ""
         normalized_pattern = normalized_pattern.replace("\\", "/").strip("`'\"")
@@ -225,17 +225,17 @@ class ToolRouter:
         return f"{directory_prefix}/{normalized_pattern}"
 
     @staticmethod
-    def _normalize_arguments(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_arguments(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         payload = dict(tool_input or {})
 
-        def _non_empty_string(value: Any) -> Optional[str]:
+        def _non_empty_string(value: Any) -> str | None:
             if isinstance(value, str):
                 normalized = value.strip()
                 if normalized:
                     return normalized
             return None
 
-        def _sanitize_path(value: Any) -> Optional[str]:
+        def _sanitize_path(value: Any) -> str | None:
             normalized = _non_empty_string(value)
             if not normalized:
                 return None
@@ -270,7 +270,7 @@ class ToolRouter:
                 _non_empty_string(payload.get("file_pattern")) or _non_empty_string(payload.get("glob")),
             )
 
-            normalized_payload: Dict[str, Any] = {"regex": is_regex}
+            normalized_payload: dict[str, Any] = {"regex": is_regex}
             if pattern:
                 normalized_payload["pattern"] = pattern
             if path_value:
@@ -373,7 +373,7 @@ class ToolRouter:
         adapter_name, _, _ = route
         return str(adapter_name or "").strip().lower() == self._LOCAL_ROUTE_ADAPTER
 
-    def route(self, tool_name: str, tool_input: Optional[Dict[str, Any]] = None) -> Optional[ToolRoute]:
+    def route(self, tool_name: str, tool_input: dict[str, Any] | None = None) -> ToolRoute | None:
         normalized_name = self._normalize_tool_name(tool_name)
         route = self._route_map.get(normalized_name)
         if route is None:

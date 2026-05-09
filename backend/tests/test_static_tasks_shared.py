@@ -1,9 +1,9 @@
-import sys
-import types
 import subprocess
+import sys
 import threading
 import time
-from datetime import datetime, timezone
+import types
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -16,8 +16,8 @@ docker_stub.errors = types.SimpleNamespace(
 )
 sys.modules.setdefault("docker", docker_stub)
 
-from app.api.v1.endpoints import static_tasks_shared
-from app.api.v1.endpoints.static_tasks_opengrep import get_static_task_progress
+from app.api.v1.endpoints import static_tasks_shared  # noqa: E402
+from app.api.v1.endpoints.static_tasks_opengrep import get_static_task_progress  # noqa: E402
 
 
 def test_ensure_scan_workspace_under_configured_root(tmp_path, monkeypatch):
@@ -215,7 +215,7 @@ def test_record_scan_progress_clears_terminal_state():
 
 def test_prune_scan_progress_store_removes_expired_entries():
     static_tasks_shared._scan_progress_store.clear()
-    now = datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 4, 10, 12, 0, tzinfo=UTC)
     static_tasks_shared._scan_progress_store.update(
         {
             "expired-task": {

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, Mapping, Optional
 
 from app.core.config import settings
 
@@ -20,7 +20,7 @@ def resolve_backend_venv_executable(
     name: str,
     *,
     required: bool = True,
-) -> Optional[str]:
+) -> str | None:
     candidate = get_backend_venv_bin_dir() / str(name).strip()
     if candidate.is_file():
         return str(candidate)
@@ -32,8 +32,8 @@ def resolve_backend_venv_executable(
 
 
 def build_backend_venv_env(
-    base_env: Optional[Mapping[str, str]] = None,
-) -> Dict[str, str]:
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
     env = dict(os.environ if base_env is None else base_env)
     venv_path = str(get_backend_venv_path())
     bin_path = str(get_backend_venv_bin_dir())

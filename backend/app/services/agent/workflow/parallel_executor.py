@@ -13,7 +13,7 @@ import copy
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord
 
@@ -89,7 +89,7 @@ class ParallelPhaseExecutor:
         self,
         *,
         task_id: str,
-        item: Dict[str, Any],
+        item: dict[str, Any],
         queue: Any,
         queue_kind: str,
     ) -> bool:

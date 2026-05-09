@@ -1,14 +1,14 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.api.v1.endpoints.agent_tasks_routes_results import list_agent_findings
 from app.models.agent_task import AgentTask
 from app.models.project import Project
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
 
 
 class _ScalarListResult:
@@ -25,7 +25,7 @@ class _ScalarListResult:
 @pytest.mark.asyncio
 async def test_list_agent_findings_hides_false_positive_by_default():
     task_id = "task-1"
-    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC)
 
     finding_confirmed = SimpleNamespace(
         id="finding-1",
@@ -151,7 +151,7 @@ async def test_list_agent_findings_hides_false_positive_by_default():
 @pytest.mark.asyncio
 async def test_list_agent_findings_verified_only_excludes_pending_and_false_positive():
     task_id = "task-verified"
-    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC)
 
     verified_finding = SimpleNamespace(
         id="finding-verified",
@@ -255,7 +255,7 @@ async def test_list_agent_findings_verified_only_excludes_pending_and_false_posi
 @pytest.mark.asyncio
 async def test_list_agent_findings_verified_only_keeps_status_verified_items():
     task_id = "task-status-verified"
-    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC)
 
     likely_verified_finding = SimpleNamespace(
         id="finding-likely",
@@ -334,7 +334,7 @@ async def test_list_agent_findings_verified_only_keeps_status_verified_items():
 @pytest.mark.asyncio
 async def test_list_agent_findings_verified_only_excludes_status_likely_items():
     task_id = "task-status-likely"
-    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 2, 12, 9, 0, 0, tzinfo=UTC)
 
     likely_finding = SimpleNamespace(
         id="finding-likely-status",

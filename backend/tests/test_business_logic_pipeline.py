@@ -8,7 +8,6 @@ from app.services.agent.business_logic_risk_queue import InMemoryBusinessLogicRi
 from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
 from app.services.agent.workflow.engine import AuditWorkflowEngine
 
-
 TASK_ID = "bl-task-001"
 
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 from app.core.config import settings
 from app.services.flow_parser_runner import get_flow_parser_runner_client
@@ -60,7 +60,7 @@ _TARGET_NODE_TYPES = {
 _PSEUDO_FUNCTION_NAMES = {"__attribute__", "__declspec"}
 
 
-def _normalize_language_token(value: Optional[str]) -> Optional[str]:
+def _normalize_language_token(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     token = value.strip().lower()
@@ -69,8 +69,8 @@ def _normalize_language_token(value: Optional[str]) -> Optional[str]:
     return _LANGUAGE_ALIASES.get(token, token)
 
 
-def _normalize_allowed_languages(values: Iterable[str]) -> List[str]:
-    normalized: List[str] = []
+def _normalize_allowed_languages(values: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
     seen = set()
     for item in values:
         token = _normalize_language_token(item)
@@ -81,7 +81,7 @@ def _normalize_allowed_languages(values: Iterable[str]) -> List[str]:
     return normalized
 
 
-def _is_pseudo_function_name(name: Optional[str]) -> bool:
+def _is_pseudo_function_name(name: str | None) -> bool:
     if not isinstance(name, str):
         return False
     normalized = name.strip().lower()
@@ -99,8 +99,8 @@ class EnclosingFunctionLocator:
     def __init__(
         self,
         *,
-        project_root: Optional[str] = None,
-        allowed_languages: Optional[Iterable[str]] = None,
+        project_root: str | None = None,
+        allowed_languages: Iterable[str] | None = None,
         cli_fallback_enabled: bool = True,
     ):
         configured = allowed_languages or getattr(settings, "FUNCTION_LOCATOR_LANGUAGES", [])
@@ -111,24 +111,24 @@ class EnclosingFunctionLocator:
         self.project_root = Path(project_root).resolve() if project_root else None
         self.cli_fallback_enabled = bool(cli_fallback_enabled)
         self.parser = TreeSitterParser()
-        self._definitions_cache: Dict[str, List[Dict[str, int | str]]] = {}
+        self._definitions_cache: dict[str, list[dict[str, int | str]]] = {}
 
-    def _detect_language(self, file_path: str) -> Optional[str]:
+    def _detect_language(self, file_path: str) -> str | None:
         ext = Path(file_path).suffix.lower()
         language = _EXT_LANGUAGE_MAP.get(ext)
         return _normalize_language_token(language)
 
     def _node_text(self, node: object, code_bytes: bytes) -> str:
         try:
-            start_byte = int(getattr(node, "start_byte"))
-            end_byte = int(getattr(node, "end_byte"))
+            start_byte = int(node.start_byte)
+            end_byte = int(node.end_byte)
             if end_byte <= start_byte:
                 return ""
             return code_bytes[start_byte:end_byte].decode("utf-8", errors="replace")
         except Exception:
             return ""
 
-    def _extract_identifier_from_node(self, node: object, code_bytes: bytes) -> Optional[str]:
+    def _extract_identifier_from_node(self, node: object, code_bytes: bytes) -> str | None:
         node_type = str(getattr(node, "type", ""))
         if node_type in {
             "identifier",
@@ -148,7 +148,7 @@ class EnclosingFunctionLocator:
                 return value
         return None
 
-    def _extract_function_name(self, node: object, language: str, code_bytes: bytes) -> Optional[str]:
+    def _extract_function_name(self, node: object, language: str, code_bytes: bytes) -> str | None:
         try:
             field_name_node = node.child_by_field_name("name")
         except Exception:
@@ -189,12 +189,12 @@ class EnclosingFunctionLocator:
             return candidate
         return None
 
-    def _extract_definitions(self, *, file_path: str, language: str, code: str) -> List[Dict[str, int | str]]:
+    def _extract_definitions(self, *, file_path: str, language: str, code: str) -> list[dict[str, int | str]]:
         cached = self._definitions_cache.get(file_path)
         if cached is not None:
             return cached
 
-        definitions: List[Dict[str, int | str]] = []
+        definitions: list[dict[str, int | str]] = []
         node_types = _TARGET_NODE_TYPES.get(language, set())
         if not node_types:
             self._definitions_cache[file_path] = definitions
@@ -245,10 +245,10 @@ class EnclosingFunctionLocator:
         *,
         full_file_path: str,
         line_start: int,
-        relative_file_path: Optional[str] = None,
-        file_lines: Optional[List[str]] = None,
-    ) -> Dict[str, object]:
-        diagnostics: List[str] = []
+        relative_file_path: str | None = None,
+        file_lines: list[str] | None = None,
+    ) -> dict[str, object]:
+        diagnostics: list[str] = []
         file_path = str(full_file_path)
         language = _normalize_language_token(self._detect_language(file_path))
 

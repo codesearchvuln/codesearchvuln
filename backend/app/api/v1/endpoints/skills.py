@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -15,8 +15,8 @@ from sqlalchemy.future import select
 from app.api import deps
 from app.db.session import get_db
 from app.models.prompt_skill import PromptSkill
-from app.models.user_config import UserConfig
 from app.models.user import User
+from app.models.user_config import UserConfig
 from app.services.agent.skills.prompt_skills import (
     DEFAULT_PROMPT_SKILL_TEMPLATES,
     PROMPT_SKILL_AGENT_KEYS,
@@ -44,29 +44,28 @@ from app.services.agent.skills.scan_core import (
     search_scan_core_skills,
 )
 
-
 router = APIRouter()
 
 
 class SkillCatalogItem(BaseModel):
     skill_id: str
-    tool_type: Optional[Literal["skill", "prompt-builtin", "prompt-custom"]] = None
-    tool_id: Optional[str] = None
+    tool_type: Literal["skill", "prompt-builtin", "prompt-custom"] | None = None
+    tool_id: str | None = None
     name: str
     namespace: str
     summary: str
-    entrypoint: Optional[str] = None
-    aliases: List[str] = Field(default_factory=list)
+    entrypoint: str | None = None
+    aliases: list[str] = Field(default_factory=list)
     has_scripts: bool = False
     has_bin: bool = False
     has_assets: bool = False
-    status_label: Optional[str] = None
-    is_enabled: Optional[bool] = None
-    is_available: Optional[bool] = None
-    resource_kind_label: Optional[str] = None
+    status_label: str | None = None
+    is_enabled: bool | None = None
+    is_available: bool | None = None
+    resource_kind_label: str | None = None
     detail_supported: bool = True
-    agent_key: Optional[str] = None
-    scope: Optional[Literal["global", "agent_specific"]] = None
+    agent_key: str | None = None
+    scope: Literal["global", "agent_specific"] | None = None
 
 
 class SkillCatalogResponse(BaseModel):
@@ -74,9 +73,9 @@ class SkillCatalogResponse(BaseModel):
     total: int = 0
     limit: int = 20
     offset: int = 0
-    supported_agent_keys: List[str] = Field(default_factory=list)
-    items: List[SkillCatalogItem] = Field(default_factory=list)
-    error: Optional[str] = None
+    supported_agent_keys: list[str] = Field(default_factory=list)
+    items: list[SkillCatalogItem] = Field(default_factory=list)
+    error: str | None = None
 
 
 class SkillDetailResponse(BaseModel):
@@ -90,19 +89,19 @@ class SkillDetailResponse(BaseModel):
     source_root: str = ""
     source_dir: str = ""
     source_skill_md: str = ""
-    aliases: List[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
     has_scripts: bool = False
     has_bin: bool = False
     has_assets: bool = False
     files_count: int = 0
-    workflow_content: Optional[str] = None
-    workflow_truncated: Optional[bool] = None
-    workflow_error: Optional[str] = None
+    workflow_content: str | None = None
+    workflow_truncated: bool | None = None
+    workflow_error: str | None = None
     test_supported: bool = False
     test_mode: Literal["single_skill_strict", "structured_tool", "disabled"] = "disabled"
-    test_reason: Optional[str] = None
+    test_reason: str | None = None
     default_test_project_name: Literal["libplist"] = "libplist"
-    tool_test_preset: Optional["ToolTestPreset"] = None
+    tool_test_preset: ToolTestPreset | None = None
 
 
 class SkillTestRequest(BaseModel):
@@ -114,17 +113,17 @@ class ToolTestPreset(BaseModel):
     project_name: Literal["libplist"] = "libplist"
     file_path: str = Field(..., min_length=1, description="目标文件路径")
     function_name: str = Field(..., min_length=1, description="目标函数名")
-    line_start: Optional[int] = Field(default=None, ge=1, description="目标起始行")
-    line_end: Optional[int] = Field(default=None, ge=1, description="目标结束行")
-    tool_input: Dict[str, Any] = Field(default_factory=dict, description="工具输入预置")
+    line_start: int | None = Field(default=None, ge=1, description="目标起始行")
+    line_end: int | None = Field(default=None, ge=1, description="目标结束行")
+    tool_input: dict[str, Any] = Field(default_factory=dict, description="工具输入预置")
 
 
 class StructuredToolTestRequest(BaseModel):
     file_path: str = Field(..., min_length=1, description="目标文件路径")
     function_name: str = Field(..., min_length=1, description="目标函数名")
-    line_start: Optional[int] = Field(default=None, ge=1, description="目标起始行")
-    line_end: Optional[int] = Field(default=None, ge=1, description="目标结束行")
-    tool_input: Dict[str, Any] = Field(default_factory=dict, description="工具执行参数")
+    line_start: int | None = Field(default=None, ge=1, description="目标起始行")
+    line_end: int | None = Field(default=None, ge=1, description="目标结束行")
+    tool_input: dict[str, Any] = Field(default_factory=dict, description="工具执行参数")
 
 
 class PromptSkillItemResponse(BaseModel):
@@ -132,10 +131,10 @@ class PromptSkillItemResponse(BaseModel):
     name: str
     content: str
     scope: Literal["global", "agent_specific"] = "global"
-    agent_key: Optional[str] = None
+    agent_key: str | None = None
     is_active: bool = True
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class PromptSkillBuiltinItemResponse(BaseModel):
@@ -149,25 +148,25 @@ class PromptSkillListResponse(BaseModel):
     total: int = 0
     limit: int = 200
     offset: int = 0
-    supported_agent_keys: List[str] = Field(default_factory=lambda: list(PROMPT_SKILL_AGENT_KEYS))
-    builtin_items: List[PromptSkillBuiltinItemResponse] = Field(default_factory=list)
-    items: List[PromptSkillItemResponse] = Field(default_factory=list)
+    supported_agent_keys: list[str] = Field(default_factory=lambda: list(PROMPT_SKILL_AGENT_KEYS))
+    builtin_items: list[PromptSkillBuiltinItemResponse] = Field(default_factory=list)
+    items: list[PromptSkillItemResponse] = Field(default_factory=list)
 
 
 class PromptSkillCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120, description="技能名称")
     content: str = Field(..., min_length=1, max_length=4000, description="技能内容")
     scope: Literal["global", "agent_specific"] = Field(default="global", description="作用域")
-    agent_key: Optional[str] = Field(default=None, description="智能体 key")
+    agent_key: str | None = Field(default=None, description="智能体 key")
     is_active: bool = Field(default=True, description="是否启用")
 
 
 class PromptSkillUpdateRequest(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=120, description="技能名称")
-    content: Optional[str] = Field(default=None, min_length=1, max_length=4000, description="技能内容")
-    scope: Optional[Literal["global", "agent_specific"]] = Field(default=None, description="作用域")
-    agent_key: Optional[str] = Field(default=None, description="智能体 key")
-    is_active: Optional[bool] = Field(default=None, description="是否启用")
+    name: str | None = Field(default=None, min_length=1, max_length=120, description="技能名称")
+    content: str | None = Field(default=None, min_length=1, max_length=4000, description="技能内容")
+    scope: Literal["global", "agent_specific"] | None = Field(default=None, description="作用域")
+    agent_key: str | None = Field(default=None, description="智能体 key")
+    is_active: bool | None = Field(default=None, description="是否启用")
 
 
 class PromptSkillBuiltinUpdateRequest(BaseModel):
@@ -185,15 +184,15 @@ class SkillResourceDetailResponse(BaseModel):
     resource_kind_label: str
     detail_supported: bool = True
     namespace: str
-    entrypoint: Optional[str] = None
-    agent_key: Optional[str] = None
-    scope: Optional[Literal["global", "agent_specific"]] = None
-    content: Optional[str] = None
-    is_builtin: Optional[bool] = None
-    can_toggle: Optional[bool] = None
-    can_edit: Optional[bool] = None
-    can_delete: Optional[bool] = None
-    scan_core_detail: Optional[SkillDetailResponse] = None
+    entrypoint: str | None = None
+    agent_key: str | None = None
+    scope: Literal["global", "agent_specific"] | None = None
+    content: str | None = None
+    is_builtin: bool | None = None
+    can_toggle: bool | None = None
+    can_edit: bool | None = None
+    can_delete: bool | None = None
+    scan_core_detail: SkillDetailResponse | None = None
 
 
 SkillDetailResponse.model_rebuild()
@@ -238,7 +237,7 @@ def _status_label(is_enabled: bool) -> str:
     return build_status_label(is_enabled=bool(is_enabled))
 
 
-def _build_scan_core_catalog_item(item: Dict[str, Any]) -> SkillCatalogItem:
+def _build_scan_core_catalog_item(item: dict[str, Any]) -> SkillCatalogItem:
     return SkillCatalogItem(**build_scan_core_catalog_item(item))
 
 
@@ -283,7 +282,7 @@ async def _build_external_tool_catalog_payload(
     db: AsyncSession,
     current_user: User,
     query: str,
-    namespace: Optional[str],
+    namespace: str | None,
     limit: int,
     offset: int,
 ) -> SkillCatalogResponse:
@@ -427,7 +426,7 @@ async def _build_skill_resource_detail(
     raise HTTPException(status_code=404, detail="资源类型不存在")
 
 
-def _parse_other_config_payload(raw_value: Any) -> Dict[str, Any]:
+def _parse_other_config_payload(raw_value: Any) -> dict[str, Any]:
     if isinstance(raw_value, dict):
         return dict(raw_value)
     raw_text = str(raw_value or "").strip()
@@ -462,7 +461,7 @@ async def _save_user_builtin_prompt_skill_state(
     record = result.scalar_one_or_none()
 
     if record is None:
-        payload: Dict[str, Any] = {PROMPT_SKILL_BUILTIN_STATE_CONFIG_KEY: normalized_state}
+        payload: dict[str, Any] = {PROMPT_SKILL_BUILTIN_STATE_CONFIG_KEY: normalized_state}
         record = UserConfig(
             user_id=user_id,
             llm_config="{}",
@@ -481,7 +480,7 @@ async def _save_user_builtin_prompt_skill_state(
 @router.get("/catalog", response_model=SkillCatalogResponse)
 async def get_skill_catalog(
     q: str = Query(default="", description="Keyword query for skill search."),
-    namespace: Optional[str] = Query(default=None, description="Filter by namespace."),
+    namespace: str | None = Query(default=None, description="Filter by namespace."),
     resource_mode: Literal["scan_core_only", "external_tools"] = Query(default=RESOURCE_MODE_SCAN_CORE_ONLY),
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -503,16 +502,16 @@ async def get_skill_catalog(
 
 @router.get("/prompt-skills", response_model=PromptSkillListResponse)
 async def list_prompt_skills(
-    scope: Optional[Literal["global", "agent_specific"]] = Query(default=None, description="作用域过滤"),
-    agent_key: Optional[str] = Query(default=None, description="智能体 key 过滤"),
-    is_active: Optional[bool] = Query(default=None, description="启用状态过滤"),
+    scope: Literal["global", "agent_specific"] | None = Query(default=None, description="作用域过滤"),
+    agent_key: str | None = Query(default=None, description="智能体 key 过滤"),
+    is_active: bool | None = Query(default=None, description="启用状态过滤"),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> PromptSkillListResponse:
-    normalized_scope: Optional[str] = None
-    normalized_agent_key: Optional[str] = None
+    normalized_scope: str | None = None
+    normalized_agent_key: str | None = None
 
     if scope is not None:
         normalized_scope, normalized_agent_key = _normalize_scope_agent_or_400(scope, agent_key)
@@ -649,7 +648,7 @@ async def delete_prompt_skill(
     prompt_skill_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     result = await db.execute(
         select(PromptSkill).where(
             PromptSkill.id == prompt_skill_id,

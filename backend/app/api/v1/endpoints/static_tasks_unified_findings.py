@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -30,7 +30,7 @@ class UnifiedFindingItemResponse(BaseModel):
     task_id: str
     rule: str
     file_path: str
-    line: Optional[int] = None
+    line: int | None = None
     severity: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
     confidence: Literal["HIGH", "MEDIUM", "LOW"]
     status: str
@@ -148,12 +148,12 @@ def _build_opengrep_rule_expr():
 
 def _build_unified_union_subquery(
     *,
-    opengrep_task_id: Optional[str],
-    gitleaks_task_id: Optional[str],
-    bandit_task_id: Optional[str],
-    phpstan_task_id: Optional[str],
-    yasa_task_id: Optional[str],
-    pmd_task_id: Optional[str],
+    opengrep_task_id: str | None,
+    gitleaks_task_id: str | None,
+    bandit_task_id: str | None,
+    phpstan_task_id: str | None,
+    yasa_task_id: str | None,
+    pmd_task_id: str | None,
 ):
     statements = []
 
@@ -336,19 +336,19 @@ def _build_sort_expressions(unified_subquery, sort_by: SortByLiteral, sort_order
 
 @router.get("/findings/unified", response_model=UnifiedFindingsPageResponse)
 async def list_unified_findings(
-    opengrep_task_id: Optional[str] = Query(None),
-    gitleaks_task_id: Optional[str] = Query(None),
-    bandit_task_id: Optional[str] = Query(None),
-    phpstan_task_id: Optional[str] = Query(None),
-    yasa_task_id: Optional[str] = Query(None),
-    pmd_task_id: Optional[str] = Query(None),
+    opengrep_task_id: str | None = Query(None),
+    gitleaks_task_id: str | None = Query(None),
+    bandit_task_id: str | None = Query(None),
+    phpstan_task_id: str | None = Query(None),
+    yasa_task_id: str | None = Query(None),
+    pmd_task_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    engine: Optional[EngineLiteral] = Query(None),
-    status: Optional[str] = Query(None),
-    severity: Optional[str] = Query(None),
-    confidence: Optional[str] = Query(None),
-    keyword: Optional[str] = Query(None),
+    engine: EngineLiteral | None = Query(None),
+    status: str | None = Query(None),
+    severity: str | None = Query(None),
+    confidence: str | None = Query(None),
+    keyword: str | None = Query(None),
     sort_by: SortByLiteral = Query("severity"),
     sort_order: SortOrderLiteral = Query("desc"),
     db: AsyncSession = Depends(get_db),

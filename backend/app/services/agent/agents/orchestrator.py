@@ -9,19 +9,23 @@ Orchestrator Agent (编排层) - LLM 驱动 ReAct 模式
 注：子 Agent 仍负责具体审计执行，Orchestrator 负责全局编排与收敛。
 """
 
-import asyncio
 import ast
+import asyncio
 import json
 import logging
 import os
 import re
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from typing import Any
 
-from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
+from ..prompts import CORE_SECURITY_PRINCIPLES, MULTI_AGENT_RULES
+from ..utils.vulnerability_naming import (
+    build_cn_structured_title,
+    is_structured_cn_title,
+    resolve_vulnerability_profile,
+)
+from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent, TaskHandoff
 from .react_parser import parse_react_response
-from ..prompts import MULTI_AGENT_RULES, CORE_SECURITY_PRINCIPLES
-from ..utils.vulnerability_naming import build_cn_structured_title, is_structured_cn_title, resolve_vulnerability_profile
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +41,8 @@ ORCHESTRATOR_SYSTEM_PROMPT = """你是安全审计编排 Agent，负责**自主*
 5. 判断何时审计完成
 
 ## 你可以调度的子 Agent
-1. **recon**: 信息收集 Agent - 分析项目结构、技术栈、入口点。**  
-2. **analysis**: 分析 Agent - 深度代码审计、漏洞检测。**  
+1. **recon**: 信息收集 Agent - 分析项目结构、技术栈、入口点。**
+2. **analysis**: 分析 Agent - 深度代码审计、漏洞检测。**
 3. **verification**: 验证 Agent - 验证发现的漏洞、生成 PoC。
 
 ##  全局漏洞队列机制（逐个验证模式）
@@ -199,7 +203,7 @@ Action Input: {}
 1. **Thought**: 分析当前状态，思考下一步应该做什么
    - 目前收集到了什么信息？
    - 还需要了解什么？
-   - **【recon 返回的风险点列表中有多少条目？是否需要逐个分析？】**  
+   - **【recon 返回的风险点列表中有多少条目？是否需要逐个分析？】**
    - 应该深入分析哪些地方？
    - 有什么发现需要验证？
    - 队列中有多少待验证漏洞？
@@ -218,10 +222,10 @@ Action Input: [JSON 参数]
 
 ## 审计策略建议
 - 先用 recon Agent 了解项目全貌（只需调度一次），**重点关注返回的 `high_risk_areas` 数组。**
-- **解析 recon 结果：** 提取风险点对象列表（每个对象包含 `file_path`、`line_start`、`description`）。  
-- **【逐个分析风险点：** 遍历列表中的每个风险点，依次调度 analysis Agent，每次将单个风险点对象（JSON 字符串）放入 `context`，任务描述为“分析指定风险点：[风险点信息]”。**】**  
-- analysis Agent 会按照提供的风险点进行深度审计，并将发现的漏洞自动推送到队列。  
-- 所有风险点分析完毕后，进入队列验证阶段：检查队列状态（`get_queue_status`），如果队列非空，循环执行 `dequeue_finding` -> `dispatch_agent`(verification) 将 finding 转为 JSON 放入 context，直到队列为空。  
+- **解析 recon 结果：** 提取风险点对象列表（每个对象包含 `file_path`、`line_start`、`description`）。
+- **【逐个分析风险点：** 遍历列表中的每个风险点，依次调度 analysis Agent，每次将单个风险点对象（JSON 字符串）放入 `context`，任务描述为“分析指定风险点：[风险点信息]”。**】**
+- analysis Agent 会按照提供的风险点进行深度审计，并将发现的漏洞自动推送到队列。
+- 所有风险点分析完毕后，进入队列验证阶段：检查队列状态（`get_queue_status`），如果队列非空，循环执行 `dequeue_finding` -> `dispatch_agent`(verification) 将 finding 转为 JSON 放入 context，直到队列为空。
 - 当你认为审计足够全面时，选择 finish.
 
 ## 编排门禁（强约束）
@@ -261,9 +265,9 @@ class AgentStep:
     """执行步骤"""
     thought: str
     action: str
-    action_input: Dict[str, Any]
-    observation: Optional[str] = None
-    sub_agent_result: Optional[AgentResult] = None
+    action_input: dict[str, Any]
+    observation: str | None = None
+    sub_agent_result: AgentResult | None = None
 
 
 class OrchestratorAgent(BaseAgent):
@@ -274,18 +278,18 @@ class OrchestratorAgent(BaseAgent):
     - Orchestrator 执行动作并反馈 Observation
     - 持续迭代直到 LLM 输出 finish
     """
-    
+
     def __init__(
         self,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
-        sub_agents: Optional[Dict[str, BaseAgent]] = None,
+        sub_agents: dict[str, BaseAgent] | None = None,
         tracer=None,
     ):
         # 组合增强的系统提示词，注入多Agent协作规则和核心安全原则
         full_system_prompt = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{CORE_SECURITY_PRINCIPLES}\n\n{MULTI_AGENT_RULES}"
-        
+
         config = AgentConfig(
             name="Orchestrator",
             agent_type=AgentType.ORCHESTRATOR,
@@ -294,43 +298,43 @@ class OrchestratorAgent(BaseAgent):
             system_prompt=full_system_prompt,
         )
         super().__init__(config, llm_service, tools, event_emitter)
-        
+
         self.sub_agents = sub_agents or {}
-        self._conversation_history: List[Dict[str, str]] = []
-        self._steps: List[AgentStep] = []
-        self._all_findings: List[Dict] = []
-        
+        self._conversation_history: list[dict[str, str]] = []
+        self._steps: list[AgentStep] = []
+        self._all_findings: list[dict] = []
+
         #  Tracer 遥测支持
         self.tracer = tracer
 
         #  存储运行时上下文，用于传递给子 Agent
-        self._runtime_context: Dict[str, Any] = {}
+        self._runtime_context: dict[str, Any] = {}
 
         #  跟踪已调度的 Agent 任务，避免重复调度
-        self._dispatched_tasks: Dict[str, int] = {}  # agent_name -> dispatch_count
+        self._dispatched_tasks: dict[str, int] = {}  # agent_name -> dispatch_count
 
         #  保存各个 Agent 的完整结果，用于传递给后续 Agent
-        self._agent_results: Dict[str, Dict[str, Any]] = {}  # agent_name -> full result data
+        self._agent_results: dict[str, dict[str, Any]] = {}  # agent_name -> full result data
 
         #  保存各个 Agent 返回的 TaskHandoff，用于 Agent 间通信
-        self._agent_handoffs: Dict[str, TaskHandoff] = {}  # agent_name -> TaskHandoff
-        self._phase_planning_applied: Dict[str, bool] = {}
+        self._agent_handoffs: dict[str, TaskHandoff] = {}  # agent_name -> TaskHandoff
+        self._phase_planning_applied: dict[str, bool] = {}
         self._verified_queue_fingerprints: set[str] = set()
-        self._recon_queue_snapshot: Dict[str, Any] = {}
-        self._last_recon_risk_point: Optional[Dict[str, Any]] = None
-    
+        self._recon_queue_snapshot: dict[str, Any] = {}
+        self._last_recon_risk_point: dict[str, Any] | None = None
+
     def register_sub_agent(self, name: str, agent: BaseAgent):
         """注册子 Agent"""
         self.sub_agents[name] = agent
 
-    def _dedup_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _dedup_findings(self, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Best-effort dedup to keep deterministic persistence stable.
 
         Key: (file_path, line_start, vulnerability_type)
         """
         if not isinstance(findings, list) or not findings:
             return []
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         seen: set[tuple[str, int, str]] = set()
         for item in findings:
             if not isinstance(item, dict):
@@ -349,7 +353,7 @@ class OrchestratorAgent(BaseAgent):
         return out
 
     @staticmethod
-    def _build_queue_fingerprint(finding: Optional[Dict[str, Any]]) -> Optional[str]:
+    def _build_queue_fingerprint(finding: dict[str, Any] | None) -> str | None:
         if not isinstance(finding, dict):
             return None
         file_path = str(finding.get("file_path") or "").strip().lower()
@@ -366,8 +370,8 @@ class OrchestratorAgent(BaseAgent):
     def _infer_verification_dispatch_reason(
         self,
         dispatch_observation: str,
-        verification_payload: Optional[Dict[str, Any]] = None,
-    ) -> Optional[str]:
+        verification_payload: dict[str, Any] | None = None,
+    ) -> str | None:
         """从调度返回文本与运行诊断中提取 Verification 失败原因。"""
         payload = verification_payload if isinstance(verification_payload, dict) else {}
         run_error = str(payload.get("_run_error") or "").strip()
@@ -403,16 +407,16 @@ class OrchestratorAgent(BaseAgent):
 
     def _build_degraded_verified_findings(
         self,
-        analysis_candidates: List[Dict[str, Any]],
+        analysis_candidates: list[dict[str, Any]],
         degraded_reason: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         在 Verification 重试耗尽时，用 Analysis 候选生成可入库的降级验证结果。
         """
         if not isinstance(analysis_candidates, list) or not analysis_candidates:
             return []
 
-        degraded_findings: List[Dict[str, Any]] = []
+        degraded_findings: list[dict[str, Any]] = []
         for candidate in analysis_candidates:
             if not isinstance(candidate, dict):
                 continue
@@ -485,26 +489,26 @@ class OrchestratorAgent(BaseAgent):
                 degraded_findings.append(normalized)
 
         return self._dedup_findings(degraded_findings)
-    
+
     def cancel(self):
         """
         取消执行 - 同时取消所有子 Agent
-        
+
         重写父类方法，确保取消信号传播到所有子 Agent
         """
         self._cancelled = True
         logger.info(f"[{self.name}] Cancel requested, propagating to {len(self.sub_agents)} sub-agents")
-        
+
         #  传播取消信号到所有子 Agent
         for name, agent in self.sub_agents.items():
             if hasattr(agent, 'cancel'):
                 agent.cancel()
                 logger.info(f"[{self.name}] Cancelled sub-agent: {name}")
-    
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         执行编排任务 - LLM ReAct 编排
-        
+
         Args:
             input_data: {
                 "project_info": 项目信息,
@@ -551,8 +555,8 @@ class OrchestratorAgent(BaseAgent):
 
         final_result = None
         error_message = None
-        last_dequeued_finding: Optional[Dict[str, Any]] = None
-        last_dequeued_fingerprint: Optional[str] = None
+        last_dequeued_finding: dict[str, Any] | None = None
+        last_dequeued_fingerprint: str | None = None
 
         await self.emit_thinking("Orchestrator Agent 启动，LLM 开始自主编排决策...")
 
@@ -770,11 +774,11 @@ Action Input: {{}}
                         try:
                             queue_status_result = await self.execute_tool("get_queue_status", {})
                             queue_data = self._parse_tool_output(queue_status_result)
-                            
+
                             pending_count = 0
                             if isinstance(queue_data, dict):
                                 pending_count = queue_data.get("pending_count") or queue_data.get("queue_status", {}).get("current_size") or 0
-                            
+
                             if pending_count == 0:
                                 await self.emit_event(
                                     "info",
@@ -979,19 +983,19 @@ Action Input: {{}}
                 success=False,
                 error=str(e),
             )
-    
+
     def _build_initial_message(
         self,
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
     ) -> str:
         """构建初始消息"""
         structure = project_info.get('structure', {})
-        
+
         #  检查是否是限定范围的审计
         scope_limited = structure.get('scope_limited', False)
         scope_message = structure.get('scope_message', '')
-        
+
         msg = f"""请开始对以下项目进行安全审计。
 
 ## 项目信息
@@ -1018,7 +1022,7 @@ Action Input: {{}}
 ### skills.md（规范摘要）
 {skills_mem or "(空)"}
 """
-        
+
         #  根据是否限定范围显示不同的结构信息
         if scope_limited:
             msg += f"""
@@ -1029,7 +1033,7 @@ Action Input: {{}}
 """
             for f in structure.get('files', []):
                 msg += f"- {f}\n"
-            
+
             if structure.get('directories'):
                 msg += f"""
 ### 相关目录
@@ -1040,7 +1044,7 @@ Action Input: {{}}
 ## 目录结构
 {json.dumps(structure, ensure_ascii=False, indent=2)}
 """
-        
+
         #  如果配置了 target_files，也明确显示
         target_files = config.get('target_files', [])
         if target_files:
@@ -1082,7 +1086,7 @@ Action Input: {{}}
 预处理状态: {bootstrap_source}
 没有可用候选，请按常规流程执行审计。
 """
-        
+
         msg += f"""
 ## 用户配置
 - 目标漏洞: {config.get('target_vulnerabilities', ['all'])}
@@ -1093,10 +1097,10 @@ Action Input: {{}}
 {', '.join(self.sub_agents.keys()) if self.sub_agents else '(暂无子 Agent)'}
 
 请开始你的审计工作。首先思考应该如何开展，然后决定第一步做什么。"""
-        
+
         return msg
-    
-    def _parse_llm_response(self, response: str) -> Optional[AgentStep]:
+
+    def _parse_llm_response(self, response: str) -> AgentStep | None:
         """解析 LLM 响应"""
         parsed = parse_react_response(
             response,
@@ -1118,7 +1122,7 @@ Action Input: {{}}
         agent_name: str,
         task: str,
         context: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         config = self._runtime_context.get("config", {})
         target_files = config.get("target_files") if isinstance(config, dict) else []
         if not isinstance(target_files, list):
@@ -1146,7 +1150,7 @@ Action Input: {{}}
             ],
         }
 
-    def _normalize_single_risk_point(self, candidate: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_single_risk_point(self, candidate: Any) -> dict[str, Any] | None:
         """标准化单风险点对象。"""
         if not isinstance(candidate, dict):
             return None
@@ -1174,11 +1178,11 @@ Action Input: {{}}
     def _extract_single_risk_point_for_analysis(
         self,
         *,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         context: str,
-        runtime_config: Dict[str, Any],
-        handoff: Optional[TaskHandoff],
-    ) -> Optional[Dict[str, Any]]:
+        runtime_config: dict[str, Any],
+        handoff: TaskHandoff | None,
+    ) -> dict[str, Any] | None:
         """为 analysis 调度提取唯一风险点。优先级：显式参数 > context JSON > handoff/context_data > bootstrap。"""
         explicit = self._normalize_single_risk_point(
             params.get("single_risk_point") or params.get("risk_point")
@@ -1227,15 +1231,15 @@ Action Input: {{}}
                     return normalized
 
         return None
-    
-    async def _dispatch_agent(self, params: Dict[str, Any]) -> str:
+
+    async def _dispatch_agent(self, params: dict[str, Any]) -> str:
         """调度子 Agent"""
         agent_name = params.get("agent", "")
         task = params.get("task", "")
         context = params.get("context", "")
-        
+
         logger.debug(f"[Orchestrator] _dispatch_agent 被调用: agent_name='{agent_name}', task='{task[:50]}...'")
-        
+
         #  尝试大小写不敏感匹配
         agent = self.sub_agents.get(agent_name)
         if not agent:
@@ -1245,18 +1249,18 @@ Action Input: {{}}
             if agent:
                 agent_name = agent_name_lower
                 logger.debug(f"[Orchestrator] 使用小写匹配: {agent_name}")
-        
+
         if not agent:
             available = list(self.sub_agents.keys())
             logger.warning(f"[Orchestrator] Agent '{agent_name}' 不存在，可用: {available}")
             return f"错误: Agent '{agent_name}' 不存在。可用的 Agent: {available}"
-        
+
         # NOTE: TODO 模式用「每个 todo item 的 attempts」控制重试与降级完成。
         # 不再使用“同一 agent 调度次数上限”作为门禁（否则会阻断 todo 重试逻辑）。
         dispatch_count = self._dispatched_tasks.get(agent_name, 0)
         self._dispatched_tasks[agent_name] = dispatch_count + 1
         is_phase_first_dispatch = dispatch_count == 0
-        
+
         #  设置父 Agent ID 并注册到注册表（动态 Agent 树）
         logger.debug(f"[Orchestrator] 准备调度 {agent_name} Agent, agent._registered={agent._registered}")
         agent.set_parent_id(self._agent_id)
@@ -1272,16 +1276,16 @@ Action Input: {{}}
         logger.debug(f"[Orchestrator] 设置 parent_id 完成，准备注册 {agent_name}")
         agent._register_to_registry(task=task)
         logger.debug(f"[Orchestrator] {agent_name} 注册完成，agent._registered={agent._registered}")
-        
+
         await self.emit_event(
             "dispatch",
             f"📤 调度 {agent_name} Agent: {task[:100]}...",
             agent=agent_name,
             task=task,
         )
-        
+
         self._tool_calls += 1
-        
+
         try:
             #  构建子 Agent 输入 - 传递完整的运行时上下文
             project_info = self._runtime_context.get("project_info", {}).copy()
@@ -1347,7 +1351,7 @@ Action Input: {{}}
                     )
                 else:
                     logger.warning("[Orchestrator] Analysis 单风险点注入失败：未解析到有效风险点")
-            
+
             #  支持从队列传递单个漏洞（方案A）
             # 如果 params 包含 finding 或 queue_finding，将其添加到 runtime_config
             queue_finding = params.get("finding") or params.get("queue_finding")
@@ -1357,7 +1361,7 @@ Action Input: {{}}
                     f"[Orchestrator] 传递队列漏洞给 {agent_name}: "
                     f"{queue_finding.get('title', 'N/A')}"
                 )
-            
+
             planning_template_applied = False
             file_planning_payload = params.get("file_planning")
             if not isinstance(file_planning_payload, dict):
@@ -1425,7 +1429,7 @@ Action Input: {{}}
             default_sub_agent_timeout = self._timeout_config.get('sub_agent_timeout', 3000)
             # 设置子 Agent 超时（根据 Agent 类型，recon稍短）
             agent_timeouts = {
-                "recon": min(3000, default_sub_agent_timeout), 
+                "recon": min(3000, default_sub_agent_timeout),
                 "analysis": default_sub_agent_timeout,
                 "verification": default_sub_agent_timeout,
             }
@@ -1477,7 +1481,7 @@ Action Input: {{}}
                     run_with_cancel_check(),
                     timeout=timeout
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(f"[{self.name}] Sub-agent {agent_name} timed out after {timeout}s")
                 self._agent_results[agent_name] = {
                     "_run_success": False,
@@ -1508,7 +1512,7 @@ Action Input: {{}}
                 f"data_keys={list(result.data.keys()) if isinstance(result.data, dict) else 'N/A'}"
             )
 
-            result_payload: Dict[str, Any] = {}
+            result_payload: dict[str, Any] = {}
             if isinstance(result.data, dict):
                 result_payload.update(result.data)
             result_payload["_run_success"] = bool(result.success)
@@ -1552,7 +1556,7 @@ Action Input: {{}}
                             normalized = self._normalize_finding(f)
                             if normalized not in raw_findings:
                                 raw_findings.append(normalized)
-                                logger.info(f"[Orchestrator] Added dict finding from initial_findings")
+                                logger.info("[Orchestrator] Added dict finding from initial_findings")
                         elif isinstance(f, str) and f.strip():
                             #  FIX: Convert string finding to dict format instead of skipping
                             # Recon Agent 有时候会返回字符串格式的发现
@@ -1745,14 +1749,14 @@ Action Input: {{}}
                     logger.info(f"[Orchestrator] Total findings now: {len(self._all_findings)}")
                 else:
                     logger.info(f"[Orchestrator] {agent_name} returned no findings")
-                
+
                 await self.emit_event(
                     "dispatch_complete",
                     f"{agent_name} Agent 完成",
                     agent=agent_name,
                     findings_count=len(self._all_findings),  #  Use total findings count
                 )
-                
+
                 #  根据 Agent 类型构建不同的观察结果
                 if agent_name == "recon":
                     # Recon Agent 返回项目信息
@@ -1775,7 +1779,7 @@ Action Input: {{}}
                     for i, ep in enumerate(data.get('entry_points', [])[:10]):
                         if isinstance(ep, dict):
                             observation += f"{i+1}. [{ep.get('type', 'unknown')}] {ep.get('file', '')}:{ep.get('line', '')}\n"
-                    
+
                     observation += f"""
 ### 高风险区域
 {data.get('high_risk_areas', [])}
@@ -1787,7 +1791,7 @@ Action Input: {{}}
                             observation += f"- {finding}\n"
                         elif isinstance(finding, dict):
                             observation += f"- {finding.get('title', finding)}\n"
-                    
+
                 else:
                     # Analysis/Verification Agent 返回漏洞发现
                     observation = f"""## {agent_name} Agent 执行结果
@@ -1811,14 +1815,14 @@ Action Input: {{}}
 
                     if len(valid_findings) > 10:
                         observation += f"\n... 还有 {len(valid_findings) - 10} 个发现"
-                
+
                 if data.get("summary"):
                     observation += f"\n\n### Agent 总结\n{data['summary']}"
-                
+
                 return observation
             else:
                 return f"## {agent_name} Agent 执行失败\n\n错误: {result.error}"
-                
+
         except Exception as e:
             logger.error(f"Sub-agent dispatch failed: {e}", exc_info=True)
             self._agent_results[agent_name] = {
@@ -1876,7 +1880,7 @@ Action Input: {{}}
 
         return False
 
-    def _build_structured_title(self, finding: Dict[str, Any], fallback: Optional[str] = None) -> str:
+    def _build_structured_title(self, finding: dict[str, Any], fallback: str | None = None) -> str:
         return build_cn_structured_title(
             file_path=finding.get("file_path"),
             function_name=finding.get("function_name"),
@@ -1890,7 +1894,7 @@ Action Input: {{}}
     def _is_structured_cn_title(self, title: str) -> bool:
         return is_structured_cn_title(title)
 
-    def _normalize_finding(self, finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _normalize_finding(self, finding: dict[str, Any]) -> dict[str, Any] | None:
         """
         标准化发现格式
 
@@ -1998,21 +2002,21 @@ Action Input: {{}}
         """汇总当前发现"""
         if not self._all_findings:
             return "目前还没有发现任何漏洞。"
-        
+
         # 统计
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         type_counts = {}
-        
+
         for f in self._all_findings:
             if not isinstance(f, dict):
                 continue
-                
+
             sev = f.get("severity", "low")
             severity_counts[sev] = severity_counts.get(sev, 0) + 1
-            
+
             vtype = f.get("vulnerability_type", "other")
             type_counts[vtype] = type_counts.get(vtype, 0) + 1
-        
+
         summary = f"""## 当前发现汇总
 
 **总计**: {len(self._all_findings)} 个漏洞
@@ -2027,34 +2031,34 @@ Action Input: {{}}
 """
         for vtype, count in type_counts.items():
             summary += f"- {vtype}: {count}\n"
-        
+
         summary += "\n### 详细列表\n"
         for i, f in enumerate(self._all_findings):
             if isinstance(f, dict):
                 summary += f"{i+1}. [{f.get('severity')}] {f.get('title')} ({f.get('file_path')})\n"
-        
+
         return summary
-    
-    def _generate_default_summary(self) -> Dict[str, Any]:
+
+    def _generate_default_summary(self) -> dict[str, Any]:
         """生成默认摘要"""
         severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        
+
         for f in self._all_findings:
             if isinstance(f, dict):
                 sev = f.get("severity", "low")
                 severity_counts[sev] = severity_counts.get(sev, 0) + 1
-        
+
         return {
             "total_findings": len(self._all_findings),
             "severity_distribution": severity_counts,
             "conclusion": "审计完成（未通过 LLM 生成结论）",
         }
-    
-    def get_conversation_history(self) -> List[Dict[str, str]]:
+
+    def get_conversation_history(self) -> list[dict[str, str]]:
         """获取对话历史"""
         return self._conversation_history
 
-    def get_steps(self) -> List[AgentStep]:
+    def get_steps(self) -> list[AgentStep]:
         """获取执行步骤"""
         return self._steps
 
@@ -2063,7 +2067,7 @@ Action Input: {{}}
         target_agent: str,
         task: str,
         context: str,
-    ) -> Optional[TaskHandoff]:
+    ) -> TaskHandoff | None:
         """
         为目标 Agent 构建 TaskHandoff
 
@@ -2088,7 +2092,7 @@ Action Input: {{}}
         # Analysis Agent 需要 Recon 的 handoff
         if target_agent == "analysis" and "recon" in self._agent_handoffs:
             recon_handoff = self._agent_handoffs["recon"]
-            logger.info(f"[Orchestrator] Using Recon's handoff for Analysis Agent")
+            logger.info("[Orchestrator] Using Recon's handoff for Analysis Agent")
             context_data = dict(recon_handoff.context_data)
             key_findings = list(recon_handoff.key_findings)
             bootstrap_findings = (
@@ -2124,11 +2128,11 @@ Action Input: {{}}
         # Verification Agent 需要 Analysis 的 handoff（也可能需要 Recon 的信息）
         if target_agent == "verification" and "analysis" in self._agent_handoffs:
             analysis_handoff = self._agent_handoffs["analysis"]
-            logger.info(f"[Orchestrator] Using Analysis's handoff for Verification Agent")
+            logger.info("[Orchestrator] Using Analysis's handoff for Verification Agent")
 
             # 合并 Recon 的上下文信息（如果有）
             context_data = dict(analysis_handoff.context_data)
-            key_findings: List[Dict[str, Any]] = []
+            key_findings: list[dict[str, Any]] = []
             if "recon" in self._agent_handoffs:
                 recon_handoff = self._agent_handoffs["recon"]
                 context_data["recon_tech_stack"] = recon_handoff.context_data.get("tech_stack", {})
@@ -2136,7 +2140,7 @@ Action Input: {{}}
             bootstrap_findings = self._runtime_context.get("config", {}).get("bootstrap_findings", []) or []
             analysis_findings = self._agent_results.get("analysis", {}).get("findings", []) if isinstance(self._agent_results.get("analysis"), dict) else []
 
-            candidates: List[Dict[str, Any]] = []
+            candidates: list[dict[str, Any]] = []
             for source in (analysis_findings, bootstrap_findings):
                 if not isinstance(source, list):
                     continue
@@ -2144,7 +2148,7 @@ Action Input: {{}}
                     if isinstance(item, dict):
                         candidates.append(item)
 
-            dedup_candidates: List[Dict[str, Any]] = []
+            dedup_candidates: list[dict[str, Any]] = []
             seen_keys: set[tuple[str, int, str, str]] = set()
             for candidate in candidates:
                 file_path = str(candidate.get("file_path") or "").strip().lower()
@@ -2321,7 +2325,7 @@ Action Input: {{}}
                 if isinstance(self._agent_results.get("analysis"), dict)
                 else []
             )
-            candidates: List[Dict[str, Any]] = []
+            candidates: list[dict[str, Any]] = []
             for source in (analysis_items, bootstrap_items):
                 if not isinstance(source, list):
                     continue

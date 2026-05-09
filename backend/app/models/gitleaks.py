@@ -4,19 +4,18 @@ Gitleaks 密钥泄露检测模型 - 数据库表定义
 """
 
 import uuid
-from datetime import datetime
-from typing import Optional, List
+
 from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    Float,
-    Boolean,
-    Text,
-    DateTime,
-    ForeignKey,
     JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
     Index,
+    Integer,
+    String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship

@@ -321,10 +321,10 @@ test("DashboardCommandCenter renders the live single-page dashboard layout", asy
 	assert.match(markup, /任务状态/);
 	assert.match(markup, /横坐标：日期/);
 	assert.match(markup, /纵坐标：漏洞数量/);
-	assert.match(markup, /当日累计新增漏洞发现/);
+	assert.doesNotMatch(markup, /当日累计新增漏洞发现/);
 	assert.match(markup, /当日静态扫描漏洞发现/);
-	assert.match(markup, /当前智能扫描漏洞发现/);
-	assert.match(markup, /混合扫描漏洞发现/);
+	assert.match(markup, /当日智能扫描漏洞发现/);
+	assert.match(markup, /当日混合扫描漏洞发现/);
 	assert.match(markup, /data-panel="trend"/);
 	assert.match(markup, /aria-pressed="true"/);
 	assert.match(markup, /Alpha Gateway/);

@@ -4,10 +4,9 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 import yaml
@@ -30,24 +29,24 @@ from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 from .base import (
     StaticBootstrapFinding,
-    StaticBootstrapScanResult,
     StaticBootstrapScanner,
+    StaticBootstrapScanResult,
 )
 
 
-def _normalize_confidence(value: Any) -> Optional[str]:
+def _normalize_confidence(value: Any) -> str | None:
     normalized = str(value or "").strip().upper()
     if normalized in {"HIGH", "MEDIUM", "LOW"}:
         return normalized
     return None
 
 
-def _extract_rule_lookup_keys(check_id: Any) -> List[str]:
+def _extract_rule_lookup_keys(check_id: Any) -> list[str]:
     raw_check_id = str(check_id or "").strip()
     if not raw_check_id:
         return []
 
-    keys: List[str] = []
+    keys: list[str] = []
 
     def _append(candidate: str) -> None:
         text = str(candidate or "").strip()
@@ -60,7 +59,7 @@ def _extract_rule_lookup_keys(check_id: Any) -> List[str]:
     return keys
 
 
-def _extract_payload_confidence(rule_data: Any) -> Optional[str]:
+def _extract_payload_confidence(rule_data: Any) -> str | None:
     if not isinstance(rule_data, dict):
         return None
 
@@ -89,8 +88,8 @@ def _extract_payload_confidence(rule_data: Any) -> Optional[str]:
     return None
 
 
-def _build_confidence_map(active_rules: List[OpengrepRule]) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
+def _build_confidence_map(active_rules: list[OpengrepRule]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
     for rule in active_rules:
         normalized_confidence = _normalize_confidence(getattr(rule, "confidence", None))
         if not normalized_confidence:
@@ -102,7 +101,7 @@ def _build_confidence_map(active_rules: List[OpengrepRule]) -> Dict[str, str]:
     return mapping
 
 
-def _parse_output(stdout: str) -> List[Dict[str, Any]]:
+def _parse_output(stdout: str) -> list[dict[str, Any]]:
     if not stdout or not stdout.strip():
         return []
 
@@ -117,7 +116,7 @@ def _parse_output(stdout: str) -> List[Dict[str, Any]]:
     if not isinstance(results, list):
         raise ValueError("Invalid opengrep results format")
 
-    parsed: List[Dict[str, Any]] = []
+    parsed: list[dict[str, Any]] = []
     for item in results:
         if isinstance(item, dict):
             parsed.append(item)
@@ -148,18 +147,18 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
     def __init__(
         self,
         *,
-        active_rules: List[OpengrepRule],
+        active_rules: list[OpengrepRule],
         timeout_seconds: int = 900,
-        cancel_check: Optional[Any] = None,
-        exclude_patterns: Optional[List[str]] = None,
+        cancel_check: Any | None = None,
+        exclude_patterns: list[str] | None = None,
     ) -> None:
         self.active_rules = list(active_rules or [])
         self.timeout_seconds = max(1, int(timeout_seconds))
         self.cancel_check = cancel_check
         self.exclude_patterns = _build_core_audit_exclude_patterns(exclude_patterns)
 
-    def _build_merged_rules(self) -> List[Dict[str, Any]]:
-        merged_rules: List[Dict[str, Any]] = []
+    def _build_merged_rules(self) -> list[dict[str, Any]]:
+        merged_rules: list[dict[str, Any]] = []
         for rule in self.active_rules:
             try:
                 parsed_yaml = yaml.safe_load(rule.pattern_yaml)
@@ -177,10 +176,10 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
 
     def _normalize_findings(
         self,
-        payload_findings: List[Dict[str, Any]],
-    ) -> List[StaticBootstrapFinding]:
+        payload_findings: list[dict[str, Any]],
+    ) -> list[StaticBootstrapFinding]:
         confidence_map = _build_confidence_map(self.active_rules)
-        normalized: List[StaticBootstrapFinding] = []
+        normalized: list[StaticBootstrapFinding] = []
 
         for index, payload in enumerate(payload_findings):
             check_id = payload.get("check_id") or payload.get("id")
@@ -237,7 +236,7 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
         output_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
         meta_dir.mkdir(parents=True, exist_ok=True)
-        merged_rule_path: Optional[str] = None
+        merged_rule_path: str | None = None
         report_file = output_dir / "report.json"
 
         try:
@@ -315,7 +314,7 @@ class OpenGrepBootstrapScanner(StaticBootstrapScanner):
                 raise RuntimeError(f"opengrep failed: {stderr_message[:300]}")
 
             findings = self._normalize_findings(payload_findings)
-            result_metadata: Dict[str, Any] = {
+            result_metadata: dict[str, Any] = {
                 "rules_count": len(self.active_rules),
                 "merged_rules_count": len(merged_rules),
                 "timeout_seconds": self.timeout_seconds,

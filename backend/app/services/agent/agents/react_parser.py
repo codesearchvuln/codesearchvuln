@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 from ..json_parser import AgentJsonParser
-
 
 _SECTION_MARKERS = ("Thought:", "Action:", "Action Input:", "Observation:", "Final Answer:")
 
@@ -15,10 +14,10 @@ _SECTION_MARKERS = ("Thought:", "Action:", "Action Input:", "Observation:", "Fin
 @dataclass
 class ParsedReactResponse:
     thought: str = ""
-    action: Optional[str] = None
-    action_input: Dict[str, Any] = field(default_factory=dict)
+    action: str | None = None
+    action_input: dict[str, Any] = field(default_factory=dict)
     is_final: bool = False
-    final_answer: Optional[Dict[str, Any]] = None
+    final_answer: dict[str, Any] | None = None
 
 
 def _normalize_markdown_sections(text: str) -> str:
@@ -91,7 +90,7 @@ def _normalize_markdown_sections(text: str) -> str:
     return normalized
 
 
-def _extract_section(cleaned_text: str, label: str) -> Optional[str]:
+def _extract_section(cleaned_text: str, label: str) -> str | None:
     pattern = (
         rf"{re.escape(label)}\s*(.*?)(?=\n(?:"
         rf"{'|'.join(re.escape(marker) for marker in _SECTION_MARKERS if marker != label)}"
@@ -103,7 +102,7 @@ def _extract_section(cleaned_text: str, label: str) -> Optional[str]:
     return match.group(1).strip()
 
 
-def _extract_action_name(cleaned_text: str) -> Optional[str]:
+def _extract_action_name(cleaned_text: str) -> str | None:
     action_match = re.search(r"Action:\s*([^\n\r]*)", cleaned_text)
     if not action_match:
         return None
@@ -149,7 +148,7 @@ def _strip_fenced_json(text: str) -> str:
 def parse_react_response(
     response: str,
     *,
-    final_default: Optional[Dict[str, Any]] = None,
+    final_default: dict[str, Any] | None = None,
     action_input_raw_key: str = "raw_input",
 ) -> ParsedReactResponse:
     """Parse a ReAct-formatted LLM response with markdown compatibility."""

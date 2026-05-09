@@ -3,14 +3,12 @@
 支持 PHP, Python, JavaScript, Java, Go, Ruby 等语言的沙箱测试
 """
 
-import asyncio
 import json
 import logging
 import os
-import tempfile
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 from pydantic import BaseModel, Field
-from dataclasses import dataclass
 
 from .base import AgentTool, ToolResult
 from .sandbox_tool import SandboxManager
@@ -22,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 class LanguageTestInput(BaseModel):
     """语言测试通用输入"""
-    code: Optional[str] = Field(default=None, description="要执行的代码（与 file_path 二选一）")
-    file_path: Optional[str] = Field(default=None, description="项目中的文件路径（与 code 二选一）")
-    params: Optional[Dict[str, str]] = Field(default=None, description="模拟的请求参数")
-    env_vars: Optional[Dict[str, str]] = Field(default=None, description="环境变量")
+    code: str | None = Field(default=None, description="要执行的代码（与 file_path 二选一）")
+    file_path: str | None = Field(default=None, description="项目中的文件路径（与 code 二选一）")
+    params: dict[str, str] | None = Field(default=None, description="模拟的请求参数")
+    env_vars: dict[str, str] | None = Field(default=None, description="环境变量")
     timeout: int = Field(default=30, description="超时时间（秒）")
 
 
@@ -36,7 +34,7 @@ class BaseLanguageTestTool(AgentTool):
     LANGUAGE_CMD = "echo"
     FILE_EXTENSION = ".txt"
 
-    def __init__(self, sandbox_manager: Optional[SandboxManager] = None, project_root: str = "."):
+    def __init__(self, sandbox_manager: SandboxManager | None = None, project_root: str = "."):
         super().__init__()
         self.sandbox_manager = sandbox_manager or SandboxManager()
         self.project_root = project_root
@@ -45,15 +43,15 @@ class BaseLanguageTestTool(AgentTool):
     def args_schema(self):
         return LanguageTestInput
 
-    def _read_file(self, file_path: str) -> Optional[str]:
+    def _read_file(self, file_path: str) -> str | None:
         """读取文件内容"""
         full_path = os.path.join(self.project_root, file_path)
         if not os.path.exists(full_path):
             return None
-        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(full_path, encoding='utf-8', errors='ignore') as f:
             return f.read()
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None) -> str:
         """构建包装代码 - 子类实现"""
         raise NotImplementedError
 
@@ -61,7 +59,7 @@ class BaseLanguageTestTool(AgentTool):
         """构建执行命令 - 子类实现"""
         raise NotImplementedError
 
-    def _analyze_output(self, result: Dict[str, Any], params: Optional[Dict[str, str]]) -> Dict[str, Any]:
+    def _analyze_output(self, result: dict[str, Any], params: dict[str, str] | None) -> dict[str, Any]:
         """分析输出结果"""
         is_vulnerable = False
         evidence = None
@@ -108,10 +106,10 @@ class BaseLanguageTestTool(AgentTool):
 
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 30,
         **kwargs
     ) -> ToolResult:
@@ -179,7 +177,7 @@ class BaseLanguageTestTool(AgentTool):
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -220,7 +218,7 @@ class PhpTestTool(BaseLanguageTestTool):
 1. 测试文件: {"file_path": "vuln.php", "params": {"cmd": "whoami"}}
 2. 测试代码: {"code": "<?php echo shell_exec($_GET['cmd']); ?>", "params": {"cmd": "id"}}"""
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None) -> str:
         """构建 PHP 包装代码
 
         注意: php -r 不需要 <?php 标签，所以这里生成的是纯 PHP 代码
@@ -293,7 +291,7 @@ class PythonTestTool(BaseLanguageTestTool):
     def args_schema(self):
         return PythonTestInput
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]],
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None,
                            flask_mode: bool = False, django_mode: bool = False) -> str:
         """构建 Python 包装代码"""
         wrapper_parts = []
@@ -373,10 +371,10 @@ class MockRequest:
 
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 30,
         flask_mode: bool = False,
         django_mode: bool = False,
@@ -410,7 +408,7 @@ class MockRequest:
 
         analysis = self._analyze_output(result, params)
 
-        output_parts = [f"🐍 Python 测试结果\n"]
+        output_parts = ["🐍 Python 测试结果\n"]
         if file_path:
             output_parts.append(f"文件: {file_path}")
         if flask_mode:
@@ -430,7 +428,7 @@ class MockRequest:
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -442,15 +440,15 @@ class MockRequest:
                 "language": "Python",
             }
         )
-    def _analyze_output(self, result: Dict[str, Any], params: Optional[Dict]) -> Dict[str, Any]:
+    def _analyze_output(self, result: dict[str, Any], params: dict | None) -> dict[str, Any]:
         """分析沙箱输出，判定漏洞是否存在"""
         stdout = result.get("stdout", "")
         stderr = result.get("stderr", "")
         combined_output = (stdout + stderr).lower()
-    
+
         is_vulnerable = False
         evidence = None
-    
+
         # 1. 检查常见的系统权限信号 (针对命令注入)
         vulnerable_patterns = ["uid=", "root:", "www-data", "nobody", "daemon"]
         for pattern in vulnerable_patterns:
@@ -458,7 +456,7 @@ class MockRequest:
                 is_vulnerable = True
                 evidence = f"Match system signal: {pattern}"
                 break
-            
+
         # 2. 如果提供了 params，检查是否有输入反射 (针对 XSS/SSTI)
         if not is_vulnerable and params:
             for val in params.values():
@@ -483,7 +481,7 @@ class MockRequest:
 class JavaScriptTestInput(LanguageTestInput):
     """JavaScript 测试输入"""
     express_mode: bool = Field(default=False, description="是否模拟 Express.js 请求环境")
-    client_ip: Optional[str] = Field(default=None, description="模拟的客户端来源 IP") # 添加这一行
+    client_ip: str | None = Field(default=None, description="模拟的客户端来源 IP") # 添加这一行
 
 
 class JavaScriptTestTool(BaseLanguageTestTool):
@@ -516,8 +514,8 @@ class JavaScriptTestTool(BaseLanguageTestTool):
     def args_schema(self):
         return JavaScriptTestInput
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]],
-                           express_mode: bool = False, client_ip: Optional[str] = None) -> str:
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None,
+                           express_mode: bool = False, client_ip: str | None = None) -> str:
         """构建 JavaScript 包装代码,仅在需要时注入 IP"""
         wrapper_parts = []
 
@@ -568,13 +566,13 @@ const res = {{
 
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 30,
         express_mode: bool = False,
-        client_ip: Optional[str] = None, # 这里默认为 None
+        client_ip: str | None = None, # 这里默认为 None
         **kwargs
     ) -> ToolResult:
         """执行 JavaScript 测试，支持动态 IP 注入"""
@@ -605,7 +603,7 @@ const res = {{
 
         analysis = self._analyze_output(result, params)
 
-        output_parts = [f"📜 JavaScript 测试结果\n"]
+        output_parts = ["📜 JavaScript 测试结果\n"]
         output_parts.append(f"模式: {'Express.js' if express_mode else 'Standard Node'}")
         if client_ip:
             output_parts.append(f"模拟客户端 IP: {client_ip}")
@@ -626,7 +624,7 @@ const res = {{
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -667,7 +665,7 @@ class JavaTestTool(BaseLanguageTestTool):
 
 注意: Java 代码会被包装在 main 方法中执行。"""
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None) -> str:
         """构建 Java 包装代码，增强 Mock 仿真度"""
         # 检测是否是完整类
         if "class " in code and "public static void main" in code:
@@ -717,10 +715,10 @@ public class Test {{
 
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 60,  # Java 编译需要更长时间
         **kwargs
     ) -> ToolResult:
@@ -752,7 +750,7 @@ public class Test {{
 
         analysis = self._analyze_output(result, params)
 
-        output_parts = [f"☕ Java 测试结果\n"]
+        output_parts = ["☕ Java 测试结果\n"]
         if file_path:
             output_parts.append(f"文件: {file_path}")
         if params:
@@ -770,7 +768,7 @@ public class Test {{
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -809,7 +807,7 @@ class GoTestTool(BaseLanguageTestTool):
 示例:
 {"code": "exec.Command(os.Args[1]).Output()", "params": {"cmd": "whoami"}}"""
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None) -> str:
         """构建 Go 包装代码，处理未使用导入报错并增强 Mock"""
         # 检测是否是完整包
         if "package main" in code and "func main()" in code:
@@ -866,10 +864,10 @@ func main() {{
 
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 60,
         **kwargs
     ) -> ToolResult:
@@ -901,7 +899,7 @@ func main() {{
 
         analysis = self._analyze_output(result, params)
 
-        output_parts = [f"🔵 Go 测试结果\n"]
+        output_parts = ["🔵 Go 测试结果\n"]
         if file_path:
             output_parts.append(f"文件: {file_path}")
         if params:
@@ -918,7 +916,7 @@ func main() {{
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -969,7 +967,7 @@ class RubyTestTool(BaseLanguageTestTool):
     def args_schema(self):
         return RubyTestInput
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]],
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None,
                            rails_mode: bool = False) -> str:
         """构建 Ruby 包装代码"""
         wrapper_parts = []
@@ -1016,10 +1014,10 @@ request = Request.new(params)
 
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 30,
         rails_mode: bool = False,
         **kwargs
@@ -1052,7 +1050,7 @@ request = Request.new(params)
 
         analysis = self._analyze_output(result, params)
 
-        output_parts = [f"💎 Ruby 测试结果\n"]
+        output_parts = ["💎 Ruby 测试结果\n"]
         if file_path:
             output_parts.append(f"文件: {file_path}")
         if rails_mode:
@@ -1070,7 +1068,7 @@ request = Request.new(params)
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -1110,7 +1108,7 @@ class ShellTestTool(BaseLanguageTestTool):
 示例:
 {"code": "eval $1", "params": {"1": "whoami"}}"""
 
-    def _build_wrapper_code(self, code: str, params: Optional[Dict[str, str]]) -> str:
+    def _build_wrapper_code(self, code: str, params: dict[str, str] | None) -> str:
         """构建 Shell 包装代码"""
         wrapper_parts = ["#!/bin/bash"]
 
@@ -1125,7 +1123,7 @@ class ShellTestTool(BaseLanguageTestTool):
                     positional_args[int(key)] = value
                 else:
                     env_vars[key.upper()] = value
-                    
+
             # 1. 注入环境变量
             for key, value in env_vars.items():
                 # 对值进行转义，防止双引号注入
@@ -1141,7 +1139,7 @@ class ShellTestTool(BaseLanguageTestTool):
                     val = positional_args.get(i, "")
                     safe_arg = val.replace('"', '\\"')
                     args_list.append(f'"{safe_arg}"')
-                
+
                 # set -- "arg1" "arg2" 会重置当前 shell 的 $1, $2...
                 wrapper_parts.append(f"set -- {' '.join(args_list)}")
 
@@ -1161,10 +1159,10 @@ class ShellTestTool(BaseLanguageTestTool):
         )
     async def _execute(
         self,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        env_vars: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        env_vars: dict[str, str] | None = None,
         timeout: int = 30,
         **kwargs
     ) -> ToolResult:
@@ -1196,10 +1194,12 @@ class ShellTestTool(BaseLanguageTestTool):
 
         analysis = self._analyze_output(result, params)
 
-        output_parts = [f"🐚 Shell 测试结果\n"]
-        if file_path: output_parts.append(f"脚本: {file_path}")
-        if params: output_parts.append(f"模拟参数: {json.dumps(params, ensure_ascii=False)}")
-        
+        output_parts = ["🐚 Shell 测试结果\n"]
+        if file_path:
+            output_parts.append(f"脚本: {file_path}")
+        if params:
+            output_parts.append(f"模拟参数: {json.dumps(params, ensure_ascii=False)}")
+
         output_parts.append(f"状态: {'执行成功' if result['exit_code'] == 0 else '执行失败'}")
         output_parts.append(f"退出码: {result['exit_code']}")
 
@@ -1211,7 +1211,7 @@ class ShellTestTool(BaseLanguageTestTool):
         if analysis["is_vulnerable"]:
             output_parts.append(f"\n🔴 **漏洞确认**: {analysis['evidence']}")
         else:
-            output_parts.append(f"\n🟡 未能确认漏洞")
+            output_parts.append("\n🟡 未能确认漏洞")
 
         return ToolResult(
             success=True,
@@ -1230,17 +1230,17 @@ class ShellTestTool(BaseLanguageTestTool):
 class UniversalCodeTestInput(BaseModel):
     """通用代码测试输入"""
     language: str = Field(..., description="编程语言: php, python, javascript, java, go, ruby, shell")
-    code: Optional[str] = Field(default=None, description="要执行的代码")
-    file_path: Optional[str] = Field(default=None, description="文件路径")
-    params: Optional[Dict[str, str]] = Field(default=None, description="模拟参数")
-    framework_mode: Optional[str] = Field(default=None, description="框架模式: flask, django, express, rails")
+    code: str | None = Field(default=None, description="要执行的代码")
+    file_path: str | None = Field(default=None, description="文件路径")
+    params: dict[str, str] | None = Field(default=None, description="模拟参数")
+    framework_mode: str | None = Field(default=None, description="框架模式: flask, django, express, rails")
     timeout: int = Field(default=30, description="超时秒数")
 
 
 class UniversalCodeTestTool(AgentTool):
     """通用多语言代码测试工具 - 已对齐统一参数名与 Mock 逻辑"""
 
-    def __init__(self, sandbox_manager: Optional[SandboxManager] = None, project_root: str = "."):
+    def __init__(self, sandbox_manager: SandboxManager | None = None, project_root: str = "."):
         super().__init__()
         self.sandbox_manager = sandbox_manager or SandboxManager()
         self.project_root = project_root
@@ -1284,10 +1284,10 @@ class UniversalCodeTestTool(AgentTool):
     async def _execute(
         self,
         language: str,
-        code: Optional[str] = None,
-        file_path: Optional[str] = None,
-        params: Optional[Dict[str, str]] = None,
-        framework_mode: Optional[str] = None,
+        code: str | None = None,
+        file_path: str | None = None,
+        params: dict[str, str] | None = None,
+        framework_mode: str | None = None,
         timeout: int = 30,
         **kwargs
     ) -> ToolResult:

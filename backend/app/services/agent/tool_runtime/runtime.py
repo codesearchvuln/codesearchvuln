@@ -6,14 +6,12 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Protocol
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastmcp import Client as MCPClient
 from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
-from urllib.parse import urlparse, urlunparse
-
-from app.core.config import settings
 
 from .health_probe import probe_endpoint_readiness
 from .router import ToolRoute, ToolRouter
@@ -22,8 +20,8 @@ from .write_scope import TaskWriteScopeGuard, WriteScopeDecision
 logger = logging.getLogger(__name__)
 
 
-def _normalize_tool_descriptor(tool: Any) -> Optional[Dict[str, Any]]:
-    candidate: Dict[str, Any]
+def _normalize_tool_descriptor(tool: Any) -> dict[str, Any] | None:
+    candidate: dict[str, Any]
     if isinstance(tool, dict):
         candidate = dict(tool)
     elif hasattr(tool, "model_dump"):
@@ -72,7 +70,7 @@ def _normalize_tool_descriptor(tool: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _normalize_tools_payload(payload: Any) -> List[Dict[str, Any]]:
+def _normalize_tools_payload(payload: Any) -> list[dict[str, Any]]:
     raw_tools: Any = payload
     if isinstance(payload, dict):
         if isinstance(payload.get("tools"), list):
@@ -82,7 +80,7 @@ def _normalize_tools_payload(payload: Any) -> List[Dict[str, Any]]:
         elif isinstance(payload.get("result"), list):
             raw_tools = payload.get("result")
     elif hasattr(payload, "tools"):
-        raw_tools = getattr(payload, "tools")
+        raw_tools = payload.tools
     elif hasattr(payload, "model_dump"):
         try:
             dumped = payload.model_dump()  # type: ignore[attr-defined]
@@ -99,7 +97,7 @@ def _normalize_tools_payload(payload: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw_tools, list):
         return []
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     seen_names: set[str] = set()
     for item in raw_tools:
         normalized_item = _normalize_tool_descriptor(item)
@@ -119,10 +117,10 @@ class ToolAdapter(Protocol):
     def is_available(self) -> bool:
         ...
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         ...
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         ...
 
 
@@ -131,8 +129,8 @@ class ToolExecutionResult:
     handled: bool
     success: bool
     data: str = ""
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     should_fallback: bool = False
 
 
@@ -144,9 +142,9 @@ class ToolStdioAdapter:
         self,
         *,
         command: str,
-        args: Optional[list[str]] = None,
-        cwd: Optional[str] = None,
-        env: Optional[Dict[str, str]] = None,
+        args: list[str] | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
         timeout: int = 30,
         runtime_domain: str = "backend",
     ) -> None:
@@ -158,7 +156,7 @@ class ToolStdioAdapter:
         self.runtime_domain = str(runtime_domain or "backend").strip().lower() or "backend"
         self._availability_checked = False
         self._available = False
-        self._availability_reason: Optional[str] = None
+        self._availability_reason: str | None = None
 
     def is_available(self) -> bool:
         if self._availability_checked:
@@ -182,7 +180,7 @@ class ToolStdioAdapter:
         return self._available
 
     @property
-    def availability_reason(self) -> Optional[str]:
+    def availability_reason(self) -> str | None:
         if not self._availability_checked:
             self.is_available()
         return self._availability_reason
@@ -199,7 +197,7 @@ class ToolStdioAdapter:
         )
 
     @staticmethod
-    def _unwrap_tool_response(result: Any) -> Dict[str, Any]:
+    def _unwrap_tool_response(result: Any) -> dict[str, Any]:
         if isinstance(result, dict):
             return result
 
@@ -251,7 +249,7 @@ class ToolStdioAdapter:
         return str(value)
 
     @classmethod
-    def _extract_error_text_from_payload(cls, payload: Dict[str, Any]) -> str:
+    def _extract_error_text_from_payload(cls, payload: dict[str, Any]) -> str:
         if not isinstance(payload, dict):
             return ""
         for key in ("error", "message", "detail", "data", "result"):
@@ -270,7 +268,7 @@ class ToolStdioAdapter:
         _ = tool_name, text
         return False
 
-    def _resolve_project_root_for_bootstrap(self, arguments: Dict[str, Any]) -> Optional[str]:
+    def _resolve_project_root_for_bootstrap(self, arguments: dict[str, Any]) -> str | None:
         for key in ("project_root", "project_path", "root"):
             candidate = str(arguments.get(key) or "").strip()
             if candidate and os.path.isabs(candidate):
@@ -312,7 +310,7 @@ class ToolStdioAdapter:
                 return True
         return False
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         transport = self._build_transport()
         async with MCPClient(transport=transport, timeout=self.timeout) as client:
             list_tools = getattr(client, "list_tools", None)
@@ -321,7 +319,7 @@ class ToolStdioAdapter:
             raw_tools = await list_tools()
         return _normalize_tools_payload(raw_tools)
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         payload_args = dict(arguments or {})
         transport = self._build_transport()
         async with MCPClient(transport=transport, timeout=self.timeout) as client:
@@ -369,8 +367,8 @@ class ToolHttpAdapter:
         url: str,
         timeout: int = 30,
         runtime_domain: str = "backend",
-        headers: Optional[Dict[str, str]] = None,
-        synthetic_tools: Optional[List[Dict[str, Any]]] = None,
+        headers: dict[str, str] | None = None,
+        synthetic_tools: list[dict[str, Any]] | None = None,
     ) -> None:
         self.url = str(url or "").strip()
         self.timeout = max(5, int(timeout))
@@ -379,13 +377,13 @@ class ToolHttpAdapter:
         self.synthetic_tools = _normalize_tools_payload(list(synthetic_tools or []))
         self._availability_checked = False
         self._available = False
-        self._availability_reason: Optional[str] = None
+        self._availability_reason: str | None = None
 
-    def _candidate_urls(self) -> List[str]:
+    def _candidate_urls(self) -> list[str]:
         endpoint = str(self.url or "").strip()
         if not endpoint:
             return []
-        candidates: List[str] = [endpoint]
+        candidates: list[str] = [endpoint]
         parsed = urlparse(endpoint)
         path = str(parsed.path or "").strip()
         if path.endswith("/mcp"):
@@ -399,8 +397,8 @@ class ToolHttpAdapter:
                 candidates.append(alt)
         return candidates
 
-    def _candidate_health_urls(self) -> List[str]:
-        health_urls: List[str] = []
+    def _candidate_health_urls(self) -> list[str]:
+        health_urls: list[str] = []
         for candidate_url in self._candidate_urls():
             parsed = urlparse(candidate_url)
             path = str(parsed.path or "").strip()
@@ -416,7 +414,7 @@ class ToolHttpAdapter:
         return health_urls
 
     @staticmethod
-    def _normalize_tool_payload(data: Any) -> Dict[str, Any]:
+    def _normalize_tool_payload(data: Any) -> dict[str, Any]:
         if isinstance(data, dict):
             if "success" in data:
                 return data
@@ -452,7 +450,7 @@ class ToolHttpAdapter:
         )
         return any(token in text for token in transport_tokens)
 
-    def _resolve_project_root_for_bootstrap(self, arguments: Dict[str, Any]) -> Optional[str]:
+    def _resolve_project_root_for_bootstrap(self, arguments: dict[str, Any]) -> str | None:
         for key in ("project_root", "project_path", "root"):
             candidate = str(arguments.get(key) or "").strip()
             if candidate and os.path.isabs(candidate):
@@ -512,7 +510,7 @@ class ToolHttpAdapter:
         return bool(ready)
 
     @property
-    def availability_reason(self) -> Optional[str]:
+    def availability_reason(self) -> str | None:
         if not self._availability_checked:
             self.is_available()
         return self._availability_reason
@@ -526,13 +524,13 @@ class ToolHttpAdapter:
                 raise
             return MCPClient(candidate_url, timeout=self.timeout)
 
-    async def list_tools(self) -> List[Dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, Any]]:
         candidate_urls = self._candidate_urls()
         if not candidate_urls:
             raise RuntimeError("missing_endpoint")
 
         request_headers = {"content-type": "application/json", **self.headers}
-        last_exc: Optional[BaseException] = None
+        last_exc: BaseException | None = None
 
         for candidate_url in candidate_urls:
             try:
@@ -584,7 +582,7 @@ class ToolHttpAdapter:
             raise last_exc
         raise RuntimeError("http_list_tools_failed")
 
-    async def _call_health_status(self) -> Dict[str, Any]:
+    async def _call_health_status(self) -> dict[str, Any]:
         last_error = "healthcheck_failed"
         for candidate_url in self._candidate_health_urls():
             try:
@@ -604,7 +602,7 @@ class ToolHttpAdapter:
                 continue
         return {"success": False, "error": last_error}
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         normalized_tool_name = str(tool_name or "").strip().lower()
         if normalized_tool_name == "health_status":
             return await self._call_health_status()
@@ -615,7 +613,7 @@ class ToolHttpAdapter:
             raise RuntimeError("missing_endpoint")
 
         request_headers = {"content-type": "application/json", **self.headers}
-        last_exc: Optional[BaseException] = None
+        last_exc: BaseException | None = None
 
         for candidate_url in candidate_urls:
             # Preferred: use official tool HTTP transport.
@@ -718,7 +716,7 @@ class _AdapterSelection:
     adapter_name: str
     adapter: ToolAdapter
     runtime_domain: str
-    fallback_from: Optional[str] = None
+    fallback_from: str | None = None
 
 
 class ToolRuntime:
@@ -750,31 +748,31 @@ class ToolRuntime:
         *,
         enabled: bool,
         prefer_runtime: bool = True,
-        router: Optional[ToolRouter] = None,
-        adapters: Optional[Dict[str, ToolAdapter]] = None,
-        domain_adapters: Optional[Dict[str, Dict[str, ToolAdapter]]] = None,
-        runtime_modes: Optional[Dict[str, str]] = None,
-        required_adapters: Optional[List[str]] = None,
-        write_scope_guard: Optional[TaskWriteScopeGuard] = None,
+        router: ToolRouter | None = None,
+        adapters: dict[str, ToolAdapter] | None = None,
+        domain_adapters: dict[str, dict[str, ToolAdapter]] | None = None,
+        runtime_modes: dict[str, str] | None = None,
+        required_adapters: list[str] | None = None,
+        write_scope_guard: TaskWriteScopeGuard | None = None,
         adapter_failure_threshold: int = 2,
         default_runtime_mode: str = "stdio_only",
         strict_mode: bool = False,
         allow_filesystem_writes: bool = True,
-        project_root: Optional[str] = None,
+        project_root: str | None = None,
     ) -> None:
         self.enabled = bool(enabled)
         self.prefer_runtime = bool(prefer_runtime)
         self.strict_mode = bool(strict_mode)
         self.router = router or ToolRouter()
-        self.adapters: Dict[str, ToolAdapter] = dict(adapters or {})
-        self.domain_adapters: Dict[str, Dict[str, ToolAdapter]] = {}
+        self.adapters: dict[str, ToolAdapter] = dict(adapters or {})
+        self.domain_adapters: dict[str, dict[str, ToolAdapter]] = {}
         for adapter_name, domain_map in (domain_adapters or {}).items():
             normalized_name = str(adapter_name or "").strip()
             if not normalized_name:
                 continue
             if not isinstance(domain_map, dict):
                 continue
-            normalized_domains: Dict[str, ToolAdapter] = {}
+            normalized_domains: dict[str, ToolAdapter] = {}
             for domain_name, adapter in domain_map.items():
                 domain_key = str(domain_name or "").strip().lower()
                 if not domain_key or adapter is None:
@@ -783,12 +781,12 @@ class ToolRuntime:
             if normalized_domains:
                 self.domain_adapters[normalized_name] = normalized_domains
         self.default_runtime_mode = self._normalize_runtime_mode(default_runtime_mode)
-        self.runtime_modes: Dict[str, str] = {
+        self.runtime_modes: dict[str, str] = {
             str(name): self._normalize_runtime_mode(mode)
             for name, mode in (runtime_modes or {}).items()
             if str(name).strip()
         }
-        self.required_adapters: List[str] = [
+        self.required_adapters: list[str] = [
             str(name).strip()
             for name in (required_adapters or [])
             if str(name).strip()
@@ -801,9 +799,9 @@ class ToolRuntime:
             self.project_root = os.path.normpath(normalized_project_root)
         else:
             self.project_root = None
-        self._adapter_failure_counts: Dict[str, int] = {}
-        self._adapter_disabled: Dict[str, bool] = {}
-        self._retrieval_cache: Dict[str, Dict[str, Any]] = {}
+        self._adapter_failure_counts: dict[str, int] = {}
+        self._adapter_disabled: dict[str, bool] = {}
+        self._retrieval_cache: dict[str, dict[str, Any]] = {}
         self._retrieval_cache_hits = 0
         self._retrieval_cache_misses = 0
         self._retrieval_cache_tools = {"read_file", "search_code"}
@@ -833,7 +831,7 @@ class ToolRuntime:
             return self.project_root
         return candidate
 
-    def _normalize_filesystem_arguments(self, route: ToolRoute) -> Dict[str, Any]:
+    def _normalize_filesystem_arguments(self, route: ToolRoute) -> dict[str, Any]:
         arguments = dict(route.arguments or {})
         if not self.project_root:
             return arguments
@@ -882,7 +880,7 @@ class ToolRuntime:
         return self.default_runtime_mode
 
     @staticmethod
-    def _candidate_domains_for_mode(mode: str) -> List[str]:
+    def _candidate_domains_for_mode(mode: str) -> list[str]:
         mode_value = str(mode or "").strip().lower()
         if mode_value == "backend_only":
             return ["backend"]
@@ -903,7 +901,7 @@ class ToolRuntime:
         return domain or "backend"
 
     @staticmethod
-    def _adapter_available(adapter: ToolAdapter) -> Tuple[bool, Optional[str]]:
+    def _adapter_available(adapter: ToolAdapter) -> tuple[bool, str | None]:
         checker = getattr(adapter, "is_available", None)
         if callable(checker):
             try:
@@ -923,11 +921,11 @@ class ToolRuntime:
         return True
 
     @staticmethod
-    def _failure_mode_for_adapter(adapter_name: str) -> Optional[str]:
+    def _failure_mode_for_adapter(adapter_name: str) -> str | None:
         return None
 
     @staticmethod
-    def _is_infra_error(error_text: str, *, tool_name: Optional[str] = None) -> bool:
+    def _is_infra_error(error_text: str, *, tool_name: str | None = None) -> bool:
         text = str(error_text or "").lower()
         if not text:
             return False
@@ -986,7 +984,7 @@ class ToolRuntime:
     def _is_expected_qmd_verify_error(
         *,
         adapter_name: str,
-        agent_name: Optional[str],
+        agent_name: str | None,
         error_text: str,
     ) -> bool:
         _ = adapter_name
@@ -1013,7 +1011,7 @@ class ToolRuntime:
     def _is_adapter_disabled(self, adapter_key: str) -> bool:
         return bool(self._adapter_disabled.get(str(adapter_key or "").strip()))
 
-    def _resolve_adapter(self, route: ToolRoute) -> Tuple[Optional[_AdapterSelection], str]:
+    def _resolve_adapter(self, route: ToolRoute) -> tuple[_AdapterSelection | None, str]:
         adapter_name = str(route.adapter_name or "").strip()
         if not adapter_name:
             return None, "adapter_unavailable"
@@ -1083,13 +1081,13 @@ class ToolRuntime:
             "",
         )
 
-    def _required_adapter_names(self) -> List[str]:
+    def _required_adapter_names(self) -> list[str]:
         if self.required_adapters:
             return list(dict.fromkeys(self.required_adapters))
         inferred = list(self.adapters.keys()) + list(self.domain_adapters.keys())
         return list(dict.fromkeys(inferred))
 
-    def _resolve_adapter_selection(self, adapter_name: str) -> Tuple[Optional[_AdapterSelection], str]:
+    def _resolve_adapter_selection(self, adapter_name: str) -> tuple[_AdapterSelection | None, str]:
         normalized_name = str(adapter_name or "").strip()
         if not normalized_name:
             return None, "adapter_unavailable"
@@ -1101,7 +1099,7 @@ class ToolRuntime:
         )
         return self._resolve_adapter(pseudo_route)
 
-    async def list_adapter_tools(self, adapter_name: str) -> Dict[str, Any]:
+    async def list_adapter_tools(self, adapter_name: str) -> dict[str, Any]:
         if not self.enabled:
             return {
                 "success": False,
@@ -1174,9 +1172,9 @@ class ToolRuntime:
         *,
         adapter_name: str,
         tool_name: str,
-        arguments: Dict[str, Any],
-        agent_name: Optional[str] = None,
-        alias_used: Optional[str] = None,
+        arguments: dict[str, Any],
+        agent_name: str | None = None,
+        alias_used: str | None = None,
     ) -> ToolExecutionResult:
         if not self.enabled:
             return ToolExecutionResult(handled=False, success=False)
@@ -1322,7 +1320,7 @@ class ToolRuntime:
     def should_prefer_runtime(self) -> bool:
         return bool(self.enabled and self.prefer_runtime)
 
-    def get_write_scope_guard(self) -> Optional[TaskWriteScopeGuard]:
+    def get_write_scope_guard(self) -> TaskWriteScopeGuard | None:
         return self.write_scope_guard
 
     def register_evidence_path(self, file_path: Any) -> bool:
@@ -1355,7 +1353,7 @@ class ToolRuntime:
         *,
         tool_name: str,
         route: ToolRoute,
-    ) -> Optional[str]:
+    ) -> str | None:
         normalized_tool = str(tool_name or "").strip().lower()
         if normalized_tool not in self._retrieval_cache_tools:
             return None
@@ -1372,7 +1370,7 @@ class ToolRuntime:
         digest = hashlib.sha1(serialized.encode("utf-8", errors="ignore")).hexdigest()
         return f"{normalized_tool}:{digest}"
 
-    def get_retrieval_cache_stats(self) -> Dict[str, int]:
+    def get_retrieval_cache_stats(self) -> dict[str, int]:
         return {
             "hits": int(self._retrieval_cache_hits),
             "misses": int(self._retrieval_cache_misses),
@@ -1382,8 +1380,8 @@ class ToolRuntime:
     def _metadata_from_write_scope(
         self,
         *,
-        decision: Optional[WriteScopeDecision],
-    ) -> Dict[str, Any]:
+        decision: WriteScopeDecision | None,
+    ) -> dict[str, Any]:
         if not decision:
             return {}
         return {
@@ -1407,7 +1405,7 @@ class ToolRuntime:
         return str(value)
 
     @staticmethod
-    def _route_label(route: Optional[ToolRoute]) -> Optional[str]:
+    def _route_label(route: ToolRoute | None) -> str | None:
         if route is None:
             return None
         adapter_name = str(route.adapter_name or "").strip()
@@ -1425,7 +1423,7 @@ class ToolRuntime:
         *,
         tool_name: str,
         route: ToolRoute,
-    ) -> Optional[ToolRoute]:
+    ) -> ToolRoute | None:
         _ = tool_name
         _ = route
         return None
@@ -1434,15 +1432,15 @@ class ToolRuntime:
         self,
         *,
         tool_name: str,
-        tool_input: Dict[str, Any],
-        agent_name: Optional[str] = None,
-        alias_used: Optional[str] = None,
+        tool_input: dict[str, Any],
+        agent_name: str | None = None,
+        alias_used: str | None = None,
     ) -> ToolExecutionResult:
         if not self.enabled:
             return ToolExecutionResult(handled=False, success=False)
 
         normalized_tool_name = str(tool_name or "").strip().lower()
-        route: Optional[ToolRoute] = self.router.route(tool_name, tool_input)
+        route: ToolRoute | None = self.router.route(tool_name, tool_input)
         if not route:
             return ToolExecutionResult(handled=False, success=False)
         route = self._prepare_route(route)
@@ -1454,7 +1452,7 @@ class ToolRuntime:
         route_primary_label = self._route_label(primary_route)
         route_fallback_label = self._route_label(fallback_route)
 
-        write_decision: Optional[WriteScopeDecision] = None
+        write_decision: WriteScopeDecision | None = None
         if (
             route.is_write
             and str(route.adapter_name or "").strip().lower() == "filesystem"
@@ -1537,7 +1535,7 @@ class ToolRuntime:
                 )
             self._retrieval_cache_misses += 1
 
-        attempt_plan: List[Tuple[str, ToolRoute]] = [("primary", primary_route)]
+        attempt_plan: list[tuple[str, ToolRoute]] = [("primary", primary_route)]
         if fallback_route is not None:
             attempt_plan.append(("fallback", fallback_route))
 
@@ -1709,27 +1707,27 @@ class ToolRuntime:
 
         return ToolExecutionResult(handled=False, success=False)
 
-    def ensure_all_adapters_ready(self, runtime_domain: str = "backend") -> Dict[str, Any]:
+    def ensure_all_adapters_ready(self, runtime_domain: str = "backend") -> dict[str, Any]:
         domain_value = str(runtime_domain or "backend").strip().lower() or "backend"
         required = self._required_adapter_names()
 
-        details: Dict[str, Dict[str, Any]] = {}
-        not_ready: List[Dict[str, str]] = []
+        details: dict[str, dict[str, Any]] = {}
+        not_ready: list[dict[str, str]] = []
 
         for adapter_name in required:
-            adapter_details: Dict[str, Any] = {"required": True, "runtime_mode": self._get_runtime_mode(adapter_name)}
+            adapter_details: dict[str, Any] = {"required": True, "runtime_mode": self._get_runtime_mode(adapter_name)}
             if domain_value == "all":
                 domains = self._candidate_domains_for_mode(self._get_runtime_mode(adapter_name))
                 if not domains:
                     domains = ["backend"]
             else:
                 domains = [domain_value]
-            normalized_domains: List[str] = []
+            normalized_domains: list[str] = []
             for domain in domains:
                 domain_key = str(domain or "").strip().lower()
                 if domain_key and domain_key not in normalized_domains:
                     normalized_domains.append(domain_key)
-            domain_checks: List[Tuple[str, bool, str]] = []
+            domain_checks: list[tuple[str, bool, str]] = []
             for domain in normalized_domains:
                 ready, reason = self._check_adapter_ready_for_domain(adapter_name, domain)
                 adapter_details[domain] = {"ready": ready, "reason": reason}
@@ -1772,7 +1770,7 @@ class ToolRuntime:
             "details": details,
         }
 
-    def _check_adapter_ready_for_domain(self, adapter_name: str, runtime_domain: str) -> Tuple[bool, str]:
+    def _check_adapter_ready_for_domain(self, adapter_name: str, runtime_domain: str) -> tuple[bool, str]:
         adapter_key = str(adapter_name or "").strip()
         domain = str(runtime_domain or "").strip().lower()
         if not adapter_key or not domain:

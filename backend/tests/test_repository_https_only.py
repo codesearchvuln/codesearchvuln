@@ -1,6 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
+from app.api.v1.api import api_router
 from app.api.v1.endpoints.projects import (
     ProjectCreate,
     ProjectUpdate,
@@ -9,7 +10,6 @@ from app.api.v1.endpoints.projects import (
     get_project_files_tree,
     update_project,
 )
-from app.api.v1.api import api_router
 from app.models.project import Project
 
 

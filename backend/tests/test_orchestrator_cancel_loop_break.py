@@ -1,22 +1,21 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
-from app.services.agent.agents.base import AgentResult
 from app.services.agent.agents.orchestrator import OrchestratorAgent
 
 
 @dataclass
 class _CapturedEvent:
     event_type: str
-    message: Optional[str]
-    metadata: Optional[Dict[str, Any]]
+    message: str | None
+    metadata: dict[str, Any] | None
 
 
 class _FakeEventEmitter:
     def __init__(self) -> None:
-        self.events: List[_CapturedEvent] = []
+        self.events: list[_CapturedEvent] = []
 
     async def emit(self, event_data: Any) -> None:
         self.events.append(

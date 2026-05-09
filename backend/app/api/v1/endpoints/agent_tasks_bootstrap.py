@@ -1,7 +1,6 @@
 """Bootstrap scan, scope filtering, and seed building helpers for agent tasks."""
 
 import asyncio
-from contextlib import suppress
 import json
 import logging
 import os
@@ -9,14 +8,15 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 from uuid import uuid4
 
 import yaml
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -39,17 +39,14 @@ from app.models.bandit import BanditRuleState
 from app.models.opengrep import OpengrepRule
 from app.models.yasa import YasaRuleConfig
 from app.runtime.db_contract import unsupported_database_contract_message
-from app.services.bandit_rules_snapshot import load_bandit_builtin_snapshot
 from app.services.agent.bootstrap import (
     BanditBootstrapScanner,
     OpenGrepBootstrapScanner,
     PhpstanBootstrapScanner,
     YasaBootstrapScanner,
 )
+from app.services.bandit_rules_snapshot import load_bandit_builtin_snapshot
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
-from app.services.agent.utils.vulnerability_naming import (
-    normalize_cwe_id as normalize_cwe_id_util,
-)
 from app.services.yasa_language import (
     YASA_SUPPORTED_LANGUAGES_TEXT,
     collect_yasa_language_counts_from_source_tree,
@@ -86,7 +83,7 @@ def _normalize_bandit_rule_id(raw_rule_id: Any) -> str:
     return str(raw_rule_id or "").strip().upper()
 
 
-def _extract_bandit_snapshot_test_ids_for_bootstrap() -> List[str]:
+def _extract_bandit_snapshot_test_ids_for_bootstrap() -> list[str]:
     try:
         payload = load_bandit_builtin_snapshot()
     except FileNotFoundError as exc:
@@ -97,7 +94,7 @@ def _extract_bandit_snapshot_test_ids_for_bootstrap() -> List[str]:
     if not isinstance(raw_rules, list):
         return []
 
-    test_ids: List[str] = []
+    test_ids: list[str] = []
     for raw in raw_rules:
         if not isinstance(raw, dict):
             continue
@@ -112,9 +109,9 @@ def _extract_bandit_snapshot_test_ids_for_bootstrap() -> List[str]:
 
 def _resolve_bandit_effective_rule_ids_for_bootstrap(
     *,
-    snapshot_test_ids: List[str],
-    states_by_test_id: Dict[str, BanditRuleState],
-) -> List[str]:
+    snapshot_test_ids: list[str],
+    states_by_test_id: dict[str, BanditRuleState],
+) -> list[str]:
     return [
         test_id
         for test_id in snapshot_test_ids
@@ -128,7 +125,7 @@ def _resolve_bandit_effective_rule_ids_for_bootstrap(
     ]
 
 
-async def _resolve_bandit_bootstrap_rule_ids(db: AsyncSession) -> List[str]:
+async def _resolve_bandit_bootstrap_rule_ids(db: AsyncSession) -> list[str]:
     snapshot_test_ids = _extract_bandit_snapshot_test_ids_for_bootstrap()
     try:
         result = await db.execute(select(BanditRuleState))
@@ -153,7 +150,7 @@ async def _resolve_bandit_bootstrap_rule_ids(db: AsyncSession) -> List[str]:
     return rule_ids
 
 
-def _to_int(value: Any) -> Optional[int]:
+def _to_int(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -167,7 +164,7 @@ def _to_int(value: Any) -> Optional[int]:
     return None
 
 
-def _normalize_verification_level(value: Optional[str]) -> str:
+def _normalize_verification_level(value: str | None) -> str:
     raw_value = str(value or "").strip().lower()
     if not raw_value:
         return "analysis_with_poc_plan"
@@ -175,8 +172,8 @@ def _normalize_verification_level(value: Optional[str]) -> str:
 
 
 def _resolve_agent_task_source_mode(
-    name: Optional[str],
-    description: Optional[str],
+    name: str | None,
+    description: str | None,
 ) -> str:
     normalized_name = str(name or "").strip().lower()
     normalized_description = str(description or "").strip().lower()
@@ -195,8 +192,8 @@ def _resolve_agent_task_source_mode(
 def _resolve_static_bootstrap_config(
     task: AgentTask,
     source_mode: str,
-) -> Dict[str, Any]:
-    defaults: Dict[str, Any] = {
+) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
         "mode": "disabled",
         "opengrep_enabled": False,
         "bandit_enabled": False,
@@ -297,9 +294,9 @@ async def _resolve_embedded_yasa_settings(
     project_root: str,
     programming_languages: Any,
     yasa_language: str,
-    yasa_rule_config_id: Optional[str],
-) -> Dict[str, Any]:
-    selected_yasa_rule_config: Optional[YasaRuleConfig] = None
+    yasa_rule_config_id: str | None,
+) -> dict[str, Any]:
+    selected_yasa_rule_config: YasaRuleConfig | None = None
     normalized_rule_config_id = str(yasa_rule_config_id or "").strip() or None
     if normalized_rule_config_id:
         rule_result = await db.execute(
@@ -327,19 +324,19 @@ async def _resolve_embedded_yasa_settings(
         "requested_language": yasa_language or "auto",
     }
 
-def _normalize_bootstrap_confidence(confidence: Any) -> Optional[str]:
+def _normalize_bootstrap_confidence(confidence: Any) -> str | None:
     normalized = str(confidence or "").strip().upper()
     if normalized in {"HIGH", "MEDIUM", "LOW"}:
         return normalized
     return None
 
 
-def _extract_bootstrap_rule_lookup_keys(check_id: Any) -> List[str]:
+def _extract_bootstrap_rule_lookup_keys(check_id: Any) -> list[str]:
     raw_check_id = str(check_id or "").strip()
     if not raw_check_id:
         return []
 
-    keys: List[str] = []
+    keys: list[str] = []
 
     def _append(value: str) -> None:
         normalized = str(value or "").strip()
@@ -352,7 +349,7 @@ def _extract_bootstrap_rule_lookup_keys(check_id: Any) -> List[str]:
     return keys
 
 
-def _extract_bootstrap_payload_confidence(rule_data: Any) -> Optional[str]:
+def _extract_bootstrap_payload_confidence(rule_data: Any) -> str | None:
     if not isinstance(rule_data, dict):
         return None
 
@@ -383,7 +380,7 @@ def _extract_bootstrap_payload_confidence(rule_data: Any) -> Optional[str]:
     return None
 
 
-def _parse_bootstrap_opengrep_output(stdout: str) -> List[Dict[str, Any]]:
+def _parse_bootstrap_opengrep_output(stdout: str) -> list[dict[str, Any]]:
     if not stdout or not stdout.strip():
         return []
 
@@ -398,7 +395,7 @@ def _parse_bootstrap_opengrep_output(stdout: str) -> List[Dict[str, Any]]:
     if not isinstance(results, list):
         raise ValueError("Invalid opengrep results format")
 
-    parsed: List[Dict[str, Any]] = []
+    parsed: list[dict[str, Any]] = []
     for item in results:
         if isinstance(item, dict):
             parsed.append(item)
@@ -406,9 +403,9 @@ def _parse_bootstrap_opengrep_output(stdout: str) -> List[Dict[str, Any]]:
 
 
 def _build_bootstrap_confidence_map_from_rules(
-    rules: List[OpengrepRule],
-) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
+    rules: list[OpengrepRule],
+) -> dict[str, str]:
+    mapping: dict[str, str] = {}
     for rule in rules:
         normalized_confidence = _normalize_bootstrap_confidence(
             getattr(rule, "confidence", None)
@@ -423,10 +420,10 @@ def _build_bootstrap_confidence_map_from_rules(
 
 
 def _normalize_bootstrap_finding_from_opengrep_payload(
-    finding: Dict[str, Any],
-    confidence_map: Dict[str, str],
+    finding: dict[str, Any],
+    confidence_map: dict[str, str],
     index: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     rule_data = finding if isinstance(finding, dict) else {}
     check_id = rule_data.get("check_id") or rule_data.get("id")
 
@@ -469,9 +466,9 @@ def _normalize_bootstrap_finding_from_opengrep_payload(
 
 
 def _normalize_bootstrap_finding_from_gitleaks_payload(
-    finding: Dict[str, Any],
+    finding: dict[str, Any],
     index: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     rule_id = str(finding.get("RuleID") or "gitleaks_secret").strip()
     description = str(finding.get("Description") or "Gitleaks 密钥泄露候选").strip()
     file_path = normalize_static_scan_file_path(
@@ -499,10 +496,10 @@ def _normalize_bootstrap_finding_from_gitleaks_payload(
 
 
 def _filter_bootstrap_findings(
-    normalized_findings: List[Dict[str, Any]],
-    exclude_patterns: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
-    filtered: List[Dict[str, Any]] = []
+    normalized_findings: list[dict[str, Any]],
+    exclude_patterns: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
     for item in normalized_findings:
         file_path = str(item.get("file_path") or "").strip()
         if file_path and _is_core_ignored_path(file_path, exclude_patterns):
@@ -521,9 +518,9 @@ def _filter_bootstrap_findings(
 
 async def _run_bootstrap_opengrep_scan(
     project_root: str,
-    active_rules: List[OpengrepRule],
-) -> List[Dict[str, Any]]:
-    merged_rules: List[Dict[str, Any]] = []
+    active_rules: list[OpengrepRule],
+) -> list[dict[str, Any]]:
+    merged_rules: list[dict[str, Any]] = []
     for rule in active_rules:
         try:
             parsed_yaml = yaml.safe_load(rule.pattern_yaml)
@@ -566,7 +563,7 @@ async def _run_bootstrap_opengrep_scan(
             pass
 
 
-def _parse_bootstrap_gitleaks_output(stdout: str) -> List[Dict[str, Any]]:
+def _parse_bootstrap_gitleaks_output(stdout: str) -> list[dict[str, Any]]:
     if not stdout or not stdout.strip():
         return []
     output = json.loads(stdout)
@@ -581,7 +578,7 @@ def _parse_bootstrap_gitleaks_output(stdout: str) -> List[Dict[str, Any]]:
 
 async def _run_bootstrap_gitleaks_scan(
     project_root: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     task_id = f"bootstrap-{uuid4().hex}"
     workspace_dir = ensure_scan_workspace("gitleaks-bootstrap", task_id)
     project_dir = ensure_scan_project_dir("gitleaks-bootstrap", task_id)
@@ -640,10 +637,10 @@ async def _run_bootstrap_gitleaks_scan(
 
 
 def _dedupe_bootstrap_findings(
-    findings: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    deduped: List[Dict[str, Any]] = []
-    seen: Set[Tuple[str, int, str, str]] = set()
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, str, str]] = set()
     for item in findings:
         file_path = str(item.get("file_path") or "").strip()
         line_start = int(item.get("line_start") or 0)
@@ -813,21 +810,21 @@ async def _prepare_embedded_bootstrap_findings(
     project_root: str,
     event_emitter: Any,
     programming_languages: Any = None,
-    exclude_patterns: Optional[List[str]] = None,
+    exclude_patterns: list[str] | None = None,
     opengrep_enabled: bool = True,
     bandit_enabled: bool = False,
     gitleaks_enabled: bool = False,
     phpstan_enabled: bool = False,
     yasa_enabled: bool = False,
     yasa_language: str = "auto",
-    yasa_rule_config_id: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], Optional[str], str]:
+    yasa_rule_config_id: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None, str]:
     effective_exclude_patterns = _build_core_audit_exclude_patterns(exclude_patterns)
-    opengrep_candidates: List[Dict[str, Any]] = []
-    bandit_candidates: List[Dict[str, Any]] = []
-    gitleaks_candidates: List[Dict[str, Any]] = []
-    phpstan_candidates: List[Dict[str, Any]] = []
-    yasa_candidates: List[Dict[str, Any]] = []
+    opengrep_candidates: list[dict[str, Any]] = []
+    bandit_candidates: list[dict[str, Any]] = []
+    gitleaks_candidates: list[dict[str, Any]] = []
+    phpstan_candidates: list[dict[str, Any]] = []
+    yasa_candidates: list[dict[str, Any]] = []
     opengrep_total_findings = 0
     bandit_total_findings = 0
     gitleaks_total_findings = 0
@@ -851,7 +848,7 @@ async def _prepare_embedded_bootstrap_findings(
     if opengrep_enabled:
         _log_embedded_bootstrap_start("OpenGrep", project_root)
         active_rules_result = await db.execute(
-            select(OpengrepRule).where(OpengrepRule.is_active == True)
+            select(OpengrepRule).where(OpengrepRule.is_active)
         )
         active_rules = active_rules_result.scalars().all()
         if not active_rules:
@@ -1226,7 +1223,7 @@ async def _prepare_embedded_bootstrap_findings(
         + yasa_total_findings
     )
 
-    enabled_sources: List[str] = []
+    enabled_sources: list[str] = []
     if opengrep_enabled:
         enabled_sources.append("opengrep")
     if bandit_enabled:
@@ -1268,7 +1265,7 @@ async def _prepare_embedded_bootstrap_findings(
 MAX_SEED_FINDINGS = 25
 
 
-def _normalize_seed_from_opengrep(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_seed_from_opengrep(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """将 OpenGrep bootstrap 候选统一转换为 fixed-first 的 seed findings 格式。"""
 
     def map_severity(value: Any) -> str:
@@ -1296,7 +1293,7 @@ def _normalize_seed_from_opengrep(candidates: List[Dict[str, Any]]) -> List[Dict
         except Exception:
             return 0.5
 
-    seeds: List[Dict[str, Any]] = []
+    seeds: list[dict[str, Any]] = []
     for item in candidates or []:
         if not isinstance(item, dict):
             continue
@@ -1333,8 +1330,8 @@ def _normalize_seed_from_opengrep(candidates: List[Dict[str, Any]]) -> List[Dict
         )
 
     # 去重与截断（按 file+line+type）
-    seen: Set[Tuple[str, int, str]] = set()
-    deduped: List[Dict[str, Any]] = []
+    seen: set[tuple[str, int, str]] = set()
+    deduped: list[dict[str, Any]] = []
     for seed in seeds:
         key = (
             str(seed.get("file_path") or ""),
@@ -1352,9 +1349,9 @@ def _normalize_seed_from_opengrep(candidates: List[Dict[str, Any]]) -> List[Dict
 
 def _discover_entry_points_deterministic(
     project_root: str,
-    target_files: Optional[List[str]] = None,
-    exclude_patterns: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    target_files: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
+) -> dict[str, Any]:
     """在 OpenGrep 候选为空时，确定性发现入口点（grep-like + AST 兜底）。"""
 
     normalized_project_root = os.path.abspath(project_root)
@@ -1385,7 +1382,7 @@ def _discover_entry_points_deterministic(
         ".hpp",
     }
 
-    patterns: List[Tuple[str, re.Pattern[str]]] = [
+    patterns: list[tuple[str, re.Pattern[str]]] = [
         ("python_fastapi_route", re.compile(r"^\s*@(?:app|router)\.(get|post|put|delete|patch)\b", re.I)),
         ("python_flask_route", re.compile(r"^\s*@app\.route\b", re.I)),
         ("python_main", re.compile(r"__name__\s*==\s*[\"']__main__[\"']")),
@@ -1398,8 +1395,8 @@ def _discover_entry_points_deterministic(
         ("laravel_route", re.compile(r"\bRoute::(get|post|put|delete|patch)\s*\(", re.I)),
     ]
 
-    entry_points: List[Dict[str, Any]] = []
-    entry_files: List[str] = []
+    entry_points: list[dict[str, Any]] = []
+    entry_files: list[str] = []
 
     def consider_file(rel_path: str) -> bool:
         if include_set is not None and rel_path not in include_set:
@@ -1488,7 +1485,7 @@ def _discover_entry_points_deterministic(
             break
 
     # 2) AST 推断入口函数名（用于 flow pipeline 入口约束）
-    entry_function_names: List[str] = []
+    entry_function_names: list[str] = []
     try:
         from app.services.agent.flow.lightweight.ast_index import ASTCallIndex
 
@@ -1515,10 +1512,10 @@ def _discover_entry_points_deterministic(
 
 async def _build_seed_from_entrypoints(
     project_root: str,
-    target_vulns: Optional[List[str]],
-    entry_function_names: List[str],
-    exclude_patterns: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
+    target_vulns: list[str] | None,
+    entry_function_names: list[str],
+    exclude_patterns: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """基于入口点提示，使用 SmartScanTool 生成固定数量的 seed findings。"""
     from app.services.agent.tools import SmartScanTool
 
@@ -1539,7 +1536,7 @@ async def _build_seed_from_entrypoints(
     if not isinstance(raw_findings, list):
         raw_findings = []
 
-    seeds: List[Dict[str, Any]] = []
+    seeds: list[dict[str, Any]] = []
     for item in raw_findings:
         if not isinstance(item, dict):
             continue
@@ -1579,8 +1576,8 @@ async def _build_seed_from_entrypoints(
         )
 
     # 去重与截断（按严重度+置信度）
-    seen: Set[Tuple[str, int, str]] = set()
-    deduped: List[Dict[str, Any]] = []
+    seen: set[tuple[str, int, str]] = set()
+    deduped: list[dict[str, Any]] = []
     for seed in seeds:
         key = (
             str(seed.get("file_path") or ""),
@@ -1602,9 +1599,9 @@ async def _build_seed_from_entrypoints(
 
 
 def _merge_seed_and_agent_findings(
-    seed_findings: List[Dict[str, Any]],
-    agent_findings: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    seed_findings: list[dict[str, Any]],
+    agent_findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """合并 seed 与 agent findings。
 
     严格门禁模式下，不再将未匹配 seed 兜底入库，避免未验证候选泄漏到最终结果。
@@ -1612,7 +1609,7 @@ def _merge_seed_and_agent_findings(
     seed_findings = [f for f in (seed_findings or []) if isinstance(f, dict)]
     agent_findings = [f for f in (agent_findings or []) if isinstance(f, dict)]
 
-    def key_for(f: Dict[str, Any]) -> Tuple[str, int, str]:
+    def key_for(f: dict[str, Any]) -> tuple[str, int, str]:
         file_path = str(f.get("file_path") or "").replace("\\", "/").strip()
         line_start = _to_int(f.get("line_start")) or _to_int(f.get("line")) or 0
         vuln_type = str(f.get("vulnerability_type") or "").strip().lower()
@@ -1621,10 +1618,10 @@ def _merge_seed_and_agent_findings(
             return (file_path, int(line_start), vuln_type)
         return (file_path, int(line_start), title)
 
-    seed_by_key: Dict[Tuple[str, int, str], Dict[str, Any]] = {key_for(f): f for f in seed_findings}
-    used: Set[Tuple[str, int, str]] = set()
+    seed_by_key: dict[tuple[str, int, str], dict[str, Any]] = {key_for(f): f for f in seed_findings}
+    used: set[tuple[str, int, str]] = set()
 
-    merged: List[Dict[str, Any]] = []
+    merged: list[dict[str, Any]] = []
     for f in agent_findings:
         k = key_for(f)
         seed = seed_by_key.get(k)
@@ -1635,8 +1632,8 @@ def _merge_seed_and_agent_findings(
             merged.append(f)
 
     # 最终去重（防止 agent_findings 内部重复）
-    out: List[Dict[str, Any]] = []
-    seen: Set[Tuple[str, int, str]] = set()
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, str]] = set()
     for f in merged:
         k = key_for(f)
         if k in seen:

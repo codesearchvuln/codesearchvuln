@@ -1,14 +1,13 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.v1.endpoints.static_tasks import (
     get_gitleaks_finding,
-    get_static_task_finding_context,
     get_static_task_finding,
+    get_static_task_finding_context,
 )
 
 

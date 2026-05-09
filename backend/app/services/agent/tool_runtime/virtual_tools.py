@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-from typing import Optional, Type
-
 from pydantic import BaseModel, Field
 
 from ..tools.base import AgentTool, ToolResult
 
 
 class VirtualWriteInput(BaseModel):
-    file_path: Optional[str] = Field(default=None, description="目标文件路径（项目内相对路径）")
-    path: Optional[str] = Field(default=None, description="目标文件路径别名")
-    content: Optional[str] = Field(default=None, description="新文件内容")
-    old_text: Optional[str] = Field(default=None, description="待替换原文")
-    new_text: Optional[str] = Field(default=None, description="替换新文本")
-    reason: Optional[str] = Field(default=None, description="写入原因（建议必填）")
-    finding_id: Optional[str] = Field(default=None, description="关联 finding id")
-    todo_id: Optional[str] = Field(default=None, description="关联 todo id")
-    evidence_ref: Optional[str] = Field(default=None, description="证据引用")
+    file_path: str | None = Field(default=None, description="目标文件路径（项目内相对路径）")
+    path: str | None = Field(default=None, description="目标文件路径别名")
+    content: str | None = Field(default=None, description="新文件内容")
+    old_text: str | None = Field(default=None, description="待替换原文")
+    new_text: str | None = Field(default=None, description="替换新文本")
+    reason: str | None = Field(default=None, description="写入原因（建议必填）")
+    finding_id: str | None = Field(default=None, description="关联 finding id")
+    todo_id: str | None = Field(default=None, description="关联 todo id")
+    evidence_ref: str | None = Field(default=None, description="证据引用")
 
 
 class VirtualWriteTool(AgentTool):
@@ -49,15 +47,15 @@ class VirtualWriteTool(AgentTool):
 
 
 class VirtualReadInput(BaseModel):
-    query: Optional[str] = Field(default=None, description="查询内容（可选）")
-    path: Optional[str] = Field(default=None, description="路径（可选）")
-    file_path: Optional[str] = Field(default=None, description="文件路径（可选）")
-    line_start: Optional[int] = Field(default=None, description="起始行号（可选）")
-    line_end: Optional[int] = Field(default=None, description="结束行号（可选）")
-    function_name: Optional[str] = Field(default=None, description="函数名（可选）")
-    keyword: Optional[str] = Field(default=None, description="关键词（可选）")
-    searches: Optional[list] = Field(default=None, description="QMD 搜索表达式（可选）")
-    collections: Optional[list] = Field(default=None, description="QMD 集合（可选）")
+    query: str | None = Field(default=None, description="查询内容（可选）")
+    path: str | None = Field(default=None, description="路径（可选）")
+    file_path: str | None = Field(default=None, description="文件路径（可选）")
+    line_start: int | None = Field(default=None, description="起始行号（可选）")
+    line_end: int | None = Field(default=None, description="结束行号（可选）")
+    function_name: str | None = Field(default=None, description="函数名（可选）")
+    keyword: str | None = Field(default=None, description="关键词（可选）")
+    searches: list | None = Field(default=None, description="QMD 搜索表达式（可选）")
+    collections: list | None = Field(default=None, description="QMD 集合（可选）")
 
 
 class VirtualReadTool(AgentTool):
@@ -68,8 +66,8 @@ class VirtualReadTool(AgentTool):
         *,
         name: str,
         description: str,
-        args_model: Type[BaseModel] = VirtualReadInput,
-        fallback_tools: Optional[list[str]] = None,
+        args_model: type[BaseModel] = VirtualReadInput,
+        fallback_tools: list[str] | None = None,
     ):
         super().__init__()
         self._name = name
@@ -100,7 +98,7 @@ class VirtualReadTool(AgentTool):
 
 
 class DeprecatedToolInput(BaseModel):
-    reason: Optional[str] = Field(default=None, description="兼容占位参数")
+    reason: str | None = Field(default=None, description="兼容占位参数")
 
 
 class DeprecatedTool(AgentTool):

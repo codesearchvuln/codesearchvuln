@@ -186,8 +186,8 @@ async def test_upload_project_zip_marks_project_info_pending_and_enqueues_refres
 
 @pytest.mark.asyncio
 async def test_generate_project_description_preview_llm_success(monkeypatch):
-    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
     from app.api.v1.endpoints import projects_shared as shared_endpoint
+    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
 
     monkeypatch.setattr(
         uploads_endpoint.CompressionStrategyFactory,
@@ -241,8 +241,8 @@ async def test_generate_project_description_preview_llm_success(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_project_description_preview_fallback_static(monkeypatch):
-    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
     from app.api.v1.endpoints import projects_shared as shared_endpoint
+    from app.api.v1.endpoints import projects_uploads as uploads_endpoint
 
     monkeypatch.setattr(
         uploads_endpoint.CompressionStrategyFactory,
@@ -359,7 +359,6 @@ async def test_get_project_info_does_not_generate_description(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_project_info_repository_is_hidden(monkeypatch):
-    from app.api.v1.endpoints import projects_crud as crud_endpoint
 
     project = SimpleNamespace(
         id="project-1",

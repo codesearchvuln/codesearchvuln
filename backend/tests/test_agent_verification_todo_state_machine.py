@@ -1,17 +1,17 @@
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.services.agent.agents.verification import VerificationAgent
 from app.services.agent.tools.base import ToolResult
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
 
 
 class _CapturedEmitter:
     def __init__(self) -> None:
-        self.events: List[Any] = []
+        self.events: list[Any] = []
 
     async def emit(self, event_data: Any) -> None:
         self.events.append(event_data)
@@ -124,7 +124,7 @@ async def test_verification_todo_state_machine_initial_pending_and_final_transit
     finding_new_events = [ev for ev in emitter.events if getattr(ev, "event_type", "") == "finding_new"]
     assert len(finding_new_events) >= 2
 
-    verification_lifecycle_by_todo: Dict[str, set[str]] = {}
+    verification_lifecycle_by_todo: dict[str, set[str]] = {}
     for ev in emitter.events:
         if getattr(ev, "event_type", "") not in {"finding_new", "finding_update", "finding_verified"}:
             continue

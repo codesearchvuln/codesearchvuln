@@ -1,6 +1,5 @@
 import app.models.gitleaks  # noqa: F401
 import app.models.opengrep  # noqa: F401
-
 from app.services.agent.agents.analysis import ANALYSIS_SYSTEM_PROMPT
 from app.services.agent.agents.business_logic_analysis import BL_ANALYSIS_SYSTEM_PROMPT
 from app.services.agent.agents.business_logic_recon import BL_RECON_SYSTEM_PROMPT
@@ -9,7 +8,6 @@ from app.services.agent.agents.recon import RECON_SYSTEM_PROMPT
 from app.services.agent.agents.recon_subagent import RECON_SUBAGENT_SYSTEM_PROMPT
 from app.services.agent.agents.verification import VERIFICATION_SYSTEM_PROMPT
 from app.services.agent.prompts.system_prompts import TOOL_USAGE_GUIDE
-
 
 REMOVED_PROMPT_TOKENS = [
     "qmd_query",

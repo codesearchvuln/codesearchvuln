@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.services.agent.logic.authz_graph_builder import AuthzGraphBuilder, AuthzNode
 
@@ -8,18 +8,18 @@ from app.services.agent.logic.authz_graph_builder import AuthzGraphBuilder, Auth
 class AuthzRuleEngine:
     """Route/handler -> auth check -> resource access rule engine."""
 
-    def __init__(self, project_root: str, target_files: Optional[List[str]] = None):
+    def __init__(self, project_root: str, target_files: list[str] | None = None):
         self.builder = AuthzGraphBuilder(project_root=project_root, target_files=target_files)
 
     def _as_evidence_line(self, node: AuthzNode, reason: str) -> str:
         return f"{reason}: {node.file_path}:{node.start_line} ({node.name})"
 
-    def analyze_node(self, node: AuthzNode) -> Dict[str, Any]:
+    def analyze_node(self, node: AuthzNode) -> dict[str, Any]:
         missing_authz_checks = node.is_route and node.has_resource_access and not node.has_auth_check
         resource_scope_mismatch = node.has_auth_check and node.has_resource_access and not node.has_object_scope_check
         idor_path = node.is_route and node.has_resource_access and node.has_id_reference and not node.has_object_scope_check
 
-        evidence: List[str] = []
+        evidence: list[str] = []
         if missing_authz_checks:
             evidence.append(self._as_evidence_line(node, "missing_authz_checks"))
         if resource_scope_mismatch:
@@ -35,7 +35,7 @@ class AuthzRuleEngine:
             "evidence": evidence,
         }
 
-    def analyze_finding(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze_finding(self, finding: dict[str, Any]) -> dict[str, Any]:
         file_path = str(finding.get("file_path") or "").strip()
         line_start = finding.get("line_start")
         try:
@@ -66,10 +66,10 @@ class AuthzRuleEngine:
 
         return self.analyze_node(node)
 
-    def analyze_project(self) -> Dict[str, Any]:
+    def analyze_project(self) -> dict[str, Any]:
         nodes = self.builder.build_nodes()
-        evidence: List[str] = []
-        proof_nodes: List[str] = []
+        evidence: list[str] = []
+        proof_nodes: list[str] = []
         missing = 0
         mismatch = 0
         idor = 0

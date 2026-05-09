@@ -1,6 +1,6 @@
 import json
 import threading
-from typing import Any, Dict
+from typing import Any
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from app.models.user_config import UserConfig
 
 GLOBAL_YASA_RUNTIME_CONFIG_KEY = "global_yasa_runtime_config"
 
-_RUNTIME_LIMITS: Dict[str, tuple[int, int]] = {
+_RUNTIME_LIMITS: dict[str, tuple[int, int]] = {
     "yasa_timeout_seconds": (30, 24 * 60 * 60),
     "yasa_orphan_stale_seconds": (30, 24 * 60 * 60),
     "yasa_exec_heartbeat_seconds": (1, 60 * 60),
@@ -18,10 +18,10 @@ _RUNTIME_LIMITS: Dict[str, tuple[int, int]] = {
 }
 
 _runtime_config_cache_lock = threading.Lock()
-_runtime_config_cache: Dict[str, int] = {}
+_runtime_config_cache: dict[str, int] = {}
 
 
-def _build_default_runtime_config() -> Dict[str, int]:
+def _build_default_runtime_config() -> dict[str, int]:
     return {
         "yasa_timeout_seconds": int(getattr(settings, "YASA_TIMEOUT_SECONDS", 600) or 600),
         "yasa_orphan_stale_seconds": int(
@@ -36,8 +36,8 @@ def _build_default_runtime_config() -> Dict[str, int]:
     }
 
 
-def _normalize_runtime_config(raw: Dict[str, Any]) -> Dict[str, int]:
-    normalized: Dict[str, int] = {}
+def _normalize_runtime_config(raw: dict[str, Any]) -> dict[str, int]:
+    normalized: dict[str, int] = {}
     defaults = _build_default_runtime_config()
     for field, (min_value, max_value) in _RUNTIME_LIMITS.items():
         fallback = defaults[field]
@@ -54,14 +54,14 @@ def _normalize_runtime_config(raw: Dict[str, Any]) -> Dict[str, int]:
     return normalized
 
 
-def get_cached_global_yasa_runtime_config() -> Dict[str, int]:
+def get_cached_global_yasa_runtime_config() -> dict[str, int]:
     with _runtime_config_cache_lock:
         if _runtime_config_cache:
             return dict(_runtime_config_cache)
     return _build_default_runtime_config()
 
 
-def update_cached_global_yasa_runtime_config(config: Dict[str, Any]) -> Dict[str, int]:
+def update_cached_global_yasa_runtime_config(config: dict[str, Any]) -> dict[str, int]:
     normalized = _normalize_runtime_config(config)
     with _runtime_config_cache_lock:
         _runtime_config_cache.clear()
@@ -69,7 +69,7 @@ def update_cached_global_yasa_runtime_config(config: Dict[str, Any]) -> Dict[str
     return dict(normalized)
 
 
-def _parse_runtime_config_from_user_config(record: UserConfig) -> Dict[str, int] | None:
+def _parse_runtime_config_from_user_config(record: UserConfig) -> dict[str, int] | None:
     raw_other_config = str(record.other_config or "").strip()
     if not raw_other_config:
         return None
@@ -88,7 +88,7 @@ def _parse_runtime_config_from_user_config(record: UserConfig) -> Dict[str, int]
         return None
 
 
-async def load_global_yasa_runtime_config(db: AsyncSession) -> Dict[str, int]:
+async def load_global_yasa_runtime_config(db: AsyncSession) -> dict[str, int]:
     stmt = select(UserConfig).order_by(desc(UserConfig.updated_at), desc(UserConfig.created_at))
     result = await db.execute(stmt)
     for record in result.scalars().all():
@@ -103,8 +103,8 @@ async def save_global_yasa_runtime_config(
     db: AsyncSession,
     *,
     user_id: str,
-    runtime_config: Dict[str, Any],
-) -> Dict[str, int]:
+    runtime_config: dict[str, Any],
+) -> dict[str, int]:
     normalized = _normalize_runtime_config(runtime_config)
     result = await db.execute(select(UserConfig).where(UserConfig.user_id == user_id))
     user_config = result.scalar_one_or_none()

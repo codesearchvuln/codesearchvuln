@@ -1,8 +1,21 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Index, UniqueConstraint, text
-from sqlalchemy.sql import func
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 from app.db.base import Base
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -10,22 +23,22 @@ class Project(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, index=True, nullable=False)
     description = Column(Text, nullable=True)
-    
+
     # 项目来源类型: 'repository' (远程仓库) 或 'zip' (ZIP上传)
     source_type = Column(String(20), default="repository", nullable=False)
-    
+
     # 仓库相关字段 (仅 source_type='repository' 时使用)
     repository_url = Column(String, nullable=True)
     repository_type = Column(String, default="other")  # github, gitlab, gitea, other
     default_branch = Column(String, default="main")
-    
+
     programming_languages = Column(Text, default="[]")  # Stored as JSON string
     # ZIP 项目归档内容哈希（SHA-256），用于去重上传
     zip_file_hash = Column(String(64), nullable=True, unique=True, index=True)
-    
+
     owner_id = Column(String, ForeignKey("users.id"), nullable=False)
     is_active = Column(Boolean(), default=True)
-    
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -85,7 +98,7 @@ class ProjectMember(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
     role = Column(String, default="member")
     permissions = Column(Text, default="{}")
-    
+
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

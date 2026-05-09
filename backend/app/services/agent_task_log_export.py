@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.models.agent_task import AgentEvent, AgentTask
 
-LOG_TYPE_LABELS: Dict[str, str] = {
+LOG_TYPE_LABELS: dict[str, str] = {
     "thinking": "思考",
     "tool": "工具",
     "phase": "阶段",
@@ -21,7 +21,7 @@ LOG_TYPE_LABELS: Dict[str, str] = {
     "progress": "进度",
 }
 
-PROGRESS_PATTERNS: List[tuple[re.Pattern[str], str]] = [
+PROGRESS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"索引进度[:：]?\s*\d+\/\d+"), "index_progress"),
     (re.compile(r"克隆进度[:：]?\s*\d+%"), "clone_progress"),
     (re.compile(r"下载进度[:：]?\s*\d+%"), "download_progress"),
@@ -76,7 +76,7 @@ def _extract_tool_output_text(value: Any) -> str:
     return _event_to_string(value)
 
 
-def _to_non_empty_id(value: Any) -> Optional[str]:
+def _to_non_empty_id(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     trimmed = value.strip()
@@ -85,14 +85,14 @@ def _to_non_empty_id(value: Any) -> Optional[str]:
 
 def _extract_tool_call_id(
     event: AgentEvent,
-    metadata: Dict[str, Any],
-) -> Optional[str]:
+    metadata: dict[str, Any],
+) -> str | None:
     return _to_non_empty_id(metadata.get("tool_call_id"))
 
 
 def _build_tool_bucket_key(
-    agent_raw_name: Optional[str],
-    agent_name: Optional[str],
+    agent_raw_name: str | None,
+    agent_name: str | None,
     tool_name: str,
 ) -> str:
     owner = _sanitize_text(agent_raw_name or agent_name or "unknown").lower() or "unknown"
@@ -109,8 +109,8 @@ def _format_duration_hms(total_seconds: float) -> str:
 
 
 def _resolve_log_display_time(
-    started_at: Optional[datetime],
-    event_timestamp: Optional[datetime],
+    started_at: datetime | None,
+    event_timestamp: datetime | None,
 ) -> str:
     if started_at is None or event_timestamp is None:
         if event_timestamp is None:
@@ -129,8 +129,8 @@ def _normalize_phase_label(
     event_type: Any,
     task_status: Any,
     message: Any,
-    fallback_phase_label: Optional[str] = None,
-) -> Optional[str]:
+    fallback_phase_label: str | None = None,
+) -> str | None:
     normalized_task_status = _to_phase_key(task_status)
     normalized_event_type = _to_phase_key(event_type)
     normalized_raw_phase = _to_phase_key(raw_phase)
@@ -165,7 +165,7 @@ def _normalize_phase_label(
     return None
 
 
-def _resolve_agent_name(metadata: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+def _resolve_agent_name(metadata: dict[str, Any]) -> tuple[str | None, str | None]:
     raw_name = _sanitize_text(metadata.get("agent_name") or metadata.get("agent"))
     if not raw_name:
         return None, None
@@ -213,7 +213,7 @@ def _resolve_task_log_title(task: AgentTask) -> str:
     return "混合扫描活动日志" if _resolve_task_source_mode(task) == "hybrid" else "智能扫描活动日志"
 
 
-def _match_progress_key(message: str) -> Optional[str]:
+def _match_progress_key(message: str) -> str | None:
     for pattern, key in PROGRESS_PATTERNS:
         if pattern.search(message):
             return key
@@ -225,16 +225,16 @@ def _build_tool_title(status_label: str, tool_name: str) -> str:
 
 
 def _append_log(
-    logs: List[Dict[str, Any]],
-    log_by_id: Dict[str, Dict[str, Any]],
-    payload: Dict[str, Any],
-) -> Dict[str, Any]:
+    logs: list[dict[str, Any]],
+    log_by_id: dict[str, dict[str, Any]],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     logs.append(payload)
     log_by_id[str(payload["id"])] = payload
     return payload
 
 
-def _reconcile_terminal_logs(logs: List[Dict[str, Any]], final_status: str) -> None:
+def _reconcile_terminal_logs(logs: list[dict[str, Any]], final_status: str) -> None:
     normalized = _sanitize_text(final_status).lower()
     if normalized not in TERMINAL_STATUSES:
         return
@@ -263,14 +263,14 @@ def _reconcile_terminal_logs(logs: List[Dict[str, Any]], final_status: str) -> N
 
 def build_agent_task_export_logs(
     task: AgentTask,
-    events: List[AgentEvent],
-) -> List[Dict[str, Any]]:
-    logs: List[Dict[str, Any]] = []
-    log_by_id: Dict[str, Dict[str, Any]] = {}
-    tool_log_id_by_call_id: Dict[str, str] = {}
-    pending_tool_buckets: Dict[str, List[str]] = {}
-    progress_log_id_by_key: Dict[str, str] = {}
-    current_phase_label: Optional[str] = None
+    events: list[AgentEvent],
+) -> list[dict[str, Any]]:
+    logs: list[dict[str, Any]] = []
+    log_by_id: dict[str, dict[str, Any]] = {}
+    tool_log_id_by_call_id: dict[str, str] = {}
+    pending_tool_buckets: dict[str, list[str]] = {}
+    progress_log_id_by_key: dict[str, str] = {}
+    current_phase_label: str | None = None
 
     for event in events:
         event_type = _sanitize_text(event.event_type).lower()
@@ -292,7 +292,7 @@ def build_agent_task_export_logs(
         event_timestamp = event.created_at
         display_time = _resolve_log_display_time(task.started_at, event_timestamp)
         agent_name, agent_raw_name = _resolve_agent_name(metadata)
-        base_detail: Dict[str, Any] = {
+        base_detail: dict[str, Any] = {
             "event_type": event_type,
             "message": message,
             "metadata": metadata,
@@ -378,7 +378,7 @@ def build_agent_task_export_logs(
             tool_status = _normalize_tool_status(metadata.get("tool_status"), event_type)
             status_label = "已完成" if tool_status == "completed" else "失败" if tool_status == "failed" else "已取消"
             tool_call_id = _extract_tool_call_id(event, metadata)
-            target_log: Optional[Dict[str, Any]] = None
+            target_log: dict[str, Any] | None = None
 
             if tool_call_id:
                 existing_id = tool_log_id_by_call_id.get(tool_call_id)
@@ -768,9 +768,9 @@ def build_agent_task_export_logs(
 
 def build_agent_task_log_export_payload(
     task: AgentTask,
-    events: List[AgentEvent],
-    exported_at: Optional[datetime] = None,
-) -> Dict[str, Any]:
+    events: list[AgentEvent],
+    exported_at: datetime | None = None,
+) -> dict[str, Any]:
     safe_exported_at = exported_at or datetime.utcnow()
     logs = build_agent_task_export_logs(task, events)
     return {
@@ -792,7 +792,7 @@ def build_agent_task_log_export_payload(
 
 def render_agent_task_logs_markdown(
     task: AgentTask,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
 ) -> str:
     logs = payload.get("logs") if isinstance(payload, dict) else []
     meta = payload.get("meta") if isinstance(payload, dict) else {}
@@ -801,7 +801,7 @@ def render_agent_task_logs_markdown(
     if not isinstance(meta, dict):
         meta = {}
 
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append(f"# {_resolve_task_log_title(task)}")
     lines.append(f"- task_id: {_sanitize_text(meta.get('task_id') or task.id) or '-'}")
     lines.append(f"- task_name: {_sanitize_text(meta.get('task_name') or task.name) or '-'}")

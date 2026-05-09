@@ -5,12 +5,12 @@
 """
 
 import os
+
 import pytest
-from pathlib import Path
 
 from app.services.sandbox_runner import (
-    SandboxRunSpec,
     SandboxRunResult,
+    SandboxRunSpec,
     run_sandbox_container,
 )
 

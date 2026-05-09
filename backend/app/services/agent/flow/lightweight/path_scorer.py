@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from app.services.agent.flow.models import FlowEvidence
 
@@ -12,10 +12,10 @@ def clamp_score(value: float) -> float:
 def compute_path_score(
     *,
     path_found: bool,
-    call_chain: List[str],
-    control_conditions: List[str],
+    call_chain: list[str],
+    control_conditions: list[str],
     entry_inferred: bool,
-    blocked_reasons: List[str],
+    blocked_reasons: list[str],
     has_code2flow: bool,
 ) -> float:
     score = 0.2
@@ -38,7 +38,7 @@ def compute_path_score(
 
 
 def build_lightweight_flow_evidence(
-    path_result: Dict[str, Any],
+    path_result: dict[str, Any],
     *,
     has_code2flow: bool,
 ) -> FlowEvidence:
@@ -52,7 +52,7 @@ def build_lightweight_flow_evidence(
     entry_inferred = bool(path_result.get("entry_inferred"))
     path_found = bool(path_result.get("path_found"))
 
-    taint_paths: List[str] = []
+    taint_paths: list[str] = []
     if len(call_chain) >= 2:
         for idx in range(len(call_chain) - 1):
             taint_paths.append(f"{call_chain[idx]} -> {call_chain[idx + 1]}")

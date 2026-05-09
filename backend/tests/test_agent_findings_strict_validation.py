@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.api.v1.endpoints.agent_tasks import _save_findings
-import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
+from app.api.v1.endpoints.agent_tasks import _save_findings
 
 
 class _ScalarOneOrNoneResult:

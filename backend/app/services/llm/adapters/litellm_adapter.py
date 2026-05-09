@@ -12,18 +12,19 @@ import json
 import logging
 import re
 import time
-from typing import Dict, Any, Optional, List
+from typing import Any
+
 from ..base_adapter import BaseLLMAdapter
+from ..prompt_cache import estimate_tokens, prompt_cache_manager
 from ..types import (
+    DEFAULT_BASE_URLS,
     LLMConfig,
+    LLMError,
+    LLMProvider,
     LLMRequest,
     LLMResponse,
     LLMUsage,
-    LLMProvider,
-    LLMError,
-    DEFAULT_BASE_URLS,
 )
-from ..prompt_cache import prompt_cache_manager, estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 class LiteLLMAdapter(BaseLLMAdapter):
     """
     LiteLLM 统一适配器
-    
+
     支持的提供商:
     - OpenAI (openai/gpt-4o-mini)
     - Claude (anthropic/claude-3-5-sonnet-20241022)
@@ -70,7 +71,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
     def _get_litellm_model(self) -> str:
         """获取 LiteLLM 格式的模型名称
-        
+
         对于使用第三方 OpenAI 兼容 API（如 SiliconFlow）的情况：
         - 如果用户设置了自定义 base_url，且模型名包含 / (如 Qwen/Qwen3-8B)
         - 需要将其转换为 openai/Qwen/Qwen3-8B 格式
@@ -83,7 +84,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
         if "/" in model:
             # 提取第一部分作为可能的 provider 前缀
             prefix_part = model.split("/")[0].lower()
-            
+
             # LiteLLM 认识的有效 provider 前缀列表
             valid_litellm_prefixes = [
                 "openai", "anthropic", "gemini", "deepseek", "ollama",
@@ -92,27 +93,27 @@ class LiteLLMAdapter(BaseLLMAdapter):
                 "sagemaker", "palm", "ai21", "nlp_cloud", "aleph_alpha",
                 "petals", "baseten", "vllm", "cloudflare", "xinference"
             ]
-            
+
             # 如果前缀是 LiteLLM 认识的，直接返回
             if prefix_part in valid_litellm_prefixes:
                 return model
-            
+
             # 如果用户设置了自定义 base_url，将其视为 OpenAI 兼容 API
             # 例如 SiliconFlow 使用模型名 "Qwen/Qwen3-8B"
             if self.config.base_url:
                 logger.debug(f"使用自定义 base_url，将模型 {model} 视为 OpenAI 兼容格式")
                 return f"openai/{model}"
-            
+
             # 对于没有自定义 base_url 的情况，尝试使用 provider 的前缀
             prefix = self.PROVIDER_PREFIX_MAP.get(provider, "openai")
             return f"{prefix}/{model}"
 
         # 获取 provider 前缀
         prefix = self.PROVIDER_PREFIX_MAP.get(provider, "openai")
-        
+
         return f"{prefix}/{model}"
 
-    def _extract_api_response(self, error: Exception) -> Optional[str]:
+    def _extract_api_response(self, error: Exception) -> str | None:
         """从异常中提取 API 服务器返回的原始响应信息"""
         error_str = str(error)
 
@@ -130,7 +131,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                     code = err.get('code', '')
                     message = err.get('message', '')
                     return f"[{code}] {message}" if code else message
-            except:
+            except Exception:
                 pass
 
         # 尝试提取 message 字段
@@ -148,7 +149,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
         return None
 
-    def _get_api_base(self) -> Optional[str]:
+    def _get_api_base(self) -> str | None:
         """获取 API 基础 URL"""
         # 优先使用用户配置的 base_url
         if self.config.base_url:
@@ -164,7 +165,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
         return None
 
-    def _estimate_message_tokens(self, messages: List[Dict[str, Any]]) -> int:
+    def _estimate_message_tokens(self, messages: list[dict[str, Any]]) -> int:
         """使用快速估算计算消息 token，避免阻塞首包。"""
         total = 0
         for msg in messages:
@@ -179,9 +180,9 @@ class LiteLLMAdapter(BaseLLMAdapter):
 
     def _build_usage_fallback(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         accumulated_content: str,
-    ) -> tuple[Dict[str, int], float, str]:
+    ) -> tuple[dict[str, int], float, str]:
         """在上游未返回 usage 时，用快速估算补齐。"""
         started_at = time.perf_counter()
         prompt_tokens = self._estimate_message_tokens(messages)
@@ -198,7 +199,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
         )
 
     @staticmethod
-    def _build_stream_diagnostics(usage_source: str, token_estimate_ms: float) -> Dict[str, Any]:
+    def _build_stream_diagnostics(usage_source: str, token_estimate_ms: float) -> dict[str, Any]:
         return {
             "usage_source": usage_source,
             "token_estimate_ms": token_estimate_ms,
@@ -215,21 +216,21 @@ class LiteLLMAdapter(BaseLLMAdapter):
     async def _send_request(self, request: LLMRequest) -> LLMResponse:
         """发送请求到 LiteLLM"""
         import litellm
-        
+
         # 启用 LiteLLM 调试模式以获取更详细的错误信息
         # 注释掉下一行可关闭调试模式
         # litellm._turn_on_debug()
-        
+
         # 禁用 LiteLLM 的缓存，确保每次都实际调用 API
         litellm.cache = None
-        
+
         # 禁用 LiteLLM 自动添加的 reasoning_effort 参数
         # 这可以防止模型名称被错误解析为 effort 参数
         litellm.drop_params = True
-        
+
         # 构建消息
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-        
+
         #  Prompt Caching: 为支持的 LLM 添加缓存标记
         cache_enabled = False
         if self.config.provider == LLMProvider.CLAUDE:
@@ -238,19 +239,19 @@ class LiteLLMAdapter(BaseLLMAdapter):
             for msg in messages:
                 if msg.get("role") == "system":
                     system_tokens += estimate_tokens(msg.get("content", ""))
-            
+
             messages, cache_enabled = prompt_cache_manager.process_messages(
                 messages=messages,
                 model=self.config.model,
                 provider=self.config.provider.value,
                 system_prompt_tokens=system_tokens,
             )
-            
+
             if cache_enabled:
                 logger.debug(f" Prompt Caching enabled for {self.config.model}")
 
         # 构建请求参数
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": self._litellm_model,
             "messages": messages,
             "temperature": request.temperature if request.temperature is not None else self.config.temperature,
@@ -280,36 +281,36 @@ class LiteLLMAdapter(BaseLLMAdapter):
             response = await litellm.acompletion(**kwargs)
         except litellm.exceptions.AuthenticationError as e:
             api_response = self._extract_api_response(e)
-            raise LLMError(f"API Key 无效或已过期", self.config.provider, 401, api_response=api_response)
+            raise LLMError("API Key 无效或已过期", self.config.provider, 401, api_response=api_response) from e
         except litellm.exceptions.RateLimitError as e:
             error_msg = str(e)
             api_response = self._extract_api_response(e)
             # 区分"余额不足"和"频率超限"
             if any(keyword in error_msg for keyword in ["余额不足", "资源包", "充值", "quota", "insufficient", "balance"]):
-                raise LLMError(f"账户余额不足或配额已用尽，请充值后重试", self.config.provider, 402, api_response=api_response)
-            raise LLMError(f"API 调用频率超限，请稍后重试", self.config.provider, 429, api_response=api_response)
+                raise LLMError("账户余额不足或配额已用尽，请充值后重试", self.config.provider, 402, api_response=api_response) from e
+            raise LLMError("API 调用频率超限，请稍后重试", self.config.provider, 429, api_response=api_response) from e
         except litellm.exceptions.APIConnectionError as e:
             api_response = self._extract_api_response(e)
-            raise LLMError(f"无法连接到 API 服务", self.config.provider, api_response=api_response)
+            raise LLMError("无法连接到 API 服务", self.config.provider, api_response=api_response) from e
         except litellm.exceptions.APIError as e:
             api_response = self._extract_api_response(e)
-            raise LLMError(f"API 错误", self.config.provider, getattr(e, 'status_code', None), api_response=api_response)
+            raise LLMError("API 错误", self.config.provider, getattr(e, 'status_code', None), api_response=api_response) from e
         except Exception as e:
             # 捕获其他异常并重新抛出
             error_msg = str(e)
             api_response = self._extract_api_response(e)
             if "invalid_api_key" in error_msg.lower() or "incorrect api key" in error_msg.lower():
-                raise LLMError(f"API Key 无效", self.config.provider, 401, api_response=api_response)
+                raise LLMError("API Key 无效", self.config.provider, 401, api_response=api_response) from e
             elif "authentication" in error_msg.lower():
-                raise LLMError(f"认证失败", self.config.provider, 401, api_response=api_response)
+                raise LLMError("认证失败", self.config.provider, 401, api_response=api_response) from e
             elif any(keyword in error_msg for keyword in ["余额不足", "资源包", "充值", "quota", "insufficient", "balance"]):
-                raise LLMError(f"账户余额不足或配额已用尽", self.config.provider, 402, api_response=api_response)
+                raise LLMError("账户余额不足或配额已用尽", self.config.provider, 402, api_response=api_response) from e
             raise
 
         # 解析响应
         if not response:
             raise LLMError("API 返回空响应", self.config.provider)
-            
+
         choice = response.choices[0] if response.choices else None
         if not choice:
             raise LLMError("API响应格式异常: 缺少choices字段", self.config.provider)
@@ -321,7 +322,7 @@ class LiteLLMAdapter(BaseLLMAdapter):
                 completion_tokens=response.usage.completion_tokens or 0,
                 total_tokens=response.usage.total_tokens or 0,
             )
-            
+
             #  更新 Prompt Cache 统计
             if cache_enabled and hasattr(response.usage, "cache_creation_input_tokens"):
                 prompt_cache_manager.update_stats(

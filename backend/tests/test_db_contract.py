@@ -9,7 +9,6 @@ import pytest
 
 from app.runtime import db_contract
 
-
 DB_CONTRACT_FILE = Path(__file__).resolve().parents[1] / "app" / "runtime" / "db_contract.py"
 EXPECTED_PUBLIC_TABLES = ("projects", "users")
 
@@ -76,9 +75,9 @@ def test_classify_database_state_marks_non_empty_schema_drift_as_mismatch() -> N
 
     assert state.kind == db_contract.DB_SCHEMA_MISMATCH
     if hasattr(state, "missing_tables"):
-        assert getattr(state, "missing_tables") == tuple()
+        assert state.missing_tables == ()
     if hasattr(state, "extra_tables"):
-        assert getattr(state, "extra_tables") == ("unexpected_table",)
+        assert state.extra_tables == ("unexpected_table",)
 
 
 def test_db_contract_mismatch_message_mentions_missing_and_extra_tables() -> None:
@@ -110,11 +109,11 @@ def test_bootstrap_database_contract_only_bootstraps_empty_database() -> None:
 async def test_check_database_contract_rejects_empty_database(monkeypatch: pytest.MonkeyPatch) -> None:
     empty_state = db_contract.DatabaseContractState(
         kind=db_contract.DB_SCHEMA_EMPTY,
-        public_tables=tuple(),
+        public_tables=(),
         **({"current_versions": set(), "expected_head": None} if "current_versions" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
         **({"expected_tables": EXPECTED_PUBLIC_TABLES} if "expected_tables" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
         **({"missing_tables": EXPECTED_PUBLIC_TABLES} if "missing_tables" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
-        **({"extra_tables": tuple()} if "extra_tables" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
+        **({"extra_tables": ()} if "extra_tables" in db_contract.DatabaseContractState.__dataclass_fields__ else {}),
     )
     monkeypatch.setattr(db_contract, "inspect_database_contract_state", AsyncMock(return_value=empty_state))
 

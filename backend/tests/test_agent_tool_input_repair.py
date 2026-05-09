@@ -1,15 +1,15 @@
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
-from pydantic import BaseModel
 import pytest
-from typing import Any, Dict, List, Optional
+from pydantic import BaseModel
 
-from app.services.agent.agents.base import AgentConfig, AgentResult, AgentType, BaseAgent
-from app.services.agent.agents.analysis import AnalysisAgent
-from app.services.agent.tools.base import AgentTool, ToolResult
-import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
+from app.services.agent.agents.analysis import AnalysisAgent
+from app.services.agent.agents.base import AgentConfig, AgentResult, AgentType, BaseAgent
+from app.services.agent.tools.base import AgentTool, ToolResult
 
 
 class _DummyAgent(BaseAgent):
@@ -19,8 +19,8 @@ class _DummyAgent(BaseAgent):
 
 class _SearchSchema(BaseModel):
     keyword: str
-    file_path: Optional[str] = None
-    file_pattern: Optional[str] = None
+    file_path: str | None = None
+    file_pattern: str | None = None
     is_regex: bool = False
 
 
@@ -54,9 +54,9 @@ class _SearchLocationTool:
 
 
 class _PatternSchema(BaseModel):
-    scan_file: Optional[str] = None
-    code: Optional[str] = None
-    file_path: Optional[str] = None
+    scan_file: str | None = None
+    code: str | None = None
+    file_path: str | None = None
 
 
 class _PatternTool:
@@ -90,8 +90,8 @@ class _SymbolBodyTool:
 
 class _ReadSchema(BaseModel):
     file_path: str
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
+    start_line: int | None = None
+    end_line: int | None = None
 
 
 class _ReadTool:
@@ -114,7 +114,7 @@ class _ReadTool:
 class _ListSchema(BaseModel):
     directory: str = "."
     recursive: bool = False
-    max_files: Optional[int] = None
+    max_files: int | None = None
 
 
 class _ListTool:
@@ -179,22 +179,22 @@ class _FileOutlineTool:
 class _PushFindingSchema(BaseModel):
     file_path: str
     line_start: int
-    line_end: Optional[int] = None
+    line_end: int | None = None
     title: str
     description: str
     vulnerability_type: str
-    severity: Optional[str] = "medium"
-    confidence: Optional[float] = 0.8
-    function_name: Optional[str] = None
-    code_snippet: Optional[str] = None
-    source: Optional[str] = None
-    sink: Optional[str] = None
-    suggestion: Optional[str] = None
-    attacker_flow: Optional[str] = None
-    evidence_chain: Optional[List[str]] = None
-    missing_checks: Optional[List[str]] = None
-    taint_flow: Optional[List[str]] = None
-    finding_metadata: Optional[Dict[str, Any]] = None
+    severity: str | None = "medium"
+    confidence: float | None = 0.8
+    function_name: str | None = None
+    code_snippet: str | None = None
+    source: str | None = None
+    sink: str | None = None
+    suggestion: str | None = None
+    attacker_flow: str | None = None
+    evidence_chain: list[str] | None = None
+    missing_checks: list[str] | None = None
+    taint_flow: list[str] | None = None
+    finding_metadata: dict[str, Any] | None = None
 
 
 class _PushFindingTool:
@@ -209,9 +209,9 @@ class _PushRiskPointSchema(BaseModel):
     file_path: str
     line_start: int
     description: str
-    severity: Optional[str] = "high"
-    confidence: Optional[float] = 0.6
-    vulnerability_type: Optional[str] = "potential_issue"
+    severity: str | None = "high"
+    confidence: float | None = 0.6
+    vulnerability_type: str | None = "potential_issue"
 
 
 class _PushRiskPointTool:
@@ -225,11 +225,11 @@ class _PushRiskPointTool:
 class _ControlFlowSchema(BaseModel):
     file_path: str
     line_start: int
-    line_end: Optional[int] = None
-    call_chain_hint: Optional[List[str]] = None
-    control_conditions_hint: Optional[List[str]] = None
-    entry_points: Optional[List[str]] = None
-    entry_points_hint: Optional[List[str]] = None
+    line_end: int | None = None
+    call_chain_hint: list[str] | None = None
+    control_conditions_hint: list[str] | None = None
+    entry_points: list[str] | None = None
+    entry_points_hint: list[str] | None = None
 
 
 class _ControlFlowTool:
@@ -260,14 +260,14 @@ class _StrictControlFlowTool(AgentTool):
 
 
 class _DataFlowSchema(BaseModel):
-    source_code: Optional[str] = None
-    sink_code: Optional[str] = None
+    source_code: str | None = None
+    sink_code: str | None = None
     variable_name: str = "user_input"
     file_path: str = "unknown"
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
-    source_hints: Optional[List[str]] = None
-    sink_hints: Optional[List[str]] = None
+    start_line: int | None = None
+    end_line: int | None = None
+    source_hints: list[str] | None = None
+    sink_hints: list[str] | None = None
 
 
 class _DataFlowTool:

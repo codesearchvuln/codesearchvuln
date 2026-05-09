@@ -1,9 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.api.v1.endpoints.agent_tasks import list_agent_findings
 from app.models.agent_task import AgentTask
 from app.models.project import Project
@@ -12,8 +14,6 @@ from app.services.agent.utils.vulnerability_naming import (
     build_cn_structured_description,
     build_cn_structured_description_markdown,
 )
-import app.models.opengrep  # noqa: F401
-import app.models.gitleaks  # noqa: F401
 
 
 class _ScalarListResult:
@@ -101,7 +101,7 @@ async def test_structured_description_markdown_filters_verifier_prefix_from_root
 @pytest.mark.asyncio
 async def test_list_agent_findings_includes_description_markdown():
     task_id = "task-description-markdown"
-    now = datetime(2026, 2, 25, 9, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 2, 25, 9, 0, 0, tzinfo=UTC)
 
     finding = SimpleNamespace(
         id="finding-1",

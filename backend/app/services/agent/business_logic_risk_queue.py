@@ -3,8 +3,8 @@ Business Logic risk queue service for managing BusinessLogicReconAgent risk poin
 """
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,13 @@ class RedisBusinessLogicRiskQueue:
         return f"{self.seen_key_prefix}:{task_id}"
 
     @staticmethod
-    def _fingerprint(risk_point: Dict[str, Any]) -> str:
+    def _fingerprint(risk_point: dict[str, Any]) -> str:
         file_path = str(risk_point.get("file_path") or "").strip().lower()
         line_start = int(risk_point.get("line_start") or 0)
         vuln_type = str(risk_point.get("vulnerability_type") or risk_point.get("description") or "").strip().lower()
         return f"{file_path}|{line_start}|{vuln_type}"
 
-    def enqueue(self, task_id: str, risk_point: Dict[str, Any]) -> bool:
+    def enqueue(self, task_id: str, risk_point: dict[str, Any]) -> bool:
         try:
             queue_key = self._queue_key(task_id)
             stats_key = self._stats_key(task_id)
@@ -49,14 +49,14 @@ class RedisBusinessLogicRiskQueue:
                 return False
             self.redis.rpush(queue_key, json.dumps(risk_point, ensure_ascii=False))
             self.redis.hincrby(stats_key, "total_enqueued", 1)
-            self.redis.hset(stats_key, "last_enqueue_time", datetime.now(timezone.utc).isoformat())
+            self.redis.hset(stats_key, "last_enqueue_time", datetime.now(UTC).isoformat())
             logger.info("[BLRiskQueue] Enqueued risk point %s for task %s", risk_point.get("file_path"), task_id)
             return True
         except Exception as exc:
             logger.error("[BLRiskQueue] Enqueue failed: %s", exc)
             return False
 
-    def enqueue_batch(self, task_id: str, risk_points: List[Dict[str, Any]]) -> int:
+    def enqueue_batch(self, task_id: str, risk_points: list[dict[str, Any]]) -> int:
         """批量入队多个业务逻辑风险点，使用 pipeline 提升效率。返回成功入队的数量。"""
         if not risk_points:
             return 0
@@ -65,7 +65,7 @@ class RedisBusinessLogicRiskQueue:
             stats_key = self._stats_key(task_id)
             seen_key = self._seen_key(task_id)
 
-            serialized: List[str] = []
+            serialized: list[str] = []
             dedup_count = 0
             for risk_point in risk_points:
                 fp = self._fingerprint(risk_point)
@@ -83,7 +83,7 @@ class RedisBusinessLogicRiskQueue:
                 pipe.hincrby(stats_key, "total_enqueued", count)
                 if dedup_count > 0:
                     pipe.hincrby(stats_key, "total_deduplicated", dedup_count)
-                pipe.hset(stats_key, "last_enqueue_time", datetime.now(timezone.utc).isoformat())
+                pipe.hset(stats_key, "last_enqueue_time", datetime.now(UTC).isoformat())
                 pipe.execute()
             logger.info("[BLRiskQueue] Batch enqueued %d risk points for task %s", count, task_id)
             return count
@@ -91,7 +91,7 @@ class RedisBusinessLogicRiskQueue:
             logger.error("[BLRiskQueue] Batch enqueue failed: %s", exc)
             return 0
 
-    def dequeue(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def dequeue(self, task_id: str) -> dict[str, Any] | None:
         try:
             queue_key = self._queue_key(task_id)
             stats_key = self._stats_key(task_id)
@@ -99,13 +99,13 @@ class RedisBusinessLogicRiskQueue:
             if raw is None:
                 return None
             self.redis.hincrby(stats_key, "total_dequeued", 1)
-            self.redis.hset(stats_key, "last_dequeue_time", datetime.now(timezone.utc).isoformat())
+            self.redis.hset(stats_key, "last_dequeue_time", datetime.now(UTC).isoformat())
             return json.loads(raw)
         except Exception as exc:
             logger.error("[BLRiskQueue] Dequeue failed: %s", exc)
             return None
 
-    def peek(self, task_id: str, limit: int = 3) -> List[Dict[str, Any]]:
+    def peek(self, task_id: str, limit: int = 3) -> list[dict[str, Any]]:
         try:
             queue_key = self._queue_key(task_id)
             items = self.redis.lrange(queue_key, 0, limit - 1)
@@ -121,7 +121,7 @@ class RedisBusinessLogicRiskQueue:
             logger.error("[BLRiskQueue] Size failed: %s", exc)
             return 0
 
-    def stats(self, task_id: str) -> Dict[str, Any]:
+    def stats(self, task_id: str) -> dict[str, Any]:
         try:
             stats_raw = self.redis.hgetall(self._stats_key(task_id))
             return {
@@ -136,7 +136,7 @@ class RedisBusinessLogicRiskQueue:
             logger.error("[BLRiskQueue] Stats failed: %s", exc)
             return {"current_size": 0}
 
-    def contains(self, task_id: str, risk_point: Dict[str, Any]) -> bool:
+    def contains(self, task_id: str, risk_point: dict[str, Any]) -> bool:
         try:
             seen_key = self._seen_key(task_id)
             fp = self._fingerprint(risk_point)
@@ -161,9 +161,9 @@ class InMemoryBusinessLogicRiskQueue:
     """In-memory Business Logic risk queue."""
 
     def __init__(self):
-        self.queues: Dict[str, List[Dict[str, Any]]] = {}
-        self._stats: Dict[str, Dict[str, Any]] = {}
-        self.seen: Dict[str, set] = {}
+        self.queues: dict[str, list[dict[str, Any]]] = {}
+        self._stats: dict[str, dict[str, Any]] = {}
+        self.seen: dict[str, set] = {}
 
     def _ensure_task(self, task_id: str):
         if task_id not in self.queues:
@@ -178,13 +178,13 @@ class InMemoryBusinessLogicRiskQueue:
             self.seen[task_id] = set()
 
     @staticmethod
-    def _fingerprint(risk_point: Dict[str, Any]) -> str:
+    def _fingerprint(risk_point: dict[str, Any]) -> str:
         file_path = str(risk_point.get("file_path") or "").strip().lower()
         line_start = int(risk_point.get("line_start") or 0)
         vuln_type = str(risk_point.get("vulnerability_type") or risk_point.get("description") or "").strip().lower()
         return f"{file_path}|{line_start}|{vuln_type}"
 
-    def enqueue(self, task_id: str, risk_point: Dict[str, Any]) -> bool:
+    def enqueue(self, task_id: str, risk_point: dict[str, Any]) -> bool:
         try:
             self._ensure_task(task_id)
             fp = self._fingerprint(risk_point)
@@ -196,13 +196,13 @@ class InMemoryBusinessLogicRiskQueue:
             self.seen[task_id].add(fp)
             self.queues[task_id].append(risk_point)
             self._stats[task_id]["total_enqueued"] += 1
-            self._stats[task_id]["last_enqueue_time"] = datetime.now(timezone.utc).isoformat()
+            self._stats[task_id]["last_enqueue_time"] = datetime.now(UTC).isoformat()
             return True
         except Exception as exc:
             logger.error("[BLRiskQueue] InMemory enqueue failed: %s", exc)
             return False
 
-    def enqueue_batch(self, task_id: str, risk_points: List[Dict[str, Any]]) -> int:
+    def enqueue_batch(self, task_id: str, risk_points: list[dict[str, Any]]) -> int:
         """批量入队多个业务逻辑风险点。返回成功入队的数量。"""
         count = 0
         for risk_point in risk_points:
@@ -210,20 +210,20 @@ class InMemoryBusinessLogicRiskQueue:
                 count += 1
         return count
 
-    def dequeue(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def dequeue(self, task_id: str) -> dict[str, Any] | None:
         try:
             self._ensure_task(task_id)
             if not self.queues[task_id]:
                 return None
             item = self.queues[task_id].pop(0)
             self._stats[task_id]["total_dequeued"] += 1
-            self._stats[task_id]["last_dequeue_time"] = datetime.now(timezone.utc).isoformat()
+            self._stats[task_id]["last_dequeue_time"] = datetime.now(UTC).isoformat()
             return item
         except Exception as exc:
             logger.error("[BLRiskQueue] InMemory dequeue failed: %s", exc)
             return None
 
-    def peek(self, task_id: str, limit: int = 3) -> List[Dict[str, Any]]:
+    def peek(self, task_id: str, limit: int = 3) -> list[dict[str, Any]]:
         try:
             self._ensure_task(task_id)
             return self.queues[task_id][:limit]
@@ -239,7 +239,7 @@ class InMemoryBusinessLogicRiskQueue:
             logger.error("[BLRiskQueue] InMemory size failed: %s", exc)
             return 0
 
-    def stats(self, task_id: str) -> Dict[str, Any]:
+    def stats(self, task_id: str) -> dict[str, Any]:
         try:
             self._ensure_task(task_id)
             data = dict(self._stats[task_id])
@@ -249,7 +249,7 @@ class InMemoryBusinessLogicRiskQueue:
             logger.error("[BLRiskQueue] InMemory stats failed: %s", exc)
             return {"current_size": 0}
 
-    def contains(self, task_id: str, risk_point: Dict[str, Any]) -> bool:
+    def contains(self, task_id: str, risk_point: dict[str, Any]) -> bool:
         try:
             self._ensure_task(task_id)
             fp = self._fingerprint(risk_point)

@@ -2,9 +2,9 @@ import asyncio
 import json
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,25 +32,28 @@ from app.api.v1.endpoints.static_tasks_shared import (
     logger,
     settings,
 )
+from app.db.static_finding_paths import resolve_static_finding_location
 from app.models.pmd import PmdRuleConfig
 from app.models.pmd_scan import PmdFinding, PmdScanTask
 from app.models.project import Project
 from app.models.user import User
-from app.db.static_finding_paths import resolve_static_finding_location
 from app.services.agent.tools.external_tools import (
     _build_pmd_runner_command,
     _normalize_pmd_violation_path,
     _read_pmd_report,
     _resolve_pmd_ruleset,
 )
-from app.services.project_metrics import project_metrics_refresher
 from app.services.pmd_rulesets import (
     PMD_PRESET_SUMMARIES,
-    PMD_RULESET_ALIASES,
-    get_builtin_pmd_ruleset_detail as service_get_builtin_pmd_ruleset_detail,
-    list_builtin_pmd_rulesets as service_list_builtin_pmd_rulesets,
     parse_pmd_ruleset_xml,
 )
+from app.services.pmd_rulesets import (
+    get_builtin_pmd_ruleset_detail as service_get_builtin_pmd_ruleset_detail,
+)
+from app.services.pmd_rulesets import (
+    list_builtin_pmd_rulesets as service_list_builtin_pmd_rulesets,
+)
+from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
@@ -65,21 +68,21 @@ class PmdPresetResponse(BaseModel):
 
 
 class PmdRuleDetailResponse(BaseModel):
-    name: Optional[str] = None
-    ref: Optional[str] = None
-    language: Optional[str] = None
-    message: Optional[str] = None
-    class_name: Optional[str] = None
-    priority: Optional[int] = None
-    since: Optional[str] = None
-    external_info_url: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    ref: str | None = None
+    language: str | None = None
+    message: str | None = None
+    class_name: str | None = None
+    priority: int | None = None
+    since: str | None = None
+    external_info_url: str | None = None
+    description: str | None = None
 
 
 class PmdRulesetResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     filename: str
     is_active: bool
     source: str
@@ -90,22 +93,22 @@ class PmdRulesetResponse(BaseModel):
     external_info_urls: list[str] = Field(default_factory=list)
     rules: list[PmdRuleDetailResponse] = Field(default_factory=list)
     raw_xml: str
-    created_by: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_by: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class PmdRuleConfigUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
 
     model_config = ConfigDict(extra="ignore")
 
 
 class PmdScanTaskCreate(BaseModel):
     project_id: str = Field(..., description="项目ID")
-    name: Optional[str] = Field(None, description="任务名称")
+    name: str | None = Field(None, description="任务名称")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
     ruleset: str = Field("security", description="规则集，默认 security")
 
@@ -123,9 +126,9 @@ class PmdScanTaskResponse(BaseModel):
     low_count: int
     scan_duration_ms: int
     files_scanned: int
-    error_message: Optional[str]
+    error_message: str | None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -134,13 +137,13 @@ class PmdFindingResponse(BaseModel):
     id: str
     scan_task_id: str
     file_path: str
-    begin_line: Optional[int]
-    end_line: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
-    rule: Optional[str]
-    ruleset: Optional[str]
-    priority: Optional[int]
+    begin_line: int | None
+    end_line: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
+    rule: str | None
+    ruleset: str | None
+    priority: int | None
     message: str
     status: str
 
@@ -168,12 +171,12 @@ def _build_pmd_ruleset_response(
     id: str,
     filename: str,
     source: str,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
+    name: str | None = None,
+    description: str | None = None,
     is_active: bool,
-    created_by: Optional[str] = None,
-    created_at: Optional[datetime] = None,
-    updated_at: Optional[datetime] = None,
+    created_by: str | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
 ) -> dict[str, Any]:
     resolved_description = description if description is not None else payload.get("description")
     return {
@@ -233,7 +236,7 @@ def _normalize_rule_config_name(value: str) -> str:
     return normalized
 
 
-def _normalize_upload_filename(filename: Optional[str]) -> str:
+def _normalize_upload_filename(filename: str | None) -> str:
     normalized = str(filename or "").strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="xml_file 文件名不能为空")
@@ -296,7 +299,7 @@ def _build_pmd_scan_task_response(task: PmdScanTask) -> PmdScanTaskResponse:
         scan_duration_ms=int(task.scan_duration_ms or 0),
         files_scanned=int(task.files_scanned or 0),
         error_message=task.error_message,
-        created_at=task.created_at or datetime.now(timezone.utc),
+        created_at=task.created_at or datetime.now(UTC),
         updated_at=task.updated_at,
     )
 
@@ -307,15 +310,15 @@ async def _execute_pmd_scan(
     target_path: str,
     ruleset: str = "security",
 ) -> None:
-    workspace_dir: Optional[Path] = None
+    workspace_dir: Path | None = None
 
     async def _update_task_state(
         status: str,
         *,
-        error_message: Optional[str] = None,
-        findings: Optional[List[Dict[str, Any]]] = None,
+        error_message: str | None = None,
+        findings: list[dict[str, Any]] | None = None,
         files_scanned: int = 0,
-    ) -> Optional[PmdScanTask]:
+    ) -> PmdScanTask | None:
         async with async_session_factory() as db:
             result = await db.execute(select(PmdScanTask).where(PmdScanTask.id == task_id))
             task = result.scalar_one_or_none()
@@ -427,7 +430,7 @@ async def _execute_pmd_scan(
             await _update_task_state("failed", error_message=str(exc))
             return
 
-        findings: List[Dict[str, Any]] = []
+        findings: list[dict[str, Any]] = []
         files = payload.get("files", [])
         for file_info in files if isinstance(files, list) else []:
             if not isinstance(file_info, dict):
@@ -494,8 +497,8 @@ async def list_pmd_presets(
 
 @router.get("/pmd/builtin-rulesets", response_model=list[PmdRulesetResponse])
 async def list_builtin_pmd_rulesets(
-    keyword: Optional[str] = Query(None),
-    language: Optional[str] = Query(None),
+    keyword: str | None = Query(None),
+    language: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -524,7 +527,7 @@ async def get_builtin_pmd_ruleset(
 @router.post("/pmd/rule-configs/import", response_model=PmdRulesetResponse)
 async def import_pmd_rule_config(
     name: str = Form(...),
-    description: Optional[str] = Form(None),
+    description: str | None = Form(None),
     xml_file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -553,8 +556,8 @@ async def import_pmd_rule_config(
 
 @router.get("/pmd/rule-configs", response_model=list[PmdRulesetResponse])
 async def list_pmd_rule_configs(
-    is_active: Optional[bool] = Query(None),
-    keyword: Optional[str] = Query(None),
+    is_active: bool | None = Query(None),
+    keyword: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -664,8 +667,8 @@ async def create_pmd_scan(
 
 @router.get("/pmd/tasks", response_model=list[PmdScanTaskResponse])
 async def list_pmd_tasks(
-    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
-    status: Optional[str] = Query(None, description="按状态过滤"),
+    project_id: str | None = Query(None, description="按项目ID过滤"),
+    status: str | None = Query(None, description="按状态过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -743,7 +746,7 @@ async def delete_pmd_task(
 @router.get("/pmd/tasks/{task_id}/findings", response_model=list[PmdFindingResponse])
 async def get_pmd_findings(
     task_id: str,
-    status: Optional[str] = Query(None, description="按状态过滤"),
+    status: str | None = Query(None, description="按状态过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

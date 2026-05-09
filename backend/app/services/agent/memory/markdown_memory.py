@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_DIR = Path("./uploads/agent_memory/projects")
 DEFAULT_MAX_BYTES = 2_000_000
 
-MEMORY_FILES: Dict[str, str] = {
+MEMORY_FILES: dict[str, str] = {
     "shared": "shared.md",
     "orchestrator": "orchestrator.md",
     "recon": "recon.md",
@@ -126,7 +126,7 @@ class MarkdownMemoryStore:
         if current_size + int(incoming_bytes) <= self.max_bytes:
             return
 
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         archive_path = file_path.with_name(f"{file_path.stem}.{ts}.archive{file_path.suffix}")
 
         excerpt = ""
@@ -146,7 +146,7 @@ class MarkdownMemoryStore:
         pointer = (
             f"# Rotated\n"
             f"- archived: {archive_path.name}\n"
-            f"- rotated_at: {datetime.now(timezone.utc).isoformat()}\n\n"
+            f"- rotated_at: {datetime.now(UTC).isoformat()}\n\n"
         )
         if excerpt:
             pointer += "## Last Excerpt\n```text\n" + excerpt + "\n```\n\n"
@@ -178,10 +178,10 @@ class MarkdownMemoryStore:
             head = head[:max_chars]
         return head
 
-    def load_bundle(self, *, max_chars: int = 8000, skills_max_lines: int = 180) -> Dict[str, str]:
+    def load_bundle(self, *, max_chars: int = 8000, skills_max_lines: int = 180) -> dict[str, str]:
         """Load memory excerpts to inject into agent prompts."""
         self.ensure()
-        bundle: Dict[str, str] = {}
+        bundle: dict[str, str] = {}
         for key in ("shared", "orchestrator", "recon", "analysis", "verification", "report"):
             bundle[key] = self._read_tail(self._path(key), int(max_chars))
         bundle["skills"] = self._read_head_lines(
@@ -196,7 +196,7 @@ class MarkdownMemoryStore:
         content: str,
         *,
         source: str = "runtime_sync",
-        task_id: Optional[str] = None,
+        task_id: str | None = None,
     ) -> None:
         self.ensure()
         file_path = self._path("skills")
@@ -205,7 +205,7 @@ class MarkdownMemoryStore:
             return
         header = (
             "# Agent Tool Skills Snapshot\n\n"
-            f"- generated_at: {datetime.now(timezone.utc).isoformat()}\n"
+            f"- generated_at: {datetime.now(UTC).isoformat()}\n"
             f"- source: {str(source or 'runtime_sync').strip()}\n"
             f"- task_id: {str(task_id or '').strip() or 'unknown'}\n\n"
         )
@@ -219,8 +219,8 @@ class MarkdownMemoryStore:
     def clear_agent_memory(
         self,
         *,
-        task_id: Optional[str] = None,
-        keys: Optional[list] = None,
+        task_id: str | None = None,
+        keys: list | None = None,
     ) -> None:
         """清除每个任务开始前的 Agent 专属记忆文件，防止跨任务上下文污染。
 
@@ -234,7 +234,7 @@ class MarkdownMemoryStore:
         if keys is None:
             keys = ["orchestrator", "recon", "analysis", "verification", "report"]
         self.ensure()
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         header = (
             f"# Task Reset\n"
             f"- cleared_at: {ts}\n"
@@ -257,13 +257,13 @@ class MarkdownMemoryStore:
         task_id: str,
         source: str,
         title: str,
-        summary: Optional[str] = None,
-        payload: Optional[Dict[str, Any]] = None,
+        summary: str | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> None:
         self.ensure()
         file_path = self._path(key)
 
-        ts = datetime.now(timezone.utc).isoformat()
+        ts = datetime.now(UTC).isoformat()
         header = f"\n\n## {ts} task_id={task_id} source={source}\n### {str(title or '').strip() or 'entry'}\n"
 
         parts = [header]

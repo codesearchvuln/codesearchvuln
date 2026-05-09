@@ -49,14 +49,14 @@ test("DashboardCommandCenter summary card descriptions use enlarged label text",
 test("DashboardCommandCenter recent task titles match progress text styling instead of bold headings", () => {
 	const source = readFileSync(dashboardCommandCenterPath, "utf8");
 
-	assert.match(source, /<p className="truncate text-xs text-muted-foreground">/);
+	assert.match(source, /<p className="truncate text-sm font-semibold tracking-\[0\.01em\] text-foreground">/);
 	assert.match(
 		source,
-		/<div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">/,
+		/<div className="mt-3 flex items-center justify-between gap-1 text-xs text-muted-foreground">/,
 	);
 	assert.doesNotMatch(
 		source,
-		/<p className="truncate text-sm font-semibold text-foreground">/,
+		/<p className="truncate text-xs text-muted-foreground">/,
 	);
 });
 

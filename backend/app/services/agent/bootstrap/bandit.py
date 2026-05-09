@@ -4,9 +4,8 @@ import asyncio
 import json
 import re
 import shutil
-import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from app.api.v1.endpoints.static_tasks_shared import (
@@ -24,12 +23,12 @@ from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 from .base import (
     StaticBootstrapFinding,
-    StaticBootstrapScanResult,
     StaticBootstrapScanner,
+    StaticBootstrapScanResult,
 )
 
 
-def _normalize_confidence(value: Any) -> Optional[str]:
+def _normalize_confidence(value: Any) -> str | None:
     normalized = str(value or "").strip().upper()
     if normalized in {"HIGH", "MEDIUM", "LOW"}:
         return normalized
@@ -45,7 +44,7 @@ def _normalize_severity_to_bootstrap_error(value: Any) -> str:
     return "WARNING"
 
 
-def _parse_output(stdout: str) -> List[Dict[str, Any]]:
+def _parse_output(stdout: str) -> list[dict[str, Any]]:
     if not stdout:
         return []
 
@@ -61,7 +60,7 @@ def _parse_output(stdout: str) -> List[Dict[str, Any]]:
         parse_targets.append(text[first_json_match.start():])
 
     output: Any = None
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for candidate in parse_targets:
         try:
             output = json.loads(candidate)
@@ -83,7 +82,7 @@ def _parse_output(stdout: str) -> List[Dict[str, Any]]:
     if not isinstance(results, list):
         raise ValueError("Invalid bandit results format")
 
-    parsed: List[Dict[str, Any]] = []
+    parsed: list[dict[str, Any]] = []
     for item in results:
         if isinstance(item, dict):
             parsed.append(item)
@@ -100,10 +99,10 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
         self,
         *,
         timeout_seconds: int = 900,
-        rule_ids: Optional[List[str]] = None,
+        rule_ids: list[str] | None = None,
     ) -> None:
         self.timeout_seconds = max(1, int(timeout_seconds))
-        normalized_rule_ids: List[str] = []
+        normalized_rule_ids: list[str] = []
         for raw in rule_ids or []:
             normalized = str(raw or "").strip().upper()
             if not normalized:
@@ -114,9 +113,9 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
 
     def _normalize_findings(
         self,
-        payload_findings: List[Dict[str, Any]],
-    ) -> List[StaticBootstrapFinding]:
-        normalized: List[StaticBootstrapFinding] = []
+        payload_findings: list[dict[str, Any]],
+    ) -> list[StaticBootstrapFinding]:
+        normalized: list[StaticBootstrapFinding] = []
         for index, payload in enumerate(payload_findings):
             test_id = str(payload.get("test_id") or "").strip()
             test_name = str(payload.get("test_name") or "").strip()
@@ -212,8 +211,8 @@ class BanditBootstrapScanner(StaticBootstrapScanner):
                     errors="ignore",
                 )
 
-            payload_findings: List[Dict[str, Any]] = []
-            parse_error: Optional[Exception] = None
+            payload_findings: list[dict[str, Any]] = []
+            parse_error: Exception | None = None
             if report_file.exists():
                 try:
                     payload_findings = _parse_output(

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-PUSH_FINDING_ALIAS_MAP: Dict[str, str] = {
+PUSH_FINDING_ALIAS_MAP: dict[str, str] = {
     "line": "line_start",
     "start_line": "line_start",
     "end_line": "line_end",
@@ -40,7 +40,7 @@ _PUSH_FINDING_MAX_EXTRA_KEYS = 20
 _PUSH_FINDING_MAX_EXTRA_BYTES = 8 * 1024
 
 
-def _parse_object_payload(raw_value: Any) -> Dict[str, Any]:
+def _parse_object_payload(raw_value: Any) -> dict[str, Any]:
     if isinstance(raw_value, dict):
         return dict(raw_value)
     if not isinstance(raw_value, str):
@@ -109,7 +109,7 @@ def _is_placeholder_payload(payload: Any) -> bool:
     return all(_is_placeholder_text(key) or _is_placeholder_text(value) for key, value in public_items.items())
 
 
-def _normalize_text_list(value: Any) -> List[str]:
+def _normalize_text_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     if isinstance(value, str):
@@ -118,7 +118,7 @@ def _normalize_text_list(value: Any) -> List[str]:
     return []
 
 
-def _coerce_positive_int(value: Any) -> Optional[int]:
+def _coerce_positive_int(value: Any) -> int | None:
     try:
         parsed = int(value)
     except Exception:
@@ -127,10 +127,10 @@ def _coerce_positive_int(value: Any) -> Optional[int]:
 
 
 def _merge_payload_fields(
-    target: Dict[str, Any],
+    target: dict[str, Any],
     source_name: str,
-    source_payload: Dict[str, Any],
-    repair_map: Dict[str, str],
+    source_payload: dict[str, Any],
+    repair_map: dict[str, str],
 ) -> None:
     for source_key, source_value in source_payload.items():
         if source_key in {"finding", "arguments"}:
@@ -142,8 +142,8 @@ def _merge_payload_fields(
         repair_map[f"{source_name}.{source_key}"] = source_key
 
 
-def _limit_extra_tool_input(extra_payload: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
-    limited: Dict[str, Any] = {}
+def _limit_extra_tool_input(extra_payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    limited: dict[str, Any] = {}
     truncated = False
 
     for index, (key, value) in enumerate(extra_payload.items()):
@@ -160,9 +160,9 @@ def _limit_extra_tool_input(extra_payload: Dict[str, Any]) -> Tuple[Dict[str, An
     return limited, truncated
 
 
-def normalize_push_finding_payload(payload: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str]]:
+def normalize_push_finding_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     normalized = dict(payload or {})
-    repair_map: Dict[str, str] = {}
+    repair_map: dict[str, str] = {}
 
     for source_name in ("arguments", "finding"):
         nested_payload = normalized.get(source_name)

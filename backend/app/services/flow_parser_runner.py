@@ -5,7 +5,7 @@ import json
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.config import settings
 from app.services.scanner_runner import SCANNER_MOUNT_PATH, ScannerRunSpec, run_scanner_container
@@ -17,8 +17,8 @@ def _run_coroutine_blocking(coro):
     except RuntimeError:
         return asyncio.run(coro)
 
-    result: Dict[str, Any] = {}
-    error: Dict[str, BaseException] = {}
+    result: dict[str, Any] = {}
+    error: dict[str, BaseException] = {}
 
     def _target() -> None:
         try:
@@ -38,11 +38,11 @@ class FlowParserRunnerClient:
     def __init__(
         self,
         *,
-        image: Optional[str] = None,
-        enabled: Optional[bool] = None,
-        timeout_seconds: Optional[int] = None,
-        batch_max_files: Optional[int] = None,
-        batch_max_bytes: Optional[int] = None,
+        image: str | None = None,
+        enabled: bool | None = None,
+        timeout_seconds: int | None = None,
+        batch_max_files: int | None = None,
+        batch_max_bytes: int | None = None,
     ) -> None:
         self.image = image or str(
             getattr(settings, "FLOW_PARSER_RUNNER_IMAGE", "vulhunter/flow-parser-runner:latest")
@@ -74,12 +74,12 @@ class FlowParserRunnerClient:
         base_root = Path(configured or "/tmp/vulhunter/scans")
         return base_root / "flow-parser-runner"
 
-    def _invoke(self, subcommand: str, payload: Dict[str, Any], *, timeout_seconds: Optional[int] = None) -> Dict[str, Any]:
+    def _invoke(self, subcommand: str, payload: dict[str, Any], *, timeout_seconds: int | None = None) -> dict[str, Any]:
         if not self.enabled:
             return {"ok": False, "error": "flow_parser_runner_disabled"}
 
         workspace_root = self._workspace_root()
-        tempdir_kwargs: Dict[str, Any] = {"prefix": "flow-parser-runner-"}
+        tempdir_kwargs: dict[str, Any] = {"prefix": "flow-parser-runner-"}
         try:
             workspace_root.mkdir(parents=True, exist_ok=True)
             tempdir_kwargs["dir"] = str(workspace_root)
@@ -124,12 +124,12 @@ class FlowParserRunnerClient:
                 return {"ok": False, "error": "flow_parser_runner_missing_response"}
             return json.loads(response_path.read_text(encoding="utf-8"))
 
-    def extract_definitions_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def extract_definitions_batch(self, items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         response = self._invoke("definitions-batch", {"items": items})
         response_items = response.get("items") if isinstance(response, dict) else None
         if not isinstance(response_items, list):
             return {}
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         for item in response_items:
             if not isinstance(item, dict):
                 continue
@@ -146,7 +146,7 @@ class FlowParserRunnerClient:
         line_start: int,
         language: str,
         content: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         response = self._invoke(
             "locate-enclosing-function",
             {
@@ -162,10 +162,10 @@ class FlowParserRunnerClient:
 
     def generate_code2flow_callgraph(
         self,
-        files: List[Dict[str, str]],
+        files: list[dict[str, str]],
         *,
-        timeout_seconds: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
         response = self._invoke(
             "code2flow-callgraph",
             {"files": files},

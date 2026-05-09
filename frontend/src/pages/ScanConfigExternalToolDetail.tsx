@@ -842,19 +842,21 @@ export default function ScanConfigExternalToolDetail() {
     let cancelled = false;
 
     async function loadDetail() {
+      if (!toolType) return;
+      const resolvedToolType = toolType;
       setLoading(true);
       setError(null);
       try {
         const [detailPayload, promptPayload] = await Promise.all([
-          api.getExternalToolResourceDetail(toolType, toolId),
-          toolType === "skill" ? Promise.resolve(null) : api.getPromptSkills({ limit: 1 }),
+          api.getExternalToolResourceDetail(resolvedToolType, toolId),
+          resolvedToolType === "skill" ? Promise.resolve(null) : api.getPromptSkills({ limit: 1 }),
         ]);
 
         if (cancelled) {
           return;
         }
 
-        if (toolType === "skill") {
+        if (resolvedToolType === "skill") {
           setSkillDetail(normalizeScanCoreDetail(detailPayload));
           setPromptSkillDetail(null);
         } else {

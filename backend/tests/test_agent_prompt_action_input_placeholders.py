@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 TARGET_FILES = [
     "app/services/agent/agents/recon.py",
     "app/services/agent/agents/analysis.py",

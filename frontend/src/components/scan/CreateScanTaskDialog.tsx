@@ -17,13 +17,6 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import {
 	Search,
 	Upload,
 	Package,

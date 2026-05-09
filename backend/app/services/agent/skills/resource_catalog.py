@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from app.models.prompt_skill import PromptSkill
 
@@ -38,7 +39,7 @@ def match_catalog_item(
     item: Mapping[str, Any],
     *,
     terms: Sequence[str],
-    namespace: Optional[str] = None,
+    namespace: str | None = None,
 ) -> bool:
     namespace_filter = str(namespace or "").strip().lower()
     item_namespace = str(item.get("namespace") or "").strip().lower()
@@ -72,7 +73,7 @@ def paginate_catalog_items(
     *,
     limit: int,
     offset: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     total = len(items)
     paged = [dict(item) for item in items[offset : offset + limit]]
     return {
@@ -84,7 +85,7 @@ def paginate_catalog_items(
     }
 
 
-def build_scan_core_catalog_item(item: Mapping[str, Any]) -> Dict[str, Any]:
+def build_scan_core_catalog_item(item: Mapping[str, Any]) -> dict[str, Any]:
     tool_id = str(item.get("skill_id") or "").strip()
     return {
         "skill_id": tool_id,
@@ -108,7 +109,7 @@ def build_scan_core_catalog_item(item: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_prompt_builtin_catalog_item(*, agent_key: str, content: str, is_active: bool) -> Dict[str, Any]:
+def build_prompt_builtin_catalog_item(*, agent_key: str, content: str, is_active: bool) -> dict[str, Any]:
     tool_id = str(agent_key or "").strip()
     return {
         "skill_id": f"{RESOURCE_TOOL_TYPE_PROMPT_BUILTIN}:{tool_id}",
@@ -133,7 +134,7 @@ def build_prompt_builtin_catalog_item(*, agent_key: str, content: str, is_active
     }
 
 
-def build_prompt_custom_catalog_item(item: PromptSkill) -> Dict[str, Any]:
+def build_prompt_custom_catalog_item(item: PromptSkill) -> dict[str, Any]:
     prompt_id = str(getattr(item, "id", "") or "").strip()
     agent_key = str(getattr(item, "agent_key", "") or "").strip() or None
     scope = str(getattr(item, "scope", "") or "").strip() or None
@@ -165,10 +166,10 @@ def filter_catalog_items(
     items: Iterable[Mapping[str, Any]],
     *,
     query: str,
-    namespace: Optional[str] = None,
-) -> list[Dict[str, Any]]:
+    namespace: str | None = None,
+) -> list[dict[str, Any]]:
     terms = split_query_terms(query)
-    filtered: list[Dict[str, Any]] = []
+    filtered: list[dict[str, Any]] = []
     for item in items:
         if match_catalog_item(item, terms=terms, namespace=namespace):
             filtered.append(dict(item))

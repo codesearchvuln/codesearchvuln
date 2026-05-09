@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -210,20 +209,10 @@ def test_backend_release_publish_workflow_uses_runtime_plain_by_default() -> Non
     assert 'echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"' in publish_backend_section
     assert "Release manifest requires a freshly built backend image ref" in publish_workflow_text
 
-    assert "if: ${{ inputs.build_backend && inputs.publish_backend_hardened }}" in hardened_section
-    assert "platforms: linux/amd64" in hardened_section
-    assert "target: runtime-cython" in hardened_section
-    assert "tags: ${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-backend:${{ needs.prepare.outputs.tag }}-hardened" in hardened_section
-    assert "scope=backend-runtime-cython" in hardened_section
-    assert "vulhunter-backend:buildcache-runtime-cython" in hardened_section
-    assert 'IMAGE_TAG: ${{ format(\'{0}-hardened\', needs.prepare.outputs.tag) }}' in hardened_section
+    assert "publish-backend-hardened:" not in publish_workflow_text
+    assert "publish_backend_hardened:" not in release_workflow_text
 
-    assert "publish_backend_hardened:" in release_workflow_text
     assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images }}" in release_workflow_text
-    assert (
-        "publish_backend_hardened: ${{ github.event_name == 'workflow_dispatch' && "
-        "!inputs.reuse_existing_images && inputs.publish_backend_hardened || false }}"
-    ) in release_workflow_text
 
 
 def test_backend_release_defaults_do_not_depend_on_release_only_cython_inputs() -> None:

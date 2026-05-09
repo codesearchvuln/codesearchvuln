@@ -6,7 +6,7 @@ Workflow 数据模型
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 
 @dataclass
@@ -30,7 +30,7 @@ class WorkflowConfig:
     report_max_workers: int = 3
     bl_analysis_max_workers: int = 3
     use_agent_count_config_file: bool = True
-    agent_count_config_path: Optional[str] = None
+    agent_count_config_path: str | None = None
 
     def __post_init__(self) -> None:
         # Recon Host 在单次 workflow 运行中固定单实例，用户不可调。
@@ -90,14 +90,14 @@ class WorkflowStepRecord:
     agent: str
 
     # 本次调度注入的上下文（风险点 / 漏洞 / 无）
-    injected_context: Optional[Dict[str, Any]] = None
+    injected_context: dict[str, Any] | None = None
 
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     findings_count: int = 0       # 本次调度后累积发现数
     duration_ms: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "phase": self.phase.value,
             "agent": self.agent,
@@ -143,32 +143,32 @@ class WorkflowState:
     vuln_queue_findings_processed: int = 0
 
     # 已验证指纹去重集合
-    verified_fingerprints: Set[str] = field(default_factory=set)
+    verified_fingerprints: set[str] = field(default_factory=set)
 
     # 所有收集到的发现
-    all_findings: List[Dict[str, Any]] = field(default_factory=list)
+    all_findings: list[dict[str, Any]] = field(default_factory=list)
 
     # Report 阶段：每条已验证漏洞的详情报告（finding_identity 或 title -> Markdown 报告内容）
-    finding_reports: Dict[str, str] = field(default_factory=dict)
+    finding_reports: dict[str, str] = field(default_factory=dict)
 
     # Report 阶段统计
     report_findings_total: int = 0
     report_findings_processed: int = 0
     project_report_generated: bool = False
-    project_risk_report: Optional[str] = None
+    project_risk_report: str | None = None
 
     # 每步调度记录
-    step_records: List[WorkflowStepRecord] = field(default_factory=list)
+    step_records: list[WorkflowStepRecord] = field(default_factory=list)
 
     # 错误信息（仅 FAILED 时非空）
-    error: Optional[str] = None
+    error: str | None = None
 
     # 统计
     total_iterations: int = 0
     total_tokens: int = 0
     tool_calls: int = 0
 
-    def to_summary(self) -> Dict[str, Any]:
+    def to_summary(self) -> dict[str, Any]:
         """生成供日志/返回值使用的摘要字典"""
         return {
             "phase": self.phase.value,

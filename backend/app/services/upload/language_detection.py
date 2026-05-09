@@ -1,8 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, List, Set
-
 
 # 显示名称与前端保持一致
 _EXT_LANGUAGE_MAP = {
@@ -61,7 +60,7 @@ _ORDERED_LANGUAGES = [
 ]
 
 
-def detect_languages_from_paths(file_paths: Iterable[str]) -> List[str]:
+def detect_languages_from_paths(file_paths: Iterable[str]) -> list[str]:
     """
     基于文件路径推断项目编程语言。
 
@@ -69,7 +68,7 @@ def detect_languages_from_paths(file_paths: Iterable[str]) -> List[str]:
     - 使用扩展名 + 常见项目标记文件进行推断；
     - 输出顺序固定，便于前端稳定展示。
     """
-    found: Set[str] = set()
+    found: set[str] = set()
 
     for raw_path in file_paths:
         path = str(raw_path).strip().replace("\\", "/").lower()

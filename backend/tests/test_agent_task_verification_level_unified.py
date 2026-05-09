@@ -3,10 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.api.v1.endpoints.agent_tasks import AgentTaskCreate, create_agent_task
-from app.api.v1.endpoints import agent_tasks_routes_tasks
-import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
+from app.api.v1.endpoints import agent_tasks_routes_tasks
+from app.api.v1.endpoints.agent_tasks import AgentTaskCreate, create_agent_task
 
 
 def _mock_db_with_project(project_id: str = "project-1"):

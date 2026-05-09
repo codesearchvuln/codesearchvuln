@@ -4,22 +4,27 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-
 
 _PSEUDO_FUNCTION_NAMES = {"__attribute__", "__declspec"}
 _CONTROL_KEYWORDS = {"if", "for", "while", "switch", "catch", "else", "return"}
 
 
-def _is_pseudo_function_name(name: Optional[str]) -> bool:
+def _is_pseudo_function_name(name: str | None) -> bool:
     if not isinstance(name, str):
         return False
     normalized = name.strip().lower()
     return normalized in _PSEUDO_FUNCTION_NAMES
 
 
+def _strip_c_function_attributes(line: str) -> str:
+    stripped = str(line or "")
+    stripped = re.sub(r"\b__attribute__\s*\(\(.*?\)\)\s*", "", stripped)
+    stripped = re.sub(r"\b__declspec\s*\([^)]*\)\s*", "", stripped)
+    return stripped
+
+
 def _detect_block_end(
-    lines: List[str],
+    lines: list[str],
     start_index: int,
     language: str,
 ) -> int:
@@ -53,15 +58,15 @@ def _detect_block_end(
 
 def _regex_locate_enclosing_function(
     *,
-    file_lines: List[str],
+    file_lines: list[str],
     line_start: int,
     language: str,
-) -> Tuple[Optional[str], Optional[int], Optional[int], str]:
+) -> tuple[str | None, int | None, int | None, str]:
     if not file_lines:
         return None, None, None, "regex_empty_file"
 
     start_idx = max(0, min(len(file_lines) - 1, int(line_start) - 1))
-    patterns: List[re.Pattern[str]] = []
+    patterns: list[re.Pattern[str]] = []
 
     if language == "python":
         patterns = [re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")]
@@ -88,8 +93,9 @@ def _regex_locate_enclosing_function(
         if stripped.startswith(("//", "#")):
             continue
 
+        match_line = _strip_c_function_attributes(line) if language in {"c", "cpp"} else line
         for pattern in patterns:
-            match = pattern.match(line)
+            match = pattern.match(match_line)
             if not match:
                 continue
 
@@ -112,14 +118,14 @@ def locate_with_tree_sitter_cli(
     file_path: str,
     line_start: int,
     language: str,
-    file_lines: Optional[List[str]] = None,
-) -> Dict[str, object]:
+    file_lines: list[str] | None = None,
+) -> dict[str, object]:
     """Best-effort CLI fallback.
 
     Python tree-sitter binding is the primary engine. CLI fallback is non-blocking:
     if CLI is unavailable or parsing fails, return diagnostics and keep flow running.
     """
-    diagnostics: List[str] = []
+    diagnostics: list[str] = []
     target_path = Path(file_path)
 
     cli_bin = shutil.which("tree-sitter")

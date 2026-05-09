@@ -8,15 +8,15 @@ const homePagePath = path.resolve(
   "src/pages/AgentAudit/index.tsx",
 );
 
-test("AgentAudit 首页默认挂载主前端承载的 Nexus iframe", () => {
+test("AgentAudit 首页默认挂载独立 GitNexus iframe", () => {
   const source = fs.readFileSync(homePagePath, "utf8");
 
-  assert.match(source, /const iframePath = "\/nexus\/";/);
-  assert.match(source, /const iframeOrigin = window\.location\.origin;/);
-  assert.match(source, /<iframe[\s\S]*src=\{iframePath\}/);
+  assert.match(source, /src=\{`http:\/\/\$\{window\.location\.hostname\}:5174`\}/);
+  assert.match(source, /"http:\/\/localhost:5174"/);
+  assert.match(source, /title="GitNexus"/);
   assert.doesNotMatch(source, /isNexusLoaded/);
   assert.doesNotMatch(source, /setIsNexusLoaded/);
   assert.doesNotMatch(source, /加载 GitNexus 页面/);
   assert.doesNotMatch(source, /visibilitychange/);
-  assert.doesNotMatch(source, /window\.location\.hostname\}:5174/);
+  assert.doesNotMatch(source, /src="\/nexus\/"/);
 });

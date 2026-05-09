@@ -11,47 +11,45 @@ LLM 是验证的大脑！
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
-import hashlib
-import threading
 import tempfile
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-from app.services.json_safe import dump_json_safe
 from app.models.analysis import (
     REAL_DATAFLOW_EVIDENCE_LIST_FIELDS,
     REAL_DATAFLOW_PLACEHOLDER_VALUES,
     REAL_DATAFLOW_SEMANTIC_LIST_FIELDS,
 )
+from app.services.json_safe import dump_json_safe
 
-from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
-from .react_parser import parse_react_response
-from .verification_table import VerificationFindingTable
-from ..json_parser import AgentJsonParser
 from ..flow.lightweight.function_locator import EnclosingFunctionLocator
 from ..flow.lightweight.function_locator_payload import (
     parse_locator_payload,
     select_locator_function,
 )
 from ..prompts import CORE_SECURITY_PRINCIPLES, VULNERABILITY_PRIORITIES
+from ..tools.verification_result_tools import (
+    deduplicate_verification_findings,
+    ensure_finding_identity,
+)
 from ..utils.vulnerability_naming import (
-    build_cn_structured_description,
     build_cn_structured_description_markdown,
     build_cn_structured_title,
     normalize_vulnerability_type,
     resolve_cwe_id,
     resolve_vulnerability_profile,
 )
-from ..tools.verification_result_tools import (
-    deduplicate_verification_findings,
-    ensure_finding_identity,
-)
+from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent, TaskHandoff
+from .react_parser import parse_react_response
+from .verification_table import VerificationFindingTable
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +69,7 @@ _SINK_REACHABLE_TRUTHY_VALUES = {
     "可触发",
 }
 _SOURCE_SINK_PLACEHOLDER_VALUES = set(REAL_DATAFLOW_PLACEHOLDER_VALUES)
-_SOURCE_SINK_GATE_METADATA_KEYS: Tuple[str, ...] = (
+_SOURCE_SINK_GATE_METADATA_KEYS: tuple[str, ...] = (
     "sink_reachable",
     "upstream_call_chain",
     "sink_trigger_condition",
@@ -516,11 +514,11 @@ Action Input: { "参数": "值" }
 class VerificationStep:
     """验证步骤"""
     thought: str
-    action: Optional[str] = None
-    action_input: Optional[Dict] = None
-    observation: Optional[str] = None
+    action: str | None = None
+    action_input: dict | None = None
+    observation: str | None = None
     is_final: bool = False
-    final_answer: Optional[Dict] = None
+    final_answer: dict | None = None
 
 
 @dataclass
@@ -535,11 +533,11 @@ class VerificationTodoItem:
     status: str = "pending"  # pending|running|verified|false_positive|uncertain|blocked
     attempts: int = 0
     max_attempts: int = 2
-    blocked_reason: Optional[str] = None
-    evidence_refs: List[str] = field(default_factory=list)
-    final_verdict: Optional[str] = None
+    blocked_reason: str | None = None
+    evidence_refs: list[str] = field(default_factory=list)
+    final_verdict: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "fingerprint": self.fingerprint,
@@ -558,17 +556,17 @@ class VerificationTodoItem:
 class VerificationAgent(BaseAgent):
     """
     漏洞验证 Agent - LLM 驱动版
-    
+
     LLM 全程参与，自主决定：
     1. 如何验证每个漏洞
     2. 使用什么工具
     3. 判断真假
     """
-    
+
     def __init__(
         self,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
     ):
         # 组合增强的系统提示词
@@ -579,7 +577,7 @@ class VerificationAgent(BaseAgent):
             f"只能调用以上工具，不得编造工具名称。\n\n"
             f"{CORE_SECURITY_PRINCIPLES}\n\n{VULNERABILITY_PRIORITIES}"
         )
-        
+
         config = AgentConfig(
             name="Verification",
             agent_type=AgentType.VERIFICATION,
@@ -588,9 +586,9 @@ class VerificationAgent(BaseAgent):
             system_prompt=full_system_prompt,
         )
         super().__init__(config, llm_service, tools, event_emitter)
-        
-        self._conversation_history: List[Dict[str, str]] = []
-        self._steps: List[VerificationStep] = []
+
+        self._conversation_history: list[dict[str, str]] = []
+        self._steps: list[VerificationStep] = []
         self._trace_logger, self._trace_log_path = self._build_trace_logger(self.name, None)
         self._trace("verification_agent_initialized", tool_count=len(tools or {}))
 
@@ -601,7 +599,7 @@ class VerificationAgent(BaseAgent):
         return safe or "verification"
 
     @staticmethod
-    def _resolve_trace_log_path(agent_name: str, task_id: Optional[str] = None) -> str:
+    def _resolve_trace_log_path(agent_name: str, task_id: str | None = None) -> str:
         safe = VerificationAgent._sanitize_logger_identity(agent_name)
         safe_task = VerificationAgent._sanitize_logger_identity(task_id or "no_task")
         log_dir = Path(__file__).resolve().parents[4] / "log" / "verification" / safe_task
@@ -609,7 +607,7 @@ class VerificationAgent(BaseAgent):
         return str(log_dir / f"{safe}.log")
 
     @staticmethod
-    def _resolve_fallback_trace_log_path(agent_name: str, task_id: Optional[str] = None) -> str:
+    def _resolve_fallback_trace_log_path(agent_name: str, task_id: str | None = None) -> str:
         safe = VerificationAgent._sanitize_logger_identity(agent_name)
         safe_task = VerificationAgent._sanitize_logger_identity(task_id or "no_task")
         log_dir = Path(tempfile.gettempdir()) / "vulhunter" / "verification" / safe_task
@@ -617,7 +615,7 @@ class VerificationAgent(BaseAgent):
         return str(log_dir / f"{safe}.log")
 
     @classmethod
-    def _build_trace_logger(cls, agent_name: str, task_id: Optional[str] = None) -> tuple[logging.Logger, str]:
+    def _build_trace_logger(cls, agent_name: str, task_id: str | None = None) -> tuple[logging.Logger, str]:
         safe = cls._sanitize_logger_identity(agent_name)
         safe_task = cls._sanitize_logger_identity(task_id or "no_task")
         trace_logger_name = f"{__name__}.trace.{safe_task}.{safe}"
@@ -648,7 +646,7 @@ class VerificationAgent(BaseAgent):
                 trace_logger.addHandler(file_handler)
         return trace_logger, target_file
 
-    def configure_trace_logger(self, identity: Optional[str] = None, task_id: Optional[str] = None) -> str:
+    def configure_trace_logger(self, identity: str | None = None, task_id: str | None = None) -> str:
         """根据运行时身份重建 trace logger，确保并发 worker 各自落盘。"""
         final_identity = str(identity or self.name or "verification").strip() or "verification"
         final_task_id = str(task_id or getattr(self, "_task_id", "") or "").strip() or None
@@ -677,7 +675,7 @@ class VerificationAgent(BaseAgent):
 
 
 
-    
+
     def _parse_llm_response(self, response: str) -> VerificationStep:
         """解析 LLM 响应（共享 ReAct 解析器）"""
         parsed = parse_react_response(
@@ -710,7 +708,7 @@ class VerificationAgent(BaseAgent):
             ]
         return step
 
-    def _validate_final_answer_schema(self, final_answer: Dict[str, Any]) -> tuple[bool, str]:
+    def _validate_final_answer_schema(self, final_answer: dict[str, Any]) -> tuple[bool, str]:
         findings = final_answer.get("findings")
         if not isinstance(findings, list) or not findings:
             return False, "Final Answer 必须包含非空 findings 数组。"
@@ -791,7 +789,7 @@ class VerificationAgent(BaseAgent):
             return "false_positive"
         return "likely"
 
-    def _normalize_verdict(self, finding: Dict[str, Any]) -> str:
+    def _normalize_verdict(self, finding: dict[str, Any]) -> str:
         """兼容性方法：优先尊重显式 verdict，再回退按 status 推断。"""
         verdict = finding.get("verdict") or finding.get("authenticity")
         if isinstance(verdict, str):
@@ -830,7 +828,7 @@ class VerificationAgent(BaseAgent):
 
     def _normalize_reachability_value(self, value: Any, verdict: str) -> str:
         """规范化可达性判定
-        
+
         改进：添加对'uncertain'状态的支持
         """
         if isinstance(value, str):
@@ -846,7 +844,7 @@ class VerificationAgent(BaseAgent):
         return "unreachable"
 
     @staticmethod
-    def _normalize_text_list(value: Any) -> List[str]:
+    def _normalize_text_list(value: Any) -> list[str]:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         if isinstance(value, str):
@@ -855,7 +853,7 @@ class VerificationAgent(BaseAgent):
         return []
 
     @staticmethod
-    def _normalize_sink_reachability_flag(value: Any) -> Optional[bool]:
+    def _normalize_sink_reachability_flag(value: Any) -> bool | None:
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
@@ -910,7 +908,7 @@ class VerificationAgent(BaseAgent):
         primary: Any,
         fallback: Any,
         min_items: int = 0,
-    ) -> List[str]:
+    ) -> list[str]:
         primary_list = cls._normalize_text_list(primary)
         fallback_list = cls._normalize_text_list(fallback)
         min_required = max(1, int(min_items or 0))
@@ -921,7 +919,7 @@ class VerificationAgent(BaseAgent):
         return primary_list or fallback_list
 
     @staticmethod
-    def _metadata_has_source_sink_signal(payload: Dict[str, Any]) -> bool:
+    def _metadata_has_source_sink_signal(payload: dict[str, Any]) -> bool:
         metadata_payload = payload.get("finding_metadata")
         if not isinstance(metadata_payload, dict):
             return False
@@ -932,7 +930,7 @@ class VerificationAgent(BaseAgent):
         return False
 
     @classmethod
-    def _has_source_sink_signal(cls, payload: Dict[str, Any]) -> bool:
+    def _has_source_sink_signal(cls, payload: dict[str, Any]) -> bool:
         if not isinstance(payload, dict):
             return False
         # 仅在存在 source/sink 门禁元数据或历史门禁结果时触发。
@@ -960,8 +958,8 @@ class VerificationAgent(BaseAgent):
     @classmethod
     def _should_enforce_source_sink_authenticity_gate(
         cls,
-        finding: Dict[str, Any],
-        fallback: Optional[Dict[str, Any]] = None,
+        finding: dict[str, Any],
+        fallback: dict[str, Any] | None = None,
     ) -> bool:
         for payload in (fallback, finding):
             if not isinstance(payload, dict):
@@ -974,10 +972,10 @@ class VerificationAgent(BaseAgent):
         return False
 
     @staticmethod
-    def _extract_source_sink_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_source_sink_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             return {}
-        extracted: Dict[str, Any] = {}
+        extracted: dict[str, Any] = {}
         metadata_payload = payload.get("finding_metadata")
         if isinstance(metadata_payload, dict):
             extracted.update(metadata_payload)
@@ -996,14 +994,14 @@ class VerificationAgent(BaseAgent):
     @classmethod
     def _validate_source_sink_authenticity(
         cls,
-        finding: Dict[str, Any],
-        fallback: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, List[str], Dict[str, Any]]:
+        finding: dict[str, Any],
+        fallback: dict[str, Any] | None = None,
+    ) -> tuple[bool, list[str], dict[str, Any]]:
         finding_payload = finding if isinstance(finding, dict) else {}
         fallback_payload = fallback if isinstance(fallback, dict) else {}
         finding_metadata_raw = cls._extract_source_sink_metadata(finding_payload)
         fallback_metadata_raw = cls._extract_source_sink_metadata(fallback_payload)
-        merged_metadata: Dict[str, Any] = {}
+        merged_metadata: dict[str, Any] = {}
 
         source = cls._pick_best_text_value(
             finding_payload.get("source"),
@@ -1028,7 +1026,7 @@ class VerificationAgent(BaseAgent):
             fallback_payload.get("evidence_chain"),
         )
 
-        errors: List[str] = []
+        errors: list[str] = []
         if not source:
             raw_source = cls._pick_best_text_value(
                 finding_payload.get("source"),
@@ -1088,7 +1086,7 @@ class VerificationAgent(BaseAgent):
         if not has_flow_evidence:
             errors.append("缺少 flow 证据（attacker_flow / taint_flow / evidence_chain）")
 
-        normalized_context: Dict[str, Any] = {
+        normalized_context: dict[str, Any] = {
             "source": source,
             "sink": sink,
             "attacker_flow": attacker_flow,
@@ -1101,9 +1099,9 @@ class VerificationAgent(BaseAgent):
     @classmethod
     def _apply_source_sink_authenticity_gate(
         cls,
-        finding: Dict[str, Any],
-        fallback: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        finding: dict[str, Any],
+        fallback: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         normalized = dict(finding or {})
         verification_result = (
             dict(normalized.get("verification_result"))
@@ -1197,10 +1195,10 @@ class VerificationAgent(BaseAgent):
         normalized["verification_result"] = verification_result
         return normalized
 
-    def _normalize_vulnerability_key(self, finding: Dict[str, Any]) -> str:
+    def _normalize_vulnerability_key(self, finding: dict[str, Any]) -> str:
         return normalize_vulnerability_type(finding.get("vulnerability_type"))
 
-    def _build_finding_match_features(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_finding_match_features(self, finding: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(finding, dict):
             return {
                 "identity": "",
@@ -1238,18 +1236,18 @@ class VerificationAgent(BaseAgent):
 
     def _select_fallback_finding(
         self,
-        finding: Dict[str, Any],
-        fallback_findings: List[Dict[str, Any]],
+        finding: dict[str, Any],
+        fallback_findings: list[dict[str, Any]],
         used_indexes: set[int],
-        preferred_index: Optional[int] = None,
-    ) -> Optional[Dict[str, Any]]:
+        preferred_index: int | None = None,
+    ) -> dict[str, Any] | None:
         if not isinstance(finding, dict):
             return None
         if not isinstance(fallback_findings, list) or not fallback_findings:
             return None
 
         target = self._build_finding_match_features(finding)
-        best_index: Optional[int] = None
+        best_index: int | None = None
         best_score = -1
 
         for index, candidate in enumerate(fallback_findings):
@@ -1299,7 +1297,7 @@ class VerificationAgent(BaseAgent):
         selected = fallback_findings[best_index]
         return selected if isinstance(selected, dict) else None
 
-    def _infer_cwe_id(self, finding: Dict[str, Any]) -> str:
+    def _infer_cwe_id(self, finding: dict[str, Any]) -> str:
         resolved = resolve_cwe_id(
             finding.get("cwe_id") or finding.get("cwe"),
             finding.get("vulnerability_type"),
@@ -1309,7 +1307,7 @@ class VerificationAgent(BaseAgent):
         )
         return resolved or "CWE-20"
 
-    def _build_structured_title(self, finding: Dict[str, Any]) -> str:
+    def _build_structured_title(self, finding: dict[str, Any]) -> str:
         return build_cn_structured_title(
             file_path=finding.get("file_path"),
             function_name=finding.get("function_name"),
@@ -1321,7 +1319,7 @@ class VerificationAgent(BaseAgent):
             localization_status=finding.get("localization_status"),
         )
 
-    def _build_default_fix_code(self, finding: Dict[str, Any]) -> str:
+    def _build_default_fix_code(self, finding: dict[str, Any]) -> str:
         vuln_type = str(finding.get("vulnerability_type") or "general_issue")
         code_snippet = str(finding.get("code_snippet") or "").strip()
         if code_snippet:
@@ -1336,7 +1334,7 @@ class VerificationAgent(BaseAgent):
             "// apply input validation, output encoding and least-privilege checks here"
         )
 
-    def _build_default_poc_plan(self, finding: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_default_poc_plan(self, finding: dict[str, Any]) -> dict[str, Any]:
         vuln_type = str(finding.get("vulnerability_type") or "general_issue")
         file_path = str(finding.get("file_path") or "unknown")
         line_start = finding.get("line_start") or 1
@@ -1359,8 +1357,8 @@ class VerificationAgent(BaseAgent):
 
     def _build_minimal_probe_request(
         self,
-        finding: Dict[str, Any],
-    ) -> Optional[tuple[str, Dict[str, Any]]]:
+        finding: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]] | None:
         file_path, line_start, _line_end = self._normalize_file_location(finding)
         normalized_file_path = str(file_path or finding.get("file_path") or "").strip()
         function_name = str(finding.get("function_name") or "").strip()
@@ -1405,7 +1403,7 @@ class VerificationAgent(BaseAgent):
                 or normalized_file_path
             )
             if keyword:
-                payload: Dict[str, Any] = {"keyword": keyword}
+                payload: dict[str, Any] = {"keyword": keyword}
                 if normalized_file_path:
                     parent_dir = str(Path(normalized_file_path).parent).strip()
                     if parent_dir and parent_dir != ".":
@@ -1442,7 +1440,7 @@ class VerificationAgent(BaseAgent):
             pass
         return default
 
-    def _normalize_file_location(self, finding: Dict[str, Any]) -> tuple[str, int, int]:
+    def _normalize_file_location(self, finding: dict[str, Any]) -> tuple[str, int, int]:
         file_path = str(finding.get("file_path") or finding.get("file") or "").strip()
         line_start_raw = finding.get("line_start") or finding.get("line")
         line_end_raw = finding.get("line_end")
@@ -1462,8 +1460,8 @@ class VerificationAgent(BaseAgent):
     def _resolve_file_paths(
         self,
         file_path: str,
-        project_root: Optional[str],
-    ) -> tuple[Optional[str], Optional[str]]:
+        project_root: str | None,
+    ) -> tuple[str | None, str | None]:
         clean = str(file_path or "").strip().replace("\\", "/")
         if not clean:
             return None, None
@@ -1493,7 +1491,7 @@ class VerificationAgent(BaseAgent):
                     return rel, str(full)
         return display_fallback, None
 
-    def _to_display_file_path(self, file_path: str, project_root: Optional[str]) -> str:
+    def _to_display_file_path(self, file_path: str, project_root: str | None) -> str:
         clean = str(file_path or "").strip().replace("\\", "/")
         if not clean:
             return ""
@@ -1510,7 +1508,7 @@ class VerificationAgent(BaseAgent):
             clean = clean[2:]
         return clean
 
-    def _extract_function_name_from_title(self, title: Any) -> Optional[str]:
+    def _extract_function_name_from_title(self, title: Any) -> str | None:
         text = str(title or "").strip()
         if not text:
             return None
@@ -1533,9 +1531,9 @@ class VerificationAgent(BaseAgent):
 
     def _infer_function_by_regex(
         self,
-        file_lines: List[str],
+        file_lines: list[str],
         line_start: int,
-    ) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    ) -> tuple[str | None, int | None, int | None]:
         """
         增强的多语言函数定位正则推断
         支持: Python, JavaScript/TypeScript, PHP, Ruby, Go, Java, C/C++, Bash/Shell
@@ -1543,32 +1541,32 @@ class VerificationAgent(BaseAgent):
         if not file_lines:
             return None, None, None
         start_idx = max(0, min(len(file_lines) - 1, line_start - 1))
-        
+
         # 增强的多语言模式
         patterns = [
             # Python: def, async def, @decorator 修饰
             ("python", re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")),
-            
+
             # JavaScript/TypeScript: function, async function, arrow, methods
             ("javascript", re.compile(r"^\s*(?:export\s+)?(?:async\s+)?(?:function\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*[(:=]")),
             ("javascript_method", re.compile(r"^\s*(?:async\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*[{:]")),
-            
+
             # PHP: function, public/private/protected, static
             ("php", re.compile(r"^\s*(?:public|private|protected|static)?\s*(?:function|async\s+function)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")),
             ("php_class_method", re.compile(r"^\s*(?:public|private|protected)?\s*(?:static)?\s*(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")),
-            
+
             # Ruby: def
             ("ruby", re.compile(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_?!]*)")),
-            
+
             # Go: func
             ("go", re.compile(r"^\s*func\s*(?:\([^)]*\))?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(")),
-            
+
             # Java: modifiers + return type + method name
             ("java", re.compile(r"^\s*(?:public|private|protected|static|final|synchronized)?\s*(?:[\w<>]+\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{")),
-            
+
             # Bash/Shell: function
             ("bash", re.compile(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{")),
-            
+
             # C/C++ 改进版: 支持复杂签名（指针、const、引用、模板等）
             ("c_cpp", re.compile(
                 r"^\s*(?:inline|virtual|static|const|volatile|explicit|constexpr)?\s*"
@@ -1576,13 +1574,13 @@ class VerificationAgent(BaseAgent):
                 r"([A-Za-z_~][A-Za-z0-9_:]*)\s*\([^;]*\)\s*(?:const)?\s*(?:noexcept)?\s*\{?$"
             )),
         ]
-        
+
         failure_reasons = []
-        
+
         for idx in range(start_idx, -1, -1):
             line = file_lines[idx]
             stripped = line.strip()
-            
+
             # 跳过注释和空行
             if not stripped:
                 continue
@@ -1590,14 +1588,14 @@ class VerificationAgent(BaseAgent):
                 continue
             if stripped.startswith(("import ", "require ", "include ", "using ")):
                 continue
-                
+
             # 尝试所有模式
             for lang, pattern in patterns:
                 try:
                     match = pattern.match(line)
                     if not match:
                         continue
-                    
+
                     name = match.group(1).strip()
                     if (
                         not name
@@ -1606,10 +1604,10 @@ class VerificationAgent(BaseAgent):
                         or name.lower() in _CONTROL_KEYWORDS
                     ):
                         continue
-                    
+
                     start_line = idx + 1
                     end_line = start_line
-                    
+
                     # 根据语言类型确定函数体范围
                     if lang == "python":
                         # Python: 基于缩进
@@ -1623,7 +1621,7 @@ class VerificationAgent(BaseAgent):
                             if probe_indent <= indent and not probe_stripped.startswith(("@", "#")):
                                 break
                             end_line = cursor + 1
-                    
+
                     elif lang == "ruby":
                         # Ruby: 查找 end 关键字
                         for cursor in range(idx + 1, min(len(file_lines), idx + 500)):
@@ -1632,7 +1630,7 @@ class VerificationAgent(BaseAgent):
                                 end_line = cursor + 1
                                 break
                             end_line = cursor + 1
-                    
+
                     elif "{" in line:
                         # C/C++/Java/Go/JavaScript/PHP/Bash: 基于括号平衡
                         balance = line.count("{") - line.count("}")
@@ -1645,7 +1643,6 @@ class VerificationAgent(BaseAgent):
                                 break
                     else:
                         # 多行函数声明（无开括号）
-                        looking_for_brace = True
                         for cursor in range(idx + 1, min(len(file_lines), idx + 20)):
                             probe = file_lines[cursor]
                             if "{" in probe:
@@ -1657,29 +1654,28 @@ class VerificationAgent(BaseAgent):
                                     end_line = cursor2 + 1
                                     if balance <= 0:
                                         break
-                                looking_for_brace = False
                                 break
                             end_line = cursor + 1
-                    
+
                     logger.debug(
                         f"[Verification] 函数定位成功 (regex): {name} @ {start_line}-{end_line} (语言={lang})"
                     )
                     if not (start_line <= line_start <= end_line):
                         continue
                     return name, start_line, end_line
-                    
+
                 except Exception as e:
                     logger.debug(f"[Verification] regex 模式 {lang} 匹配失败: {e}")
                     failure_reasons.append(f"{lang}: {str(e)[:50]}")
                     continue
-        
+
         logger.debug(
             f"[Verification] regex 函数定位全部失败 (line_start={line_start}, 失败原因={failure_reasons})"
         )
         return None, None, None
 
     @staticmethod
-    def _safe_int(value: Any) -> Optional[int]:
+    def _safe_int(value: Any) -> int | None:
         try:
             parsed = int(value)
             if parsed > 0:
@@ -1691,20 +1687,20 @@ class VerificationAgent(BaseAgent):
     def _extract_locator_payload(
         self,
         raw_output: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         return parse_locator_payload(raw_output)
 
     def _extract_function_from_locator_payload(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         line_start: int,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         return select_locator_function(payload, line_start=line_start)
 
     async def _enrich_function_metadata_with_locator(
         self,
-        findings_to_verify: List[Dict[str, Any]],
-        project_root: Optional[str],
+        findings_to_verify: list[dict[str, Any]],
+        project_root: str | None,
     ) -> None:
         """
         改进的函数定位辅助方法：增强容错与诊断日志
@@ -1715,12 +1711,12 @@ class VerificationAgent(BaseAgent):
 
         success_count = 0
         fail_count = 0
-        
+
         for idx, finding in enumerate(findings_to_verify):
             if not isinstance(finding, dict):
                 logger.debug(f"[Verification] 函数定位 enrichment跳过非字典项 #{idx}")
                 continue
-            
+
             existing_name = str(finding.get("function_name") or "").strip()
             if existing_name and existing_name.lower() not in {"unknown", "未知函数"}:
                 logger.debug(f"[Verification] 函数定位 enrichment跳过已有函数名: {existing_name}")
@@ -1729,7 +1725,7 @@ class VerificationAgent(BaseAgent):
             file_path, line_start, _line_end = self._normalize_file_location(finding)
             resolved_file_path, _full = self._resolve_file_paths(file_path, project_root)
             request_path = resolved_file_path or file_path
-            
+
             if not request_path or line_start <= 0:
                 logger.debug(f"[Verification] 函数定位 enrichment跳过无效路径: {request_path}:{line_start}")
                 continue
@@ -1738,14 +1734,14 @@ class VerificationAgent(BaseAgent):
                 "file_path": request_path,
                 "line_start": int(line_start),
             }
-            
+
             try:
                 logger.debug(f"[Verification] 调用 locate_enclosing_function: {request_path}:{line_start}")
                 locator_output = await self.execute_tool(
                     "locate_enclosing_function",
                     locator_input,
                 )
-                
+
                 payload = self._extract_locator_payload(locator_output)
                 if not payload:
                     fail_count += 1
@@ -1756,7 +1752,7 @@ class VerificationAgent(BaseAgent):
                     # 标记工具尝试但失败
                     finding["_function_locator_attempt"] = "failed_empty_payload"
                     continue
-                
+
                 located = self._extract_function_from_locator_payload(payload, int(line_start))
                 if not located:
                     fail_count += 1
@@ -1775,7 +1771,7 @@ class VerificationAgent(BaseAgent):
                     )
                     finding["_function_locator_attempt"] = "failed_empty_function_name"
                     continue
-                
+
                 # 函数定位成功
                 success_count += 1
                 finding["function_name"] = located_name
@@ -1787,11 +1783,11 @@ class VerificationAgent(BaseAgent):
                     finding["function_language"] = located.get("language")
                 if located.get("diagnostics") is not None:
                     finding["function_resolution_diagnostics"] = located.get("diagnostics")
-                
+
                 logger.info(
                     f"[Verification] 函数定位成功: '{located_name}' @ {request_path}:{line_start}"
                 )
-                
+
             except Exception as e:
                 fail_count += 1
                 logger.error(
@@ -1800,7 +1796,7 @@ class VerificationAgent(BaseAgent):
                 )
                 finding["_function_locator_attempt"] = f"exception: {str(e)[:100]}"
                 continue
-        
+
         logger.info(
             f"[Verification] 函数定位 enrichment 完成: 成功={success_count}, 失败={fail_count}, "
             f"总数={len(findings_to_verify)}"
@@ -1808,21 +1804,21 @@ class VerificationAgent(BaseAgent):
 
     def _resolve_function_metadata(
         self,
-        finding: Dict[str, Any],
-        project_root: Optional[str],
-        ast_cache: Dict[str, tuple[Optional[str], Optional[int], Optional[int]]],
-        file_cache: Dict[str, List[str]],
-        locator: Optional[EnclosingFunctionLocator] = None,
-    ) -> Dict[str, Any]:
+        finding: dict[str, Any],
+        project_root: str | None,
+        ast_cache: dict[str, tuple[str | None, int | None, int | None]],
+        file_cache: dict[str, list[str]],
+        locator: EnclosingFunctionLocator | None = None,
+    ) -> dict[str, Any]:
         """
         改进的函数定位方法：4层降级策略 + 详细诊断日志
         层级1: 显式函数名 → 层级2: TreeSitter → 层级3: Regex → 层级4: 诊断失败
         """
         file_path, line_start, line_end = self._normalize_file_location(finding)
         resolved_file_path, full_file_path = self._resolve_file_paths(file_path, project_root)
-        
+
         diagnostics_trace = []
-        read_error_reason: Optional[str] = None
+        read_error_reason: str | None = None
 
         # === 层级 1: 显式函数名提取 ===
         reachability_target = finding.get("reachability_target")
@@ -1832,7 +1828,7 @@ class VerificationAgent(BaseAgent):
                 maybe_target = verification_payload.get("reachability_target")
                 if isinstance(maybe_target, dict):
                     reachability_target = maybe_target
-        
+
         explicit_function = None
         for candidate in (
             finding.get("function_name"),
@@ -1849,8 +1845,8 @@ class VerificationAgent(BaseAgent):
                 logger.info(f"[Verification] 函数定位成功 (显式): {explicit_function} @ {file_path}:{line_start}")
                 break
 
-        start_from_target: Optional[int] = None
-        end_from_target: Optional[int] = None
+        start_from_target: int | None = None
+        end_from_target: int | None = None
         if isinstance(reachability_target, dict):
             raw_start = reachability_target.get("start_line")
             raw_end = reachability_target.get("end_line")
@@ -1862,7 +1858,7 @@ class VerificationAgent(BaseAgent):
                 end_from_target = int(raw_end) if raw_end is not None else None
             except Exception:
                 end_from_target = None
-        
+
         explicit_start = (
             self._safe_int(finding.get("function_start_line"))
             or self._safe_int(finding.get("function_start"))
@@ -1891,7 +1887,7 @@ class VerificationAgent(BaseAgent):
             )
             or "explicit"
         )
-        
+
         if explicit_function:
             return {
                 "file_path": resolved_file_path or file_path,
@@ -1918,7 +1914,7 @@ class VerificationAgent(BaseAgent):
             diagnostics_trace.append("层级1-无: 未找到有效的显式函数名")
 
         # === 层级 2: TreeSitter AST 定位 ===
-        lines: List[str] = []
+        lines: list[str] = []
         if full_file_path:
             lines = file_cache.get(full_file_path) or []
             if not lines:
@@ -1933,9 +1929,9 @@ class VerificationAgent(BaseAgent):
                     lines = []
                 file_cache[full_file_path] = lines
 
-        tree_sitter_language: Optional[str] = None
+        tree_sitter_language: str | None = None
         tree_sitter_diagnostics: Any = None
-        
+
         if locator and project_root and resolved_file_path and full_file_path:
             try:
                 logger.debug(f"[Verification] 尝试 TreeSitter 定位: {full_file_path}:{line_start}")
@@ -1948,7 +1944,7 @@ class VerificationAgent(BaseAgent):
                 tree_sitter_language = located.get("language")
                 tree_sitter_diagnostics = located.get("diagnostics")
                 function_name = located.get("function")
-                
+
                 if isinstance(function_name, str) and function_name.strip():
                     diagnostics_trace.append(f"层级2-命中: TreeSitter 定位 '{function_name}'")
                     logger.info(f"[Verification] 函数定位成功 (TreeSitter): {function_name} @ {file_path}:{line_start}")
@@ -1984,15 +1980,15 @@ class VerificationAgent(BaseAgent):
             diagnostics_trace.append(f"层级2-跳过: {', '.join(reason)}")
 
         # === 层级 3: Regex 推断 ===
-        regex_name: Optional[str] = None
-        regex_start: Optional[int] = None
-        regex_end: Optional[int] = None
-        
+        regex_name: str | None = None
+        regex_start: int | None = None
+        regex_end: int | None = None
+
         if lines:
             try:
                 logger.debug(f"[Verification] 尝试 Regex 定位: {file_path}:{line_start}")
                 regex_name, regex_start, regex_end = self._infer_function_by_regex(lines, line_start)
-                
+
                 if regex_name:
                     diagnostics_trace.append(f"层级3-命中: Regex 推断 '{regex_name}'")
                     logger.info(f"[Verification] 函数定位成功 (Regex): {regex_name} @ {file_path}:{line_start}")
@@ -2023,7 +2019,7 @@ class VerificationAgent(BaseAgent):
             f"[Verification] 所有函数定位方法失败: {file_path}:{line_start} | "
             f"诊断链: {' → '.join(diagnostics_trace)}"
         )
-        
+
         # === 改进的文件可读性判定 ===
         # 区分三种情况：文件存在但为空、文件存在且可读、文件不存在
         file_exists = False
@@ -2032,7 +2028,7 @@ class VerificationAgent(BaseAgent):
                 file_exists = Path(full_file_path).exists()
             except Exception as e:
                 logger.debug(f"[Verification] 检查文件存在性失败: {e}")
-        
+
         file_readable = bool(lines) and file_exists
         if not file_readable:
             if file_exists and not lines:
@@ -2063,17 +2059,17 @@ class VerificationAgent(BaseAgent):
         self,
         existing_flow: Any,
         file_path: str,
-        function_name: Optional[str],
-        function_start_line: Optional[int],
-        function_end_line: Optional[int],
+        function_name: str | None,
+        function_start_line: int | None,
+        function_end_line: int | None,
         line_start: int,
         line_end: int,
-    ) -> List[str]:
+    ) -> list[str]:
         if isinstance(existing_flow, list):
             normalized = [str(step).strip() for step in existing_flow if str(step).strip()]
             if normalized:
                 return normalized
-        flow: List[str] = []
+        flow: list[str] = []
         if function_name:
             if function_start_line and function_end_line:
                 flow.append(
@@ -2087,28 +2083,28 @@ class VerificationAgent(BaseAgent):
 
     def _repair_final_answer(
         self,
-        final_answer: Dict[str, Any],
-        findings_to_verify: List[Dict[str, Any]],
+        final_answer: dict[str, Any],
+        findings_to_verify: list[dict[str, Any]],
         verification_level: str,
-        project_root: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        project_root: str | None = None,
+    ) -> dict[str, Any]:
         findings = final_answer.get("findings")
         if not isinstance(findings, list):
             findings = []
 
         fallback_findings = [item for item in (findings_to_verify or []) if isinstance(item, dict)]
         llm_findings = [item for item in findings if isinstance(item, dict)]
-        repaired_findings: List[Dict[str, Any]] = []
+        repaired_findings: list[dict[str, Any]] = []
         source_findings = fallback_findings if fallback_findings else llm_findings
 
-        llm_by_key: Dict[tuple[str, str, int], Dict[str, Any]] = {}
+        llm_by_key: dict[tuple[str, str, int], dict[str, Any]] = {}
         for item in llm_findings:
             file_path, line_start, _line_end = self._normalize_file_location(item)
             key = (self._normalize_vulnerability_key(item), file_path, line_start)
             llm_by_key.setdefault(key, item)
 
-        ast_cache: Dict[str, tuple[Optional[str], Optional[int], Optional[int]]] = {}
-        file_cache: Dict[str, List[str]] = {}
+        ast_cache: dict[str, tuple[str | None, int | None, int | None]] = {}
+        file_cache: dict[str, list[str]] = {}
         locator = EnclosingFunctionLocator(project_root=project_root) if project_root else None
         for index, base in enumerate(source_findings):
             file_path, line_start, _line_end = self._normalize_file_location(base)
@@ -2147,12 +2143,12 @@ class VerificationAgent(BaseAgent):
                 or merged.get("evidence")
                 or "基于代码上下文与工具输出完成验证。"
             )
-            
+
             # === 新规则：不再因缺少函数名就自动标记为false_positive ===
             # 只有在以下情况才标记为false_positive：
             # 1. 文件不可读（真正的无法验证）
             # 2. OR LLM明确判定为false_positive
-            
+
             if not function_name:
                 # === 改进的规则：区分文件状态，避免误判 ===
                 if not file_readable:
@@ -2265,14 +2261,14 @@ class VerificationAgent(BaseAgent):
                 if isinstance(merged.get("verification_result"), dict)
                 else {}
             )
-            
+
             # === 诊断追踪：记录置信度与文件状态 ===
             confidence_for_tracking = merged.get("confidence")
             if confidence_for_tracking is None:
                 confidence_source_for_tracking = "missing"
             else:
                 confidence_source_for_tracking = "direct"
-            
+
             verification_result.update(
                 {
                     "authenticity": verdict,
@@ -2370,7 +2366,7 @@ class VerificationAgent(BaseAgent):
         }
 
     @staticmethod
-    def _build_candidate_fingerprint(finding: Dict[str, Any], index: int) -> str:
+    def _build_candidate_fingerprint(finding: dict[str, Any], index: int) -> str:
         file_path = str(finding.get("file_path") or finding.get("file") or "").strip()
         line_start = str(finding.get("line_start") or finding.get("line") or "")
         vuln_type = str(finding.get("vulnerability_type") or "unknown").strip().lower()
@@ -2380,11 +2376,11 @@ class VerificationAgent(BaseAgent):
 
     def _build_verification_todo_items(
         self,
-        findings_to_verify: List[Dict[str, Any]],
+        findings_to_verify: list[dict[str, Any]],
         max_attempts_per_item: int,
-        project_root: Optional[str] = None,
-    ) -> List[VerificationTodoItem]:
-        todo_items: List[VerificationTodoItem] = []
+        project_root: str | None = None,
+    ) -> list[VerificationTodoItem]:
+        todo_items: list[VerificationTodoItem] = []
         for idx, finding in enumerate(findings_to_verify):
             file_path, line_start, _line_end = self._normalize_file_location(finding)
             file_path = self._to_display_file_path(file_path, project_root)
@@ -2405,7 +2401,7 @@ class VerificationAgent(BaseAgent):
         return todo_items
 
     @staticmethod
-    def _extract_tool_error_reason(observation: str) -> Optional[str]:
+    def _extract_tool_error_reason(observation: str) -> str | None:
         text = str(observation or "")
         if not text.strip():
             return "empty_observation"
@@ -2436,7 +2432,7 @@ class VerificationAgent(BaseAgent):
         return None
 
     @staticmethod
-    def _extract_verify_pipeline_blocked_reason(observation: str) -> Optional[str]:
+    def _extract_verify_pipeline_blocked_reason(observation: str) -> str | None:
         text = str(observation or "")
         lowered = text.lower()
         runtime_hints = (
@@ -2490,8 +2486,8 @@ class VerificationAgent(BaseAgent):
 
     @staticmethod
     def _map_flow_error_to_blocked_reason(
-        flow_error_reason: Optional[str],
-        pipeline_blocked_reason: Optional[str],
+        flow_error_reason: str | None,
+        pipeline_blocked_reason: str | None,
     ) -> str:
         if pipeline_blocked_reason:
             return pipeline_blocked_reason
@@ -2550,7 +2546,7 @@ class VerificationAgent(BaseAgent):
         *,
         vulnerability_type: str,
         language: str,
-        function_name: Optional[str],
+        function_name: str | None,
         extracted_code: str,
         code_context: str,
         file_path: str,
@@ -2596,15 +2592,15 @@ class VerificationAgent(BaseAgent):
 
     def _build_verification_todo_summary(
         self,
-        todo_items: List[VerificationTodoItem],
-    ) -> Dict[str, Any]:
+        todo_items: list[VerificationTodoItem],
+    ) -> dict[str, Any]:
         total = len(todo_items)
         verified = len([item for item in todo_items if item.status == "verified"])
         false_positive = len([item for item in todo_items if item.status == "false_positive"])
         uncertain = len([item for item in todo_items if item.status == "uncertain"])
         blocked = len([item for item in todo_items if item.status == "blocked"])
         pending = len([item for item in todo_items if item.status in {"pending", "running"}])
-        blocked_reasons: Dict[str, int] = {}
+        blocked_reasons: dict[str, int] = {}
         for item in todo_items:
             reason = str(item.blocked_reason or "").strip()
             if not reason:
@@ -2639,12 +2635,12 @@ class VerificationAgent(BaseAgent):
 
     async def _emit_verification_todo_update(
         self,
-        todo_items: List[VerificationTodoItem],
+        todo_items: list[VerificationTodoItem],
         message: str,
-        current_index: Optional[int] = None,
-        total_todos: Optional[int] = None,
-        last_action: Optional[str] = None,
-        last_tool_name: Optional[str] = None,
+        current_index: int | None = None,
+        total_todos: int | None = None,
+        last_action: str | None = None,
+        last_tool_name: str | None = None,
     ) -> None:
         await self.emit_event(
             "todo_update",
@@ -2667,7 +2663,7 @@ class VerificationAgent(BaseAgent):
         round_index: int,
         queue_size: int,
         newly_discovered_count: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         summary = finding_table.summary(
             round_index=round_index,
             queue_size=queue_size,
@@ -2687,11 +2683,11 @@ class VerificationAgent(BaseAgent):
 
     async def _emit_unverified_finding_event(
         self,
-        finding: Dict[str, Any],
+        finding: dict[str, Any],
         status: str = "new",
-        project_root: Optional[str] = None,
-        verification_todo_id: Optional[str] = None,
-        verification_fingerprint: Optional[str] = None,
+        project_root: str | None = None,
+        verification_todo_id: str | None = None,
+        verification_fingerprint: str | None = None,
     ) -> None:
         title = str(finding.get("title") or "待验证漏洞").strip() or "待验证漏洞"
         severity = str(finding.get("severity") or "medium").strip() or "medium"
@@ -2748,8 +2744,8 @@ class VerificationAgent(BaseAgent):
                 "verification_status": status if status in {"new", "running"} else "new",
             },
         )
-    
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         执行漏洞验证 - LLM 全程参与！
         """
@@ -2781,7 +2777,7 @@ class VerificationAgent(BaseAgent):
             self.receive_handoff(handoff)
 
         findings_to_verify = []
-        
+
         #  优先支持：从队列取出的单个漏洞（方案A支持）
         # Orchestrator 在调用 dequeue_finding 后，会将单个漏洞通过 context 传递
         queue_finding_from_context = None
@@ -2798,11 +2794,11 @@ class VerificationAgent(BaseAgent):
                         queue_finding_from_context = json.loads(json_match.group(0))
             except (json.JSONDecodeError, Exception) as e:
                 logger.debug(f"[Verification] 无法从 task_context 解析队列漏洞: {e}")
-        
+
         # 如果通过 config 传递了单个漏洞（备用方案）
         if not queue_finding_from_context and isinstance(config, dict):
             queue_finding_from_context = config.get("queue_finding")
-        
+
         if queue_finding_from_context and isinstance(queue_finding_from_context, dict):
             findings_to_verify = [queue_finding_from_context]
             logger.info(f"[Verification] 🎯 从队列获取单个漏洞进行验证: {queue_finding_from_context.get('title', 'N/A')}")
@@ -2816,7 +2812,7 @@ class VerificationAgent(BaseAgent):
         if self._incoming_handoff and self._incoming_handoff.key_findings and not findings_to_verify:
             findings_to_verify = self._incoming_handoff.key_findings.copy()
             logger.info(f"[Verification] 从交接信息获取 {len(findings_to_verify)} 个发现")
-        
+
         if not findings_to_verify:
             if isinstance(previous_results, dict) and "findings" in previous_results:
                 direct_findings = previous_results.get("findings", [])
@@ -2876,7 +2872,7 @@ class VerificationAgent(BaseAgent):
         findings_to_verify = self._deduplicate(findings_to_verify)
         self._trace("findings_collected", count=len(findings_to_verify))
 
-        def has_valid_file_path(finding: Dict) -> bool:
+        def has_valid_file_path(finding: dict) -> bool:
             file_path = finding.get("file_path", "")
             return bool(file_path and file_path.strip() and file_path.lower() not in ["unknown", "n/a", ""])
 
@@ -2927,7 +2923,7 @@ class VerificationAgent(BaseAgent):
             current_index=0,
             total_todos=len(todo_items),
         )
-        for todo_item, candidate in zip(todo_items, findings_to_verify):
+        for todo_item, candidate in zip(todo_items, findings_to_verify, strict=False):
             await self._emit_unverified_finding_event(
                 candidate,
                 status="new",
@@ -2940,10 +2936,10 @@ class VerificationAgent(BaseAgent):
         self.record_work(f"开始验证 {len(findings_to_verify)} 个漏洞发现")
 
         handoff_context = self.get_handoff_context()
-        
+
         #  支持单个漏洞验证（方案A：队列集成）
         is_single_finding = len(findings_to_verify) == 1
-        
+
         if is_single_finding:
             # 单个漏洞验证模式：更简洁直接的提示词
             finding = findings_to_verify[0]
@@ -3030,7 +3026,7 @@ class VerificationAgent(BaseAgent):
 6. 给出最终验证结论
 7. 输出结果时，必须把事实、推论和结论分开写；所有推理跳跃都要先检查是否有直接支持
 
-{f'💡 参考 Analysis Agent 的分析要点。' if handoff_context else ''}"""
+{'💡 参考 Analysis Agent 的分析要点。' if handoff_context else ''}"""
         else:
             # 批量验证模式：保持原有逻辑
             findings_summary = []
@@ -3118,7 +3114,7 @@ class VerificationAgent(BaseAgent):
 5. 对命令执行/高危操作类问题，明确回答输入过滤、敏感函数进入、真实副作用是否都成立
 6. 最后判断是否为真实漏洞
 7. 输出结果时，必须把事实、推论和结论分开写；所有推理跳跃都要先检查是否有直接支持
-{f'特别注意 Analysis Agent 提到的关注点。' if handoff_context else ''}"""
+{'特别注意 Analysis Agent 提到的关注点。' if handoff_context else ''}"""
 
         use_prompt_skills = bool(config.get("use_prompt_skills", False))
         prompt_skills = config.get("prompt_skills") if isinstance(config, dict) else {}
@@ -3140,7 +3136,7 @@ class VerificationAgent(BaseAgent):
         self._steps = []
         final_result = None
         current_todo_index = 0
-        current_todo_id: Optional[str] = None
+        current_todo_id: str | None = None
         run_iteration_count = 0
 
         await self.emit_thinking("🔐 Verification Agent 启动，LLM 开始自主验证漏洞...")
@@ -3460,7 +3456,7 @@ class VerificationAgent(BaseAgent):
                     verification_result = finding.get("verification_result", {})
                     if not isinstance(verification_result, dict):
                         verification_result = {}
-                    
+
                     status_value = self._normalize_verification_status(
                         verification_result.get("status") or finding.get("status")
                     )
@@ -3536,7 +3532,7 @@ class VerificationAgent(BaseAgent):
                         },
                         "is_verified": status_value in {"verified", "likely"},
                         "verified_at": (
-                            datetime.now(timezone.utc).isoformat()
+                            datetime.now(UTC).isoformat()
                             if status_value in {"verified", "likely"}
                             else None
                         ),
@@ -3780,7 +3776,7 @@ class VerificationAgent(BaseAgent):
             #  验证结果持久化：通过工具将 findings 保存到数据库
             # LLM 处理层已在验证过程中逐个调用 save_verification_result；
             # 这里作为监控点，记录验证结果统计。
-            rescue_save_result: Optional[Dict[str, Any]] = None
+            rescue_save_result: dict[str, Any] | None = None
             if "save_verification_result" in self.tools and verified_findings:
                 logger.info(
                     "[%s] save_verification_result 工具可用，验证过程中应已逐个保存 %d 条结果 "
@@ -3809,14 +3805,14 @@ class VerificationAgent(BaseAgent):
                         ),
                         metadata=rescue_save_result,
                     )
-            
+
             #  兜底机制：检查是否遗漏了 save_verification_result 调用
             fallback_result = await self._fallback_check_and_save(
                 conversation_history=self._conversation_history,
                 expected_tool="save_verification_result",
                 agent_type="verification",
             )
-            
+
             if fallback_result:
                 logger.warning(
                     f"[{self.name}] 兜底机制执行完成: 补救保存了 "
@@ -3894,8 +3890,8 @@ class VerificationAgent(BaseAgent):
 
     def _build_save_verification_params(
         self,
-        finding: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        finding: dict[str, Any],
+    ) -> dict[str, Any]:
         finding = self._apply_source_sink_authenticity_gate(
             dict(finding or {}),
             fallback=finding if isinstance(finding, dict) else None,
@@ -4004,9 +4000,9 @@ class VerificationAgent(BaseAgent):
 
     async def _rescue_save_missing_verification_results(
         self,
-        verified_findings: List[Dict[str, Any]],
+        verified_findings: list[dict[str, Any]],
         task_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         当 Verification 提前结束且未调用 save_verification_result 时，进行确定性补救保存。
         """
@@ -4067,7 +4063,7 @@ class VerificationAgent(BaseAgent):
             "saved_count": saved_count,
             "failed_count": failed_count,
         }
-    
+
     def _get_recommendation(self, vuln_type: str) -> str:
         """获取修复建议"""
         recommendations = {
@@ -4081,40 +4077,40 @@ class VerificationAgent(BaseAgent):
             "weak_crypto": "使用强加密算法（AES-256, SHA-256+），避免 MD5/SHA1",
         }
         return recommendations.get(vuln_type, "请根据具体情况修复此安全问题")
-    
-    def _deduplicate(self, findings: List[Dict]) -> List[Dict]:
+
+    def _deduplicate(self, findings: list[dict]) -> list[dict]:
         """去重"""
         seen = set()
         unique = []
-        
+
         for f in findings:
             key = (
                 f.get("file_path", ""),
                 f.get("line_start", 0),
                 f.get("vulnerability_type", ""),
             )
-            
+
             if key not in seen:
                 seen.add(key)
                 unique.append(f)
-        
+
         return unique
-    
-    def get_conversation_history(self) -> List[Dict[str, str]]:
+
+    def get_conversation_history(self) -> list[dict[str, str]]:
         """获取对话历史"""
         return self._conversation_history
 
-    def get_steps(self) -> List[VerificationStep]:
+    def get_steps(self) -> list[VerificationStep]:
         """获取执行步骤"""
         return self._steps
 
     def _create_verification_handoff(
         self,
-        verified_findings: List[Dict[str, Any]],
+        verified_findings: list[dict[str, Any]],
         confirmed_count: int,
         likely_count: int,
         false_positive_count: int,
-        candidate_count: Optional[int] = None,
+        candidate_count: int | None = None,
     ) -> TaskHandoff:
         """
         创建 Verification Agent 的任务交接信息
@@ -4129,7 +4125,7 @@ class VerificationAgent(BaseAgent):
             TaskHandoff 对象，供 Orchestrator 汇总
         """
         # 按状态分类（status-first）
-        def _finding_status(item: Dict[str, Any]) -> str:
+        def _finding_status(item: dict[str, Any]) -> str:
             vr = item.get("verification_result")
             vr_status = vr.get("status") if isinstance(vr, dict) else None
             return self._normalize_verification_status(
@@ -4139,7 +4135,7 @@ class VerificationAgent(BaseAgent):
         verified = [f for f in verified_findings if _finding_status(f) == "verified"]
         likely = [f for f in verified_findings if _finding_status(f) == "likely"]
         uncertain = [f for f in verified_findings if _finding_status(f) == "uncertain"]
-        false_positives = [f for f in verified_findings if _finding_status(f) == "false_positive"]
+        [f for f in verified_findings if _finding_status(f) == "false_positive"]
 
         actionable_findings = verified + likely
 

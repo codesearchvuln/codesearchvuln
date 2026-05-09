@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from app.core.config import settings
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _encoders: dict[str, Any] = {}
 _tiktoken_available: bool | None = None  # None=未检测, True=可用, False=不可用
 _logged_method: bool = False  # 是否已输出使用方案日志
-_runtime_mode: Optional[str] = None
+_runtime_mode: str | None = None
 
 _RUNTIME_MODE_HEURISTIC = "heuristic"
 _RUNTIME_MODE_AUTO = "auto"
@@ -31,7 +31,7 @@ _VALID_RUNTIME_MODES = {
 }
 
 
-def _normalize_runtime_mode(value: Optional[str]) -> str:
+def _normalize_runtime_mode(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in _VALID_RUNTIME_MODES:
         return normalized
@@ -62,7 +62,7 @@ def get_tiktoken_cache_dir() -> str:
     return str(explicit).strip()
 
 
-def ensure_tiktoken_cache_dir() -> Optional[str]:
+def ensure_tiktoken_cache_dir() -> str | None:
     """配置并创建 tiktoken 缓存目录。"""
     cache_dir = get_tiktoken_cache_dir()
     if not cache_dir:
@@ -231,7 +231,7 @@ class TokenEstimator:
         return total
 
 
-def prewarm_tiktoken(model: Optional[str] = None) -> bool:
+def prewarm_tiktoken(model: str | None = None) -> bool:
     """可选预热 tiktoken 编码器。失败只记日志，不影响服务。"""
     ensure_tiktoken_cache_dir()
 

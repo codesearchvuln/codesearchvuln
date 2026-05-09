@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
@@ -12,13 +12,13 @@ from app.services.agent.agents.orchestrator import OrchestratorAgent
 @dataclass
 class _CapturedEvent:
     event_type: str
-    message: Optional[str]
-    metadata: Optional[Dict[str, Any]]
+    message: str | None
+    metadata: dict[str, Any] | None
 
 
 class _FakeEventEmitter:
     def __init__(self) -> None:
-        self.events: List[_CapturedEvent] = []
+        self.events: list[_CapturedEvent] = []
 
     async def emit(self, event_data: Any) -> None:  # matches AgentEventEmitter.emit signature
         self.events.append(
@@ -31,7 +31,7 @@ class _FakeEventEmitter:
 
 
 class _StubSubAgent:
-    def __init__(self, results: List[AgentResult]) -> None:
+    def __init__(self, results: list[AgentResult]) -> None:
         self._results = results
         self._idx = 0
         self._registered = False
@@ -46,7 +46,7 @@ class _StubSubAgent:
     def cancel(self) -> None:
         self._cancelled = True
 
-    async def run(self, _input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, _input_data: dict[str, Any]) -> AgentResult:
         if self._idx < len(self._results):
             out = self._results[self._idx]
             self._idx += 1
@@ -76,7 +76,7 @@ class _StickyCancelVerificationAgent:
         self.reset_calls += 1
         self._cancelled = False
 
-    async def run(self, _input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, _input_data: dict[str, Any]) -> AgentResult:
         self._run_calls += 1
         if self._cancelled:
             return AgentResult(
@@ -120,7 +120,7 @@ class _StickyCancelVerificationAgent:
         )
 
 
-def _todo_items_from_event(ev: _CapturedEvent) -> List[Dict[str, Any]]:
+def _todo_items_from_event(ev: _CapturedEvent) -> list[dict[str, Any]]:
     assert isinstance(ev.metadata, dict)
     todo_list = ev.metadata.get("todo_list")
     assert isinstance(todo_list, list)
@@ -194,9 +194,9 @@ async def test_orchestrator_todo_mode_initial_done_false_and_final_all_done_true
         ]
     )
 
-    persist_calls: List[List[Dict[str, Any]]] = []
+    persist_calls: list[list[dict[str, Any]]] = []
 
-    async def persist_findings_cb(findings: List[Dict[str, Any]]) -> int:
+    async def persist_findings_cb(findings: list[dict[str, Any]]) -> int:
         persist_calls.append(findings)
         return len(findings)
 
@@ -271,7 +271,7 @@ async def test_orchestrator_todo_mode_degrades_after_retries_and_continues():
     )
     verification = _StubSubAgent([AgentResult(success=True, data={"summary": "ok", "findings": []})])
 
-    async def persist_findings_cb(_findings: List[Dict[str, Any]]) -> int:
+    async def persist_findings_cb(_findings: list[dict[str, Any]]) -> int:
         return 0
 
     orch = OrchestratorAgent(
@@ -320,7 +320,7 @@ async def test_orchestrator_analysis_blocked_reason_prefers_degraded_reason_from
     )
     verification = _StubSubAgent([AgentResult(success=True, data={"summary": "ok", "findings": []})])
 
-    async def persist_findings_cb(_findings: List[Dict[str, Any]]) -> int:
+    async def persist_findings_cb(_findings: list[dict[str, Any]]) -> int:
         return 0
 
     orch = OrchestratorAgent(
@@ -444,7 +444,7 @@ async def test_orchestrator_verification_retries_three_times_and_reports_contrac
         ]
     )
 
-    async def persist_findings_cb(_findings: List[Dict[str, Any]]) -> int:
+    async def persist_findings_cb(_findings: list[dict[str, Any]]) -> int:
         return 0
 
     orch = OrchestratorAgent(
@@ -524,7 +524,7 @@ async def test_orchestrator_verification_retry_resets_sticky_cancel_state():
     )
     verification = _StickyCancelVerificationAgent()
 
-    async def persist_findings_cb(_findings: List[Dict[str, Any]]) -> int:
+    async def persist_findings_cb(_findings: list[dict[str, Any]]) -> int:
         return 0
 
     orch = OrchestratorAgent(
@@ -618,7 +618,7 @@ async def test_orchestrator_verification_degraded_merge_uses_analysis_findings(t
         ]
     )
 
-    async def persist_findings_cb(findings: List[Dict[str, Any]]) -> int:
+    async def persist_findings_cb(findings: list[dict[str, Any]]) -> int:
         return len(findings)
 
     orch = OrchestratorAgent(

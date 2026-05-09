@@ -18,14 +18,14 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from .models import WorkflowPhase, WorkflowState, WorkflowStepRecord, WorkflowConfig
-from .memory_monitor import MemoryMonitor
-from .parallel_executor import ParallelPhaseExecutor
 from ..tools.verification_result_tools import deduplicate_verification_findings
+from .memory_monitor import MemoryMonitor
+from .models import WorkflowConfig, WorkflowPhase, WorkflowState, WorkflowStepRecord
+from .parallel_executor import ParallelPhaseExecutor
 
 if TYPE_CHECKING:
     from ..agents.orchestrator import OrchestratorAgent
@@ -65,8 +65,8 @@ class AuditWorkflowEngine:
         vuln_queue_service: Any,
         task_id: str,
         orchestrator: "OrchestratorAgent",
-        workflow_config: Optional[WorkflowConfig] = None,
-        business_logic_queue_service: Optional[Any] = None,
+        workflow_config: WorkflowConfig | None = None,
+        business_logic_queue_service: Any | None = None,
     ) -> None:
         """
         Args:
@@ -152,7 +152,7 @@ class AuditWorkflowEngine:
         return sub_agents.get("business_logic_recon") is not None
 
     def _build_recon_phase_context(self, task_context: str = "") -> str:
-        parts: List[str] = []
+        parts: list[str] = []
         base_context = str(task_context or "").strip()
         if base_context:
             parts.append(base_context)
@@ -204,7 +204,7 @@ class AuditWorkflowEngine:
             )
             return workflow_config
 
-        overrides_applied: Dict[str, int] = {}
+        overrides_applied: dict[str, int] = {}
         for agent_name, field_name in (
             ("recon", "recon_max_workers"),
             ("analysis", "analysis_max_workers"),
@@ -277,8 +277,8 @@ class AuditWorkflowEngine:
 
     async def run(
         self,
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
         project_root: str,
         task_id: str,
     ) -> WorkflowState:
@@ -305,7 +305,7 @@ class AuditWorkflowEngine:
             and isinstance(bootstrap_findings, list)
             and len(bootstrap_findings) > 0
         )
-        
+
         #  记录起始内存
         if self.enable_memory_monitoring:
             self.memory_monitor.take_snapshot(phase="init", agent_name="orchestrator")
@@ -334,7 +334,7 @@ class AuditWorkflowEngine:
                 )
             await orc.emit_event("info", "🔎 [Workflow] 开始 Recon 阶段")
             await self._run_recon_until_queue_ready(state, task_id)
-            
+
             #  业务逻辑侦察阶段（与 Recon 相互独立，可并行；这里在 Recon 完成后启动）
             # 注意：由于 bootstrap 模式下 Recon 可能被跳过，BL Recon 不受影响，始终运行
             if self.bl_queue is not None and not orc.is_cancelled:
@@ -345,7 +345,7 @@ class AuditWorkflowEngine:
                 else:
                     logger.info("[WorkflowEngine] No business_logic_recon agent registered, skipping BL Recon phase")
                     await orc.emit_event("info", " [Workflow] 未配置 BusinessLogicReconAgent，跳过 BL Recon 阶段")
-            
+
             #  bootstrap 注入场景保留 Recon 队列去重；常规 Recon 已在重试闭环内完成去重
             if seeded_count > 0 and state.recon_done and not orc.is_cancelled:
                 await self._dedup_recon_risk_queue(self.task_id)
@@ -353,7 +353,7 @@ class AuditWorkflowEngine:
             #  BL Recon 结束后对业务逻辑风险点去重
             if state.bl_recon_done and not orc.is_cancelled and self.bl_queue is not None:
                 await self._dedup_bl_risk_queue(self.task_id)
-            
+
             #  记录 Recon 完成后的内存
             if self.enable_memory_monitoring:
                 self.memory_monitor.take_snapshot(phase="recon_done", agent_name="recon")
@@ -398,11 +398,11 @@ class AuditWorkflowEngine:
                     f" [Workflow] 开始 Analysis 阶段，Recon 队列共 {recon_queue_size} 条风险点",
                 )
                 await self._run_analysis_phase(state, task_id)
-            
+
             #  Analysis 阶段结束后调用 LLM 对漏洞进行去重
             if not orc.is_cancelled:
                 await self._dedup_vuln_queue(self.task_id)
-            
+
             #  记录 Analysis 完成后的内存
             if self.enable_memory_monitoring:
                 self.memory_monitor.take_snapshot(phase="analysis_done", agent_name="analysis")
@@ -462,7 +462,7 @@ class AuditWorkflowEngine:
                 force=True,
                 reason="verification_buffer_synced",
             )
-            
+
             #  记录 Verification 完成后的内存
             if self.enable_memory_monitoring:
                 self.memory_monitor.take_snapshot(phase="verification_done", agent_name="verification")
@@ -494,7 +494,7 @@ class AuditWorkflowEngine:
                 "info",
                 f"[Workflow] 所有阶段完成，共收集 {len(state.all_findings)} 个发现",
             )
-            
+
             #  记录最终内存
             if self.enable_memory_monitoring:
                 self.memory_monitor.take_snapshot(phase="complete", agent_name="orchestrator")
@@ -532,28 +532,28 @@ class AuditWorkflowEngine:
     async def _dedup_recon_risk_queue(self, task_id: str) -> None:
         """
         在 Recon 结束后，调用大模型对队列中可能重复的风险项进行语义级去重。
-        
+
         过程：
         1. 从队列中预览所有风险点
         2. 构建 prompt 让 LLM 识别重复项
         3. 根据 LLM 分析结果从队列中删除重复的项
         """
         orc = self.orchestrator
-        
+
         try:
             # 获取队列中的所有风险点
             all_risk_points = self.recon_queue.peek(task_id, limit=1000)
-            
+
             if not all_risk_points or len(all_risk_points) <= 1:
                 logger.info("[WorkflowEngine] Recon queue has ≤1 items, skipping LLM dedup")
                 return
-            
+
             queue_size = self.recon_queue.size(task_id)
             await orc.emit_event(
                 "info",
                 f"[Workflow] 开始 Recon 风险点 LLM 去重：队列共 {queue_size} 条",
             )
-            
+
             # 构建 prompt 让 LLM 分析可能重复的风险点
             risk_points_json = json.dumps(
                 [
@@ -586,7 +586,7 @@ class AuditWorkflowEngine:
                 ensure_ascii=False,
                 indent=2,
             )
-            
+
             dedup_prompt = f"""请分析以下风险点列表，识别其中**明确重复或基本相同**的项目。
 
 风险点列表：
@@ -616,31 +616,31 @@ class AuditWorkflowEngine:
                     "content": dedup_prompt,
                 }
             ]
-            
+
             # 调用 LLM
             logger.info("[WorkflowEngine] Calling LLM for Recon risk queue dedup...")
             llm_response, _ = await orc.stream_llm_call(messages)
-            
+
             # 解析 LLM 响应
             dedup_result = self._parse_llm_dedup_response(llm_response)
-            
+
             if not dedup_result or not dedup_result.get("duplicates"):
                 logger.info("[WorkflowEngine] No duplicates identified by LLM")
                 await orc.emit_event("info", "[Workflow] Recon 风险点 LLM 去重：无重复项")
                 return
-            
+
             # 根据 LLM 分析结果删除重复的风险点
             removed_count = await self._remove_duplicate_recon_risk_points(
                 task_id, dedup_result["duplicates"], all_risk_points
             )
-            
+
             if removed_count > 0:
                 await orc.emit_event(
                     "info",
                     f"[Workflow] Recon 风险点 LLM 去重完成：移除 {removed_count} 条重复项",
                 )
                 logger.info("[WorkflowEngine] Removed %s duplicate recon risk points", removed_count)
-            
+
         except Exception as exc:
             logger.warning("[WorkflowEngine] Recon queue LLM dedup failed: %s", exc)
             await orc.emit_event(
@@ -675,28 +675,28 @@ class AuditWorkflowEngine:
     async def _dedup_vuln_queue(self, task_id: str) -> None:
         """
         在 Analysis 阶段总体结束后，调用大模型对队列中可能重复的漏洞项进行语义级去重。
-        
+
         过程：
         1. 从队列中预览所有漏洞
         2. 构建 prompt 让 LLM 识别重复漏洞
         3. 根据 LLM 分析结果从队列中删除重复的漏洞
         """
         orc = self.orchestrator
-        
+
         try:
             # 获取队列中的所有漏洞
             all_findings = self.vuln_queue.peek_queue(task_id, limit=1000)
-            
+
             if not all_findings or len(all_findings) <= 1:
                 logger.info("[WorkflowEngine] Vuln queue has ≤1 items, skipping LLM dedup")
                 return
-            
+
             queue_size = self.vuln_queue.get_queue_size(task_id)
             await orc.emit_event(
                 "info",
                 f"[Workflow] 开始漏洞队列 LLM 去重：队列共 {queue_size} 条",
             )
-            
+
             # 构建 prompt 让 LLM 分析可能重复的漏洞
             findings_json = json.dumps(
                 [
@@ -714,7 +714,7 @@ class AuditWorkflowEngine:
                 ensure_ascii=False,
                 indent=2,
             )
-            
+
             dedup_prompt = f"""请分析以下漏洞列表，识别其中**明确重复或基本相同**的项目。
 
 漏洞列表：
@@ -743,24 +743,24 @@ class AuditWorkflowEngine:
                     "content": dedup_prompt,
                 }
             ]
-            
+
             # 调用 LLM
             logger.info("[WorkflowEngine] Calling LLM for vulnerability queue dedup...")
             llm_response, _ = await orc.stream_llm_call(messages)
-            
+
             # 解析 LLM 响应
             dedup_result = self._parse_llm_dedup_response(llm_response)
-            
+
             if not dedup_result or not dedup_result.get("duplicates"):
                 logger.info("[WorkflowEngine] No duplicates identified by LLM")
                 await orc.emit_event("info", "[Workflow] 漏洞队列 LLM 去重：无重复项")
                 return
-            
+
             # 根据 LLM 分析结果删除重复的漏洞
             removed_count = await self._remove_duplicate_findings(
                 task_id, dedup_result["duplicates"], all_findings
             )
-            
+
             if removed_count > 0:
                 current_size = int(self.vuln_queue.get_queue_size(task_id))
                 await orc.emit_event(
@@ -772,7 +772,7 @@ class AuditWorkflowEngine:
                     removed_count,
                     current_size,
                 )
-            
+
         except Exception as exc:
             logger.warning("[WorkflowEngine] Vuln queue LLM dedup failed: %s", exc)
             await orc.emit_event(
@@ -781,7 +781,7 @@ class AuditWorkflowEngine:
             )
 
     @staticmethod
-    def _parse_llm_dedup_response(response: str) -> Optional[Dict[str, Any]]:
+    def _parse_llm_dedup_response(response: str) -> dict[str, Any] | None:
         """从 LLM 响应中解析去重结果"""
         try:
             # 尝试直接解析 JSON
@@ -791,7 +791,7 @@ class AuditWorkflowEngine:
                 json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
                 if json_match:
                     text = json_match.group(1)
-            
+
             result = json.loads(text)
             return result if isinstance(result, dict) else None
         except Exception as exc:
@@ -801,9 +801,9 @@ class AuditWorkflowEngine:
     async def _remove_duplicate_recon_risk_points(
         self,
         task_id: str,
-        duplicates: List[Dict[str, Any]],
-        all_risk_points: List[Dict[str, Any]],
-        queue: Optional[Any] = None,
+        duplicates: list[dict[str, Any]],
+        all_risk_points: list[dict[str, Any]],
+        queue: Any | None = None,
     ) -> int:
         """根据 LLM 分析结果，从风险队列中删除重复的风险点。
 
@@ -814,7 +814,7 @@ class AuditWorkflowEngine:
         removed_count = 0
         ids_to_remove = set()
         total_items = len(all_risk_points)
-        
+
         for dup_group in duplicates:
             if isinstance(dup_group, dict) and "remove_ids" in dup_group:
                 for remove_id in dup_group.get("remove_ids", []):
@@ -849,20 +849,20 @@ class AuditWorkflowEngine:
                 removed_count = max(0, total_items - len(kept_items))
             except Exception as exc:
                 logger.error("[WorkflowEngine] Failed to remove duplicate recon risk points: %s", exc)
-        
+
         return removed_count
 
     async def _remove_duplicate_findings(
         self,
         task_id: str,
-        duplicates: List[Dict[str, Any]],
-        all_findings: List[Dict[str, Any]],
+        duplicates: list[dict[str, Any]],
+        all_findings: list[dict[str, Any]],
     ) -> int:
         """根据 LLM 分析结果，从漏洞队列中删除重复的漏洞"""
         removed_count = 0
         ids_to_remove = set()
         total_items = len(all_findings)
-        
+
         for dup_group in duplicates:
             if isinstance(dup_group, dict) and "remove_ids" in dup_group:
                 for remove_id in dup_group.get("remove_ids", []):
@@ -907,7 +907,7 @@ class AuditWorkflowEngine:
                     removed_count = 0
             except Exception as exc:
                 logger.error("[WorkflowEngine] Failed to remove duplicate findings: %s", exc)
-        
+
         return removed_count
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1132,12 +1132,11 @@ class AuditWorkflowEngine:
             "task": "侦查项目中的业务逻辑漏洞风险点（IDOR、权限绕过、支付逻辑、竞态条件等），将风险点推送到业务逻辑队列",
         }
         try:
-            observation = await orc._dispatch_agent(params)
+            await orc._dispatch_agent(params)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.error("[WorkflowEngine] BL Recon phase failed: %s", exc)
-            observation = f"BL Recon 执行异常: {exc}"
 
         duration_ms = int((time.time() - step_start) * 1000)
         bl_recon_success = bool(
@@ -1266,8 +1265,8 @@ class AuditWorkflowEngine:
         self,
         task_id: str,
         save_tool: Any,
-    ) -> List[Dict[str, Any]]:
-        candidates: List[Dict[str, Any]] = []
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
 
         for item in self.orchestrator._all_findings or []:
             if not isinstance(item, dict):
@@ -1389,7 +1388,7 @@ class AuditWorkflowEngine:
             self.orchestrator._all_findings[idx] = finding
 
     @staticmethod
-    def _build_verification_report_markdown(finding: Dict[str, Any]) -> str:
+    def _build_verification_report_markdown(finding: dict[str, Any]) -> str:
         """根据 finding 字段构建 9 段式漏洞详情报告（Markdown 兜底模板）。"""
         title = str(finding.get("title") or "未命名漏洞").strip()
         vuln_type = str(finding.get("vulnerability_type") or "unknown").strip()
@@ -1490,12 +1489,12 @@ class AuditWorkflowEngine:
         return ""
 
     @classmethod
-    def _resolve_finding_status(cls, finding: Dict[str, Any]) -> str:
+    def _resolve_finding_status(cls, finding: dict[str, Any]) -> str:
         """解析发现状态：优先 status，再回退兼容历史 verdict/authenticity。"""
         if not isinstance(finding, dict):
             return ""
 
-        candidates: List[Any] = [finding.get("status")]
+        candidates: list[Any] = [finding.get("status")]
         verification_payload = finding.get("verification_result")
         if isinstance(verification_payload, dict):
             candidates.append(verification_payload.get("status"))
@@ -1517,8 +1516,8 @@ class AuditWorkflowEngine:
     async def _run_report_phase(
         self,
         state: WorkflowState,
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
     ) -> None:
         """
         Report 阶段包含两部分：
@@ -1593,8 +1592,8 @@ class AuditWorkflowEngine:
     async def _run_project_risk_report_phase(
         self,
         state: WorkflowState,
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
     ) -> None:
         """调用 ReportAgent 生成项目级风险评估报告并落到 workflow state。"""
         orc = self.orchestrator
@@ -1627,7 +1626,7 @@ class AuditWorkflowEngine:
 
         step_start = time.time()
         success = False
-        error_msg: Optional[str] = None
+        error_msg: str | None = None
         project_report_text = ""
         tool_calls = 0
         tokens_used = 0
@@ -1747,9 +1746,9 @@ class AuditWorkflowEngine:
     async def _run_sequential_report_phase(
         self,
         state: WorkflowState,
-        reportable: List[Dict[str, Any]],
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        reportable: list[dict[str, Any]],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
     ) -> None:
         for idx, finding in enumerate(reportable, start=1):
             if self.orchestrator.is_cancelled:
@@ -1768,12 +1767,12 @@ class AuditWorkflowEngine:
     async def _run_parallel_report_phase(
         self,
         state: WorkflowState,
-        reportable: List[Dict[str, Any]],
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
+        reportable: list[dict[str, Any]],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
     ) -> None:
         worker_count = max(1, self.workflow_config.report_max_workers)
-        work_queue: asyncio.Queue[tuple[int, Dict[str, Any]]] = asyncio.Queue()
+        work_queue: asyncio.Queue[tuple[int, dict[str, Any]]] = asyncio.Queue()
         lock = asyncio.Lock()
 
         for idx, finding in enumerate(reportable, start=1):
@@ -1827,13 +1826,13 @@ class AuditWorkflowEngine:
     async def _process_single_report(
         self,
         state: WorkflowState,
-        finding: Dict[str, Any],
+        finding: dict[str, Any],
         index: int,
         total: int,
-        project_info: Dict[str, Any],
-        config: Dict[str, Any],
-        worker_id: Optional[int],
-        lock: Optional[asyncio.Lock],
+        project_info: dict[str, Any],
+        config: dict[str, Any],
+        worker_id: int | None,
+        lock: asyncio.Lock | None,
     ) -> None:
         orc = self.orchestrator
         title = finding.get("title") or f"漏洞 #{index}"
@@ -1846,7 +1845,7 @@ class AuditWorkflowEngine:
 
         step_start = time.time()
         report_text = ""
-        updated_finding: Optional[Dict[str, Any]] = None
+        updated_finding: dict[str, Any] | None = None
         success = False
         error_msg = None
 

@@ -6,7 +6,7 @@ import asyncio
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from app.api.v1.endpoints.static_tasks_shared import (
@@ -20,25 +20,25 @@ from app.api.v1.endpoints.static_tasks_shared import (
 from app.core.config import settings
 from app.models.yasa import YasaRuleConfig
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
+from app.services.yasa_language import resolve_yasa_language_profile
 from app.services.yasa_runtime import (
     YASA_RUNNER_BINARY,
     YASA_RUNNER_RESOURCE_DIR,
     build_yasa_rule_config_path,
     build_yasa_scan_command,
 )
-from app.services.yasa_language import resolve_yasa_language_profile
 
-from .base import StaticBootstrapFinding, StaticBootstrapScanResult, StaticBootstrapScanner
+from .base import StaticBootstrapFinding, StaticBootstrapScanner, StaticBootstrapScanResult
 
 
-def _parse_sarif(payload: Any) -> List[Dict[str, Any]]:
+def _parse_sarif(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
     runs = payload.get("runs")
     if not isinstance(runs, list):
         return []
 
-    findings: List[Dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
     for run in runs:
         if not isinstance(run, dict):
             continue
@@ -105,8 +105,8 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         self,
         *,
         language: str = "python",
-        timeout_seconds: Optional[int] = None,
-        custom_rule_config: Optional[YasaRuleConfig] = None,
+        timeout_seconds: int | None = None,
+        custom_rule_config: YasaRuleConfig | None = None,
     ):
         normalized = str(language or "").strip().lower() or "python"
         if normalized in {"javascript", "js"}:
@@ -116,7 +116,7 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         self.timeout_seconds = max(1, int(timeout_seconds or configured_timeout))
         self.custom_rule_config = custom_rule_config
 
-    def _build_rule_config(self) -> Optional[str]:
+    def _build_rule_config(self) -> str | None:
         try:
             return build_yasa_rule_config_path(
                 self.profile["rule_config"],
@@ -125,8 +125,8 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         except Exception:
             return None
 
-    def _normalize_findings(self, findings: List[Dict[str, Any]]) -> List[StaticBootstrapFinding]:
-        normalized: List[StaticBootstrapFinding] = []
+    def _normalize_findings(self, findings: list[dict[str, Any]]) -> list[StaticBootstrapFinding]:
+        normalized: list[StaticBootstrapFinding] = []
         for idx, item in enumerate(findings):
             level = str(item.get("level") or "WARNING").upper()
             severity = "ERROR" if level in {"ERROR", "CRITICAL"} else "WARNING"
@@ -169,7 +169,7 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
         await asyncio.to_thread(shutil.rmtree, project_dir, True)
         await asyncio.to_thread(copy_project_tree_to_scan_dir, project_root, project_dir)
         checker_pack_ids = [self.profile["checker_pack"]]
-        checker_ids: List[str] | None = None
+        checker_ids: list[str] | None = None
         if self.custom_rule_config is not None:
             checker_pack_ids = [
                 item.strip()
@@ -210,7 +210,7 @@ class YasaBootstrapScanner(StaticBootstrapScanner):
                 )
             )
             sarif_path = output_dir / "report.sarif"
-            findings: List[Dict[str, Any]] = []
+            findings: list[dict[str, Any]] = []
             if sarif_path.exists():
                 try:
                     payload = json.loads(sarif_path.read_text(encoding="utf-8", errors="ignore"))

@@ -461,7 +461,7 @@ test("buildStaticAnalysisTaskStatusSummary marks mixed completed and failed engi
   });
 
   assert.equal(summary.aggregateStatus, "failed");
-  assert.equal(summary.aggregateLabel, "任务失败");
+  assert.equal(summary.aggregateLabel, "失败");
   assert.equal(summary.progressHint, "扫描已结束，至少一个引擎失败");
   assert.deepEqual(summary.failureReasons, [
     {

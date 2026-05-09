@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Dict, List, Literal, Optional
+from collections.abc import Callable
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from .base import AgentTool, ToolResult
 from ..workflow.models import WorkflowState
 from ..workflow.recon_executor import ReconModuleExecutor
 from ..workflow.recon_models import (
@@ -15,6 +15,7 @@ from ..workflow.recon_models import (
     derive_module_root_directories,
     merge_recon_module_results,
 )
+from .base import AgentTool, ToolResult
 
 
 class RunReconSubAgentInput(BaseModel):
@@ -22,28 +23,28 @@ class RunReconSubAgentInput(BaseModel):
         default="run",
         description="plan: 仅返回模块规划；run: 执行 ReconSubAgent 并返回归并结果",
     )
-    modules: Optional[List[Dict[str, Any]]] = Field(
+    modules: list[dict[str, Any]] | None = Field(
         default=None,
         description=(
             "可选的 Host 模块规划。每项只需要 directories 和 description；"
             "兼容旧格式 paths/name/risk_focus，工具会自动归一化。"
         ),
     )
-    notes: Optional[str] = Field(
+    notes: str | None = Field(
         default=None,
         description="兼容旧调用的备注字段；当前会被忽略。",
     )
-    module_ids: Optional[List[str]] = Field(
+    module_ids: list[str] | None = Field(
         default=None,
         description="仅运行指定模块ID；为空时按优先级自动选择",
     )
-    max_modules: Optional[int] = Field(
+    max_modules: int | None = Field(
         default=None,
         ge=1,
         le=256,
         description="本次最多执行模块数（按 priority 排序后截断）",
     )
-    max_workers: Optional[int] = Field(
+    max_workers: int | None = Field(
         default=None,
         ge=1,
         le=32,
@@ -61,7 +62,7 @@ class RunReconSubAgentTool(AgentTool):
     def __init__(
         self,
         *,
-        orchestrator_provider: Optional[Callable[[], Any]] = None,
+        orchestrator_provider: Callable[[], Any] | None = None,
         max_workers: int = 3,
     ):
         super().__init__()
@@ -105,7 +106,7 @@ class RunReconSubAgentTool(AgentTool):
         return None
 
     @staticmethod
-    def _build_host_input(orchestrator: Any) -> Dict[str, Any]:
+    def _build_host_input(orchestrator: Any) -> dict[str, Any]:
         runtime_context = getattr(orchestrator, "_runtime_context", {}) or {}
         return {
             "project_info": (
@@ -123,7 +124,7 @@ class RunReconSubAgentTool(AgentTool):
         }
 
     @staticmethod
-    def _resolve_project_model(orchestrator: Any, host_input: Dict[str, Any]) -> ProjectReconModel:
+    def _resolve_project_model(orchestrator: Any, host_input: dict[str, Any]) -> ProjectReconModel:
         recon_agent = getattr(orchestrator, "sub_agents", {}).get("recon")
         if recon_agent is not None and hasattr(recon_agent, "build_project_recon_model"):
             return recon_agent.build_project_recon_model(host_input)
@@ -139,7 +140,7 @@ class RunReconSubAgentTool(AgentTool):
         *,
         lifecycle: str,
         message: str,
-        selected: Optional[List[ReconModuleDescriptor]] = None,
+        selected: list[ReconModuleDescriptor] | None = None,
     ) -> None:
         recon_agent = getattr(orchestrator, "sub_agents", {}).get("recon")
         emit = getattr(recon_agent, "emit_event", None)
@@ -161,11 +162,11 @@ class RunReconSubAgentTool(AgentTool):
             pass
 
     @staticmethod
-    def _normalize_directories(raw_module: Dict[str, Any]) -> List[str]:
+    def _normalize_directories(raw_module: dict[str, Any]) -> list[str]:
         directories = raw_module.get("directories")
         if not isinstance(directories, list) or not directories:
             directories = raw_module.get("paths")
-        normalized: List[str] = []
+        normalized: list[str] = []
         for item in directories or []:
             text = str(item or "").replace("\\", "/").strip().lstrip("./")
             if text and text not in normalized:
@@ -173,7 +174,7 @@ class RunReconSubAgentTool(AgentTool):
         return normalized
 
     @staticmethod
-    def _normalize_description(raw_module: Dict[str, Any], directories: List[str]) -> str:
+    def _normalize_description(raw_module: dict[str, Any], directories: list[str]) -> str:
         description = str(raw_module.get("description") or "").strip()
         if description:
             return description
@@ -194,7 +195,7 @@ class RunReconSubAgentTool(AgentTool):
         return "Inspect module"
 
     @staticmethod
-    def _path_matches_any_directory(path: str, directories: List[str]) -> bool:
+    def _path_matches_any_directory(path: str, directories: list[str]) -> bool:
         normalized_path = str(path or "").replace("\\", "/").strip().lstrip("./")
         if not normalized_path:
             return False
@@ -221,7 +222,7 @@ class RunReconSubAgentTool(AgentTool):
         self,
         *,
         base_model: ProjectReconModel,
-        modules: List[Dict[str, Any]],
+        modules: list[dict[str, Any]],
     ) -> ProjectReconModel:
         all_files = sorted(
             {
@@ -233,7 +234,7 @@ class RunReconSubAgentTool(AgentTool):
         )
         entry_points = [str(path or "") for path in (base_model.entry_points or []) if str(path or "").strip()]
 
-        planned_descriptors: List[ReconModuleDescriptor] = []
+        planned_descriptors: list[ReconModuleDescriptor] = []
         seen_module_ids: set[str] = set()
         for index, raw_module in enumerate(modules or []):
             if not isinstance(raw_module, dict):
@@ -314,7 +315,7 @@ class RunReconSubAgentTool(AgentTool):
         *,
         force_rerun: bool,
         executed_ids: set[str],
-    ) -> List[ReconModuleDescriptor]:
+    ) -> list[ReconModuleDescriptor]:
         modules = list(model.module_descriptors or [])
         if not modules:
             return []
@@ -355,11 +356,11 @@ class RunReconSubAgentTool(AgentTool):
     def _select_modules(
         *,
         model: ProjectReconModel,
-        module_ids: List[str] | None,
+        module_ids: list[str] | None,
         max_modules: int | None,
         force_rerun: bool,
         executed_ids: set[str],
-    ) -> List[ReconModuleDescriptor]:
+    ) -> list[ReconModuleDescriptor]:
         modules = list(model.module_descriptors or [])
         if not modules:
             return []
@@ -378,7 +379,7 @@ class RunReconSubAgentTool(AgentTool):
         return selected
 
     @staticmethod
-    def _build_plan_project_model_summary(project_model: ProjectReconModel) -> Dict[str, Any]:
+    def _build_plan_project_model_summary(project_model: ProjectReconModel) -> dict[str, Any]:
         return {
             "project_root": str(project_model.project_root or "."),
             "languages": list(project_model.languages or []),
@@ -392,8 +393,8 @@ class RunReconSubAgentTool(AgentTool):
 
     @staticmethod
     def _build_planned_modules_summary(
-        modules: List[ReconModuleDescriptor],
-    ) -> List[Dict[str, Any]]:
+        modules: list[ReconModuleDescriptor],
+    ) -> list[dict[str, Any]]:
         return [
             {
                 "module_id": str(module.module_id),
@@ -410,11 +411,11 @@ class RunReconSubAgentTool(AgentTool):
     async def _execute(
         self,
         action: Literal["plan", "run"] = "run",
-        modules: Optional[List[Dict[str, Any]]] = None,
-        notes: Optional[str] = None,
-        module_ids: Optional[List[str]] = None,
-        max_modules: Optional[int] = None,
-        max_workers: Optional[int] = None,
+        modules: list[dict[str, Any]] | None = None,
+        notes: str | None = None,
+        module_ids: list[str] | None = None,
+        max_modules: int | None = None,
+        max_workers: int | None = None,
         force_rerun: bool = False,
         **kwargs,
     ) -> ToolResult:

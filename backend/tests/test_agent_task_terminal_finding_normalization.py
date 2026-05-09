@@ -1,6 +1,6 @@
-from types import SimpleNamespace
 import sys
 import types
+from types import SimpleNamespace
 
 if "docker" not in sys.modules:
     docker_stub = types.ModuleType("docker")

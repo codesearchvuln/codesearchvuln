@@ -11,7 +11,7 @@ import uuid
 import zipfile
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -310,7 +310,7 @@ def _discover_project_domain_specs() -> tuple[list[str], dict[str, DomainModelSp
                     continue
                 soft_edges.add((candidate, table_name))
 
-    indegree: dict[str, int] = {table: 0 for table in domain_tables}
+    indegree: dict[str, int] = dict.fromkeys(domain_tables, 0)
     edges: dict[str, set[str]] = {table: set() for table in domain_tables}
 
     for parent, children in children_by_parent.items():
@@ -495,7 +495,7 @@ async def export_projects_bundle(
     datasets, table_order = await _collect_project_domain_rows(db=db, projects=projects)
 
     tmp_dir = tempfile.mkdtemp(prefix="Vulhunter-project-export-")
-    bundle_filename = f"{TRANSFER_BUNDLE_PREFIX}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.zip"
+    bundle_filename = f"{TRANSFER_BUNDLE_PREFIX}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.zip"
     bundle_path = os.path.join(tmp_dir, bundle_filename)
 
     zip_entries: dict[str, dict[str, Any]] = {}
@@ -520,7 +520,7 @@ async def export_projects_bundle(
 
     manifest = {
         "export_version": TRANSFER_EXPORT_VERSION,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "source_app_version": _git_commit(),
         "scope": TRANSFER_SCOPE,
         "conflict_policy": "skip",

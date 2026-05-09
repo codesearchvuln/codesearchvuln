@@ -13,9 +13,9 @@ if os.environ.get("RUN_API_INTEGRATION_TESTS") != "1":
     )
 
 import json
+
 import requests
 import yaml
-
 
 # 示例规则数据
 EXAMPLE_RULES = [
@@ -112,7 +112,7 @@ def test_json_upload_rule(base_url: str, token: str):
 
         if response.status_code == 200:
             result = response.json()
-            print(f"  成功")
+            print("  成功")
             print(f"     规则 ID: {result['rule_id']}")
             print(f"     语言: {result['language']}")
             print(f"     严重程度: {result['severity']}")
@@ -141,7 +141,7 @@ def generate_curl_examples():
         "is_active": True,
     }
 
-    json_str = json.dumps(rule_example, ensure_ascii=False, indent=2)
+    json.dumps(rule_example, ensure_ascii=False, indent=2)
 
     print("curl -X POST http://localhost:8000/api/v1/static-tasks/rules/upload/json \\")
     print('  -H "Authorization: Bearer YOUR_TOKEN" \\')

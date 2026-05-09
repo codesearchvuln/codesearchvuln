@@ -46,8 +46,8 @@ test("DashboardMockPreview renders single-page command center with sidebar and t
 	assert.match(markup, /纵坐标：漏洞数量/);
 	assert.match(markup, /当日累计新增漏洞发现/);
 	assert.match(markup, /当日静态扫描漏洞发现/);
-	assert.match(markup, /当前智能扫描漏洞发现/);
-	assert.match(markup, /混合扫描漏洞发现/);
+	assert.match(markup, /当日智能扫描漏洞发现/);
+	assert.match(markup, /当日混合扫描漏洞发现/);
 	// assert.match(markup, /最近创建任务/);
 	assert.match(markup, /查看详情/);
 	assert.match(markup, /混合扫描 · Alpha Gateway/);

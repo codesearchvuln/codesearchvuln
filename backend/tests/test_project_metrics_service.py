@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,8 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.security import get_password_hash
 from app.db.base import Base
-from app.models.agent_task import AgentFinding
-from app.models.agent_task import AgentTask
+from app.models.agent_task import AgentFinding, AgentTask
 from app.models.bandit import BanditScanTask
 from app.models.gitleaks import GitleaksScanTask
 from app.models.opengrep import OpengrepScanTask
@@ -133,7 +132,7 @@ async def test_recalc_project_uses_updated_at_for_static_scan_tasks_without_comp
         ),
     )
 
-    base_time = datetime(2026, 3, 17, 10, 0, tzinfo=timezone.utc)
+    base_time = datetime(2026, 3, 17, 10, 0, tzinfo=UTC)
 
     async with session_factory() as session:
         user = User(
@@ -232,7 +231,7 @@ async def test_recalc_project_uses_updated_at_for_static_scan_tasks_without_comp
     assert metrics.verified_medium == 0
     assert metrics.verified_low == 0
     assert metrics.last_completed_task_at is not None
-    assert metrics.last_completed_task_at.replace(tzinfo=timezone.utc) == (
+    assert metrics.last_completed_task_at.replace(tzinfo=UTC) == (
         base_time + timedelta(minutes=4)
     )
 
@@ -278,7 +277,7 @@ async def test_recalc_project_aggregates_verified_findings_from_intelligent_and_
             name="[INTELLIGENT] intelligent task",
             description="智能扫描任务",
             status="completed",
-            completed_at=datetime(2026, 3, 17, 9, 0, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 3, 17, 9, 0, tzinfo=UTC),
             critical_count=1,
             high_count=1,
             medium_count=1,
@@ -290,7 +289,7 @@ async def test_recalc_project_aggregates_verified_findings_from_intelligent_and_
             name="[HYBRID] hybrid task",
             description="混合扫描任务",
             status="completed",
-            completed_at=datetime(2026, 3, 17, 10, 0, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 3, 17, 10, 0, tzinfo=UTC),
             high_count=1,
             medium_count=1,
         )

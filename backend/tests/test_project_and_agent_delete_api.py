@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from app.api.v1.endpoints.projects_crud import delete_project
 from app.api.v1.endpoints.agent_tasks_routes_tasks import (
     AgentTaskStatus,
     delete_agent_task,
 )
+from app.api.v1.endpoints.projects_crud import delete_project
 
 
 @pytest.mark.asyncio

@@ -1,89 +1,31 @@
 import asyncio
-import hashlib
 import json
-import logging
 import os
-import uuid
-import re
 import shutil
-import subprocess
-import tempfile
-import zipfile
-from datetime import datetime, timezone
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-import yaml
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.bandit import BanditFinding, BanditRuleState, BanditScanTask
-from app.db.static_finding_paths import (
-    normalize_static_scan_file_path,
-    resolve_static_finding_location,
-)
-from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
-from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanScanTask
-from app.models.project import Project
-from app.models.user import User
-from app.runtime.db_contract import unsupported_database_contract_message
-from app.schemas.gitleaks_rules import (
-    GitleaksRuleBatchUpdateRequest,
-    GitleaksRuleCreateRequest,
-    GitleaksRuleResponse,
-    GitleaksRuleUpdateRequest,
-)
-from app.schemas.opengrep import (
-    OpengrepRuleCreateRequest,
-    OpengrepRulePatchResponse,
-    OpengrepRuleTextCreateRequest,
-    OpengrepRuleTextResponse,
-    OpengrepRuleUpdateRequest,
-)
-from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
-from app.services.bandit_rules_snapshot import (
-    load_bandit_builtin_snapshot,
-    update_bandit_builtin_snapshot_rule,
-)
-from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
-from app.services.opengrep_confidence import (
-    count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
-    extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
-    extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
-    normalize_confidence as shared_normalize_confidence,
-)
-from app.services.rule import get_rule_by_patch, validate_generic_rule
-from app.services.upload.upload_manager import UploadManager
-
 from app.api.v1.endpoints.static_tasks_shared import (
-    _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
-    copy_project_tree_to_scan_dir,
-    _dt_to_iso,
-    _ensure_opengrep_xdg_dirs,
     _get_project_root,
-    _get_user_config,
     _is_scan_task_cancelled,
-    _is_test_like_directory,
     _launch_static_background_job,
     _pop_scan_container,
     _register_scan_container,
     _release_request_db_session,
-    _resolve_backend_venv_executable,
-    _normalize_llm_config_error_message,
-    _record_scan_progress,
     _request_scan_task_cancel,
-    _run_subprocess_with_tracking,
     _sync_task_scan_duration,
-    _utc_now_iso,
-    _validate_user_llm_config,
     async_session_factory,
     cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
     deps,
     ensure_scan_logs_dir,
     ensure_scan_meta_dir,
@@ -94,6 +36,18 @@ from app.api.v1.endpoints.static_tasks_shared import (
     logger,
     settings,
 )
+from app.db.static_finding_paths import (
+    normalize_static_scan_file_path,
+    resolve_static_finding_location,
+)
+from app.models.bandit import BanditFinding, BanditRuleState, BanditScanTask
+from app.models.project import Project
+from app.models.user import User
+from app.runtime.db_contract import unsupported_database_contract_message
+from app.services.bandit_rules_snapshot import (
+    load_bandit_builtin_snapshot,
+    update_bandit_builtin_snapshot_rule,
+)
 from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
@@ -103,7 +57,7 @@ class BanditScanTaskCreate(BaseModel):
     """创建 Bandit 扫描任务请求"""
 
     project_id: str = Field(..., description="项目ID")
-    name: Optional[str] = Field(None, description="任务名称")
+    name: str | None = Field(None, description="任务名称")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
     severity_level: str = Field("medium", description="最低严重程度: low, medium, high")
     confidence_level: str = Field("medium", description="最低置信度: low, medium, high")
@@ -125,9 +79,9 @@ class BanditScanTaskResponse(BaseModel):
     low_count: int
     scan_duration_ms: int
     files_scanned: int
-    error_message: Optional[str]
+    error_message: str | None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -142,12 +96,12 @@ class BanditFindingResponse(BaseModel):
     issue_severity: str
     issue_confidence: str
     file_path: str
-    line_number: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
-    code_snippet: Optional[str]
-    issue_text: Optional[str]
-    more_info: Optional[str]
+    line_number: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
+    code_snippet: str | None
+    issue_text: str | None
+    more_info: str | None
     status: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -169,7 +123,7 @@ def _build_bandit_scan_task_response(task: BanditScanTask) -> BanditScanTaskResp
         scan_duration_ms=int(task.scan_duration_ms or 0),
         files_scanned=int(task.files_scanned or 0),
         error_message=task.error_message,
-        created_at=task.created_at or datetime.now(timezone.utc),
+        created_at=task.created_at or datetime.now(UTC),
         updated_at=task.updated_at,
     )
 
@@ -181,13 +135,13 @@ class BanditRuleResponse(BaseModel):
     name: str
     description: str
     description_summary: str
-    checks: List[str]
+    checks: list[str]
     source: str
     bandit_version: str
     is_active: bool
     is_deleted: bool
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class BanditRuleEnabledUpdateRequest(BaseModel):
@@ -195,10 +149,10 @@ class BanditRuleEnabledUpdateRequest(BaseModel):
 
 
 class BanditRuleBatchEnabledUpdateRequest(BaseModel):
-    rule_ids: Optional[List[str]] = None
-    source: Optional[str] = None
-    keyword: Optional[str] = None
-    current_is_active: Optional[bool] = None
+    rule_ids: list[str] | None = None
+    source: str | None = None
+    keyword: str | None = None
+    current_is_active: bool | None = None
     is_active: bool
 
 
@@ -207,20 +161,20 @@ class BanditRuleDeletedUpdateRequest(BaseModel):
 
 
 class BanditRuleBatchDeletedUpdateRequest(BaseModel):
-    rule_ids: Optional[List[str]] = None
-    source: Optional[str] = None
-    keyword: Optional[str] = None
-    current_is_deleted: Optional[bool] = None
+    rule_ids: list[str] | None = None
+    source: str | None = None
+    keyword: str | None = None
+    current_is_deleted: bool | None = None
     is_deleted: bool
 
 
 class BanditRuleUpdateRequest(BaseModel):
     """Bandit 规则编辑请求（仅用于规则页展示字段）。"""
 
-    name: Optional[str] = None
-    description_summary: Optional[str] = None
-    description: Optional[str] = None
-    checks: Optional[List[str]] = None
+    name: str | None = None
+    description_summary: str | None = None
+    description: str | None = None
+    checks: list[str] | None = None
 
 
 class BanditRuleUpdateResponse(BaseModel):
@@ -242,11 +196,11 @@ def _normalize_bandit_rule_id(raw_rule_id: Any) -> str:
     return str(raw_rule_id or "").strip().upper()
 
 
-def _normalize_bandit_rule_checks(raw_checks: Optional[List[str]]) -> List[str]:
+def _normalize_bandit_rule_checks(raw_checks: list[str] | None) -> list[str]:
     """规范化可编辑的 checks 字段，过滤空项并去重。"""
     if not isinstance(raw_checks, list):
         return []
-    normalized: List[str] = []
+    normalized: list[str] = []
     for item in raw_checks:
         text = str(item or "").strip()
         if not text:
@@ -256,7 +210,7 @@ def _normalize_bandit_rule_checks(raw_checks: Optional[List[str]]) -> List[str]:
     return normalized
 
 
-def _extract_bandit_snapshot_rules() -> List[Dict[str, Any]]:
+def _extract_bandit_snapshot_rules() -> list[dict[str, Any]]:
     try:
         payload = load_bandit_builtin_snapshot()
     except FileNotFoundError as exc:
@@ -266,7 +220,7 @@ def _extract_bandit_snapshot_rules() -> List[Dict[str, Any]]:
     raw_rules = payload.get("rules")
     if not isinstance(raw_rules, list):
         return []
-    normalized_rules: List[Dict[str, Any]] = []
+    normalized_rules: list[dict[str, Any]] = []
     for raw in raw_rules:
         if not isinstance(raw, dict):
             continue
@@ -295,7 +249,7 @@ def _extract_bandit_snapshot_rules() -> List[Dict[str, Any]]:
     return normalized_rules
 
 
-async def _load_bandit_rule_states(db: AsyncSession) -> Dict[str, BanditRuleState]:
+async def _load_bandit_rule_states(db: AsyncSession) -> dict[str, BanditRuleState]:
     try:
         result = await db.execute(select(BanditRuleState))
     except ProgrammingError as exc:
@@ -306,10 +260,10 @@ async def _load_bandit_rule_states(db: AsyncSession) -> Dict[str, BanditRuleStat
 
 def _merge_bandit_rule_payload(
     *,
-    snapshot_rules: List[Dict[str, Any]],
-    states_by_test_id: Dict[str, BanditRuleState],
-) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = []
+    snapshot_rules: list[dict[str, Any]],
+    states_by_test_id: dict[str, BanditRuleState],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
     for item in snapshot_rules:
         test_id = item["test_id"]
         state = states_by_test_id.get(test_id)
@@ -327,9 +281,9 @@ def _merge_bandit_rule_payload(
 
 def _resolve_bandit_effective_rule_ids(
     *,
-    snapshot_rules: List[Dict[str, Any]],
-    states_by_test_id: Dict[str, BanditRuleState],
-) -> List[str]:
+    snapshot_rules: list[dict[str, Any]],
+    states_by_test_id: dict[str, BanditRuleState],
+) -> list[str]:
     merged_rules = _merge_bandit_rule_payload(
         snapshot_rules=snapshot_rules,
         states_by_test_id=states_by_test_id,
@@ -341,7 +295,7 @@ def _resolve_bandit_effective_rule_ids(
     ]
 
 
-async def _resolve_bandit_scan_rule_ids(db: AsyncSession) -> List[str]:
+async def _resolve_bandit_scan_rule_ids(db: AsyncSession) -> list[str]:
     snapshot_rules = _extract_bandit_snapshot_rules()
     states_by_test_id = await _load_bandit_rule_states(db)
     rule_ids = _resolve_bandit_effective_rule_ids(
@@ -361,7 +315,7 @@ def _normalize_bandit_level(value: Any, *, fallback: str = "medium") -> str:
     return fallback
 
 
-def _parse_bandit_output_payload(payload: Any) -> List[Dict[str, Any]]:
+def _parse_bandit_output_payload(payload: Any) -> list[dict[str, Any]]:
     """解析 Bandit JSON 输出并统一返回 issue 列表。"""
     if payload is None:
         return []
@@ -380,20 +334,19 @@ async def _execute_bandit_scan(
     severity_level: str = "medium",
     confidence_level: str = "medium",
 ) -> None:
-    project_id: Optional[str] = None
-    workspace_dir: Optional[Path] = None
-    active_container_id: Optional[str] = None
+    workspace_dir: Path | None = None
+    active_container_id: str | None = None
 
     async def _update_task_state(
         status: str,
         *,
-        error_message: Optional[str] = None,
-        findings: Optional[List[Dict[str, Any]]] = None,
+        error_message: str | None = None,
+        findings: list[dict[str, Any]] | None = None,
         high_count: int = 0,
         medium_count: int = 0,
         low_count: int = 0,
         scanned_file_count: int = 0,
-    ) -> Optional[BanditScanTask]:
+    ) -> BanditScanTask | None:
         async with async_session_factory() as db:
             result = await db.execute(select(BanditScanTask).where(BanditScanTask.id == task_id))
             task = result.scalar_one_or_none()
@@ -439,7 +392,6 @@ async def _execute_bandit_scan(
             if not task:
                 logger.error(f"Bandit task {task_id} not found")
                 return
-            project_id = task.project_id
             if _is_scan_task_cancelled("bandit", task_id) or task.status == "interrupted":
                 task.status = "interrupted"
                 task.error_message = task.error_message or "扫描任务已中止（用户操作）"
@@ -476,7 +428,7 @@ async def _execute_bandit_scan(
         async with async_session_factory() as db:
             executable_rule_ids = await _resolve_bandit_scan_rule_ids(db)
 
-        findings_to_persist: List[Dict[str, Any]] = []
+        findings_to_persist: list[dict[str, Any]] = []
         high_count = 0
         medium_count = 0
         low_count = 0
@@ -534,7 +486,7 @@ async def _execute_bandit_scan(
 
             raw_payload: Any = {}
             if report_file.exists():
-                with open(report_file, "r", encoding="utf-8", errors="ignore") as f:
+                with open(report_file, encoding="utf-8", errors="ignore") as f:
                     content = f.read().strip()
                 if content:
                     try:
@@ -611,11 +563,11 @@ async def _execute_bandit_scan(
                 logger.warning(f"Failed to clean up temporary directory {project_root}: {e}")
 
 
-@router.get("/bandit/rules", response_model=List[BanditRuleResponse])
+@router.get("/bandit/rules", response_model=list[BanditRuleResponse])
 async def list_bandit_rules(
-    is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
-    source: Optional[str] = Query(None, description="按来源过滤"),
-    keyword: Optional[str] = Query(None, description="按 test_id/name/description 关键词过滤"),
+    is_active: bool | None = Query(None, description="按启用状态过滤"),
+    source: str | None = Query(None, description="按来源过滤"),
+    keyword: str | None = Query(None, description="按 test_id/name/description 关键词过滤"),
     deleted: str = Query("false", description="软删除筛选：false(默认)/true/all"),
     skip: int = Query(0, ge=0),
     limit: int = Query(1000, ge=1, le=2000),
@@ -630,7 +582,7 @@ async def list_bandit_rules(
         states_by_test_id=states_by_test_id,
     )
 
-    filtered: List[Dict[str, Any]] = []
+    filtered: list[dict[str, Any]] = []
     keyword_text = str(keyword or "").strip().lower()
     source_text = str(source or "").strip()
     deleted_text = str(deleted or "false").strip().lower()
@@ -693,7 +645,7 @@ async def update_bandit_rule(
     if normalized_rule_id not in known_rule_ids:
         raise HTTPException(status_code=404, detail="Bandit 规则不存在")
 
-    updates: Dict[str, Any] = {}
+    updates: dict[str, Any] = {}
     if request.name is not None:
         name = str(request.name).strip()
         if not name:
@@ -794,7 +746,7 @@ async def batch_update_bandit_rules_enabled(
     )
     keyword_text = str(request.keyword or "").strip().lower()
     source_text = str(request.source or "").strip()
-    selected_rule_ids: List[str] = []
+    selected_rule_ids: list[str] = []
 
     for item in merged_rules:
         if bool(item["is_deleted"]):
@@ -975,7 +927,7 @@ async def _batch_update_bandit_rules_deleted(
     )
     keyword_text = str(request.keyword or "").strip().lower()
     source_text = str(request.source or "").strip()
-    selected_rule_ids: List[str] = []
+    selected_rule_ids: list[str] = []
 
     for item in merged_rules:
         if rule_ids_filter is not None and item["test_id"] not in rule_ids_filter:
@@ -1087,9 +1039,9 @@ async def create_bandit_scan(
     return response
 
 
-@router.get("/bandit/tasks", response_model=List[BanditScanTaskResponse])
+@router.get("/bandit/tasks", response_model=list[BanditScanTaskResponse])
 async def list_bandit_tasks(
-    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
+    project_id: str | None = Query(None, description="按项目ID过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1162,11 +1114,11 @@ async def delete_bandit_task(
     return {"message": "任务已删除", "task_id": task_id}
 
 
-@router.get("/bandit/tasks/{task_id}/findings", response_model=List[BanditFindingResponse])
+@router.get("/bandit/tasks/{task_id}/findings", response_model=list[BanditFindingResponse])
 async def get_bandit_findings(
     task_id: str,
-    status: Optional[str] = Query(None, description="按状态过滤"),
-    severity: Optional[str] = Query(None, description="按严重度过滤: HIGH, MEDIUM, LOW"),
+    status: str | None = Query(None, description="按状态过滤"),
+    severity: str | None = Query(None, description="按严重度过滤: HIGH, MEDIUM, LOW"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

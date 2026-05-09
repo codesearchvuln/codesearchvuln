@@ -1,7 +1,7 @@
 """Tools for managing the Business Logic risk point queue."""
 
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +15,7 @@ def _validate_bl_queue_service_binding(
     queue_service: Any,
     task_id: str,
     tool_name: str,
-    required_callables: Tuple[str, ...],
+    required_callables: tuple[str, ...],
 ) -> None:
     missing = [
         method_name
@@ -37,22 +37,22 @@ class BLRiskPointInput(BaseModel):
     file_path: str = Field(..., description="风险点文件路径（相对于项目根目录）")
     line_start: int = Field(..., description="风险点起始行号")
     description: str = Field(..., description="业务逻辑风险描述")
-    severity: Optional[str] = Field("high", description="严重程度：critical/high/medium/low")
-    confidence: Optional[float] = Field(0.6, description="置信度 0.0-1.0")
-    vulnerability_type: Optional[str] = Field("business_logic", description="业务逻辑漏洞类型：idor/privilege_escalation/amount_tampering/race_condition/auth_bypass/state_machine_bypass/etc.")
-    entry_function: Optional[str] = Field(None, description="涉及的入口函数名（如 update_order, create_payment）")
-    context: Optional[str] = Field(None, description="附加上下文（如 HTTP 方法、路由、相关表名）")
-    route: Optional[str] = Field(None, description="入口路由或业务入口标识（HTTP/Webhook/RPC 等）")
-    http_method: Optional[str] = Field(None, description="入口方法，如 GET/POST/WEBHOOK/RPC")
-    auth_context: Optional[str] = Field(None, description="认证鉴权上下文，如 login_required、tenant middleware、service guard")
-    related_symbols: Optional[List[str]] = Field(None, description="关联符号，如 handler/service/model/guard 名称")
-    object_type: Optional[str] = Field(None, description="业务对象类型，如 order/user/payment/tenant")
-    sensitive_action: Optional[str] = Field(None, description="敏感动作，如 update/refund/approve/export/share")
-    evidence_refs: Optional[List[str]] = Field(None, description="证据锚点列表，如 file.py:42、OrderService.cancel")
+    severity: str | None = Field("high", description="严重程度：critical/high/medium/low")
+    confidence: float | None = Field(0.6, description="置信度 0.0-1.0")
+    vulnerability_type: str | None = Field("business_logic", description="业务逻辑漏洞类型：idor/privilege_escalation/amount_tampering/race_condition/auth_bypass/state_machine_bypass/etc.")
+    entry_function: str | None = Field(None, description="涉及的入口函数名（如 update_order, create_payment）")
+    context: str | None = Field(None, description="附加上下文（如 HTTP 方法、路由、相关表名）")
+    route: str | None = Field(None, description="入口路由或业务入口标识（HTTP/Webhook/RPC 等）")
+    http_method: str | None = Field(None, description="入口方法，如 GET/POST/WEBHOOK/RPC")
+    auth_context: str | None = Field(None, description="认证鉴权上下文，如 login_required、tenant middleware、service guard")
+    related_symbols: list[str] | None = Field(None, description="关联符号，如 handler/service/model/guard 名称")
+    object_type: str | None = Field(None, description="业务对象类型，如 order/user/payment/tenant")
+    sensitive_action: str | None = Field(None, description="敏感动作，如 update/refund/approve/export/share")
+    evidence_refs: list[str] | None = Field(None, description="证据锚点列表，如 file.py:42、OrderService.cancel")
 
 
 class BLRiskPointsBatchInput(BaseModel):
-    risk_points: List[BLRiskPointInput] = Field(
+    risk_points: list[BLRiskPointInput] = Field(
         ...,
         description="批量业务逻辑风险点列表，每项结构与 push_bl_risk_point_to_queue 相同",
     )
@@ -368,7 +368,7 @@ class IsBLRiskPointInQueueTool(AgentTool):
     class Input(BaseModel):
         file_path: str = Field(...)
         line_start: int = Field(...)
-        vulnerability_type: Optional[str] = Field("")
+        vulnerability_type: str | None = Field("")
 
     def __init__(self, *, queue_service: Any, task_id: str):
         super().__init__()

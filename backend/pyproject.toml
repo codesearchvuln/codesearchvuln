@@ -142,6 +142,27 @@ ignore = [
     "C901",  # too complex
 ]
 
+
+[tool.ruff.lint.per-file-ignores]
+# Split endpoint modules intentionally re-export shared helpers and route contracts.
+"app/api/v1/endpoints/agent_tasks_execution.py" = ["F403", "F405"]
+"app/api/v1/endpoints/agent_tasks_reporting.py" = ["F403", "F405"]
+"app/api/v1/endpoints/agent_tasks_routes_results.py" = ["F403", "F405"]
+"app/api/v1/endpoints/agent_tasks_routes_tasks.py" = ["F403", "F405"]
+"app/api/v1/endpoints/projects.py" = ["F403", "F405"]
+"app/api/v1/endpoints/projects_crud.py" = ["F403", "F405"]
+"app/api/v1/endpoints/projects_files.py" = ["F403", "F405"]
+"app/api/v1/endpoints/projects_insights.py" = ["F403", "F405"]
+"app/api/v1/endpoints/projects_transfer.py" = ["F403", "F405"]
+"app/api/v1/endpoints/projects_uploads.py" = ["F403", "F405"]
+# Generated/compatibility modules keep imports near the generated or bootstrap code they support.
+"app/api/v1/endpoints/projects_shared.py" = ["E402"]
+"app/db/schema_snapshots/*.py" = ["E402"]
+"app/services/agent/prompts/__init__.py" = ["E402"]
+"tests/test_agent_opengrep_bootstrap.py" = ["E402"]
+"tests/test_opengrep_bootstrap_scanner.py" = ["E402"]
+"tests/test_remote_repository_scan_removal.py" = ["E402"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true

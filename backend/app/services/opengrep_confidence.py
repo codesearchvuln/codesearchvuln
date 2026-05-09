@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,7 @@ from sqlalchemy.future import select
 from app.models.opengrep import OpengrepFinding, OpengrepRule
 
 
-def normalize_confidence(confidence: Any) -> Optional[str]:
+def normalize_confidence(confidence: Any) -> str | None:
     """Normalize confidence to HIGH/MEDIUM/LOW."""
     normalized = str(confidence or "").strip().upper()
     if normalized == "HIGH":
@@ -24,7 +25,7 @@ def normalize_confidence(confidence: Any) -> Optional[str]:
     return None
 
 
-def extract_rule_lookup_keys(check_id: Any) -> List[str]:
+def extract_rule_lookup_keys(check_id: Any) -> list[str]:
     """
     Extract lookup candidates for matching OpengrepRule.name.
 
@@ -44,7 +45,7 @@ def extract_rule_lookup_keys(check_id: Any) -> List[str]:
             flags=re.IGNORECASE,
         ).strip()
 
-    keys: List[str] = []
+    keys: list[str] = []
 
     def _append(value: str) -> None:
         normalized = str(value or "").strip()
@@ -65,7 +66,7 @@ def extract_rule_lookup_keys(check_id: Any) -> List[str]:
     return keys
 
 
-def extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
+def extract_finding_payload_confidence(rule_data: Any) -> str | None:
     """
     Read confidence from finding.rule payload.
 
@@ -104,9 +105,9 @@ def extract_finding_payload_confidence(rule_data: Any) -> Optional[str]:
 
 def build_rule_confidence_map(
     rows: Sequence[Sequence[Any]],
-) -> Dict[str, Optional[str]]:
+) -> dict[str, str | None]:
     """Build lookup map: rule-name-candidate -> normalized confidence."""
-    rule_confidence_map: Dict[str, Optional[str]] = {}
+    rule_confidence_map: dict[str, str | None] = {}
     for row in rows:
         rule_name = row[0] if len(row) > 0 else None
         rule_confidence = row[1] if len(row) > 1 else None
@@ -127,8 +128,8 @@ def build_rule_confidence_map(
 
 async def count_high_confidence_findings_by_task_ids(
     db: AsyncSession,
-    task_ids: List[str],
-) -> Dict[str, int]:
+    task_ids: list[str],
+) -> dict[str, int]:
     """
     Count HIGH-confidence findings for each scan task.
 
@@ -140,7 +141,7 @@ async def count_high_confidence_findings_by_task_ids(
     if not normalized_task_ids:
         return {}
 
-    counts = {task_id: 0 for task_id in normalized_task_ids}
+    counts = dict.fromkeys(normalized_task_ids, 0)
     result = await db.execute(
         select(OpengrepFinding.scan_task_id, OpengrepFinding.rule).where(
             OpengrepFinding.scan_task_id.in_(normalized_task_ids),
@@ -162,7 +163,7 @@ async def count_high_confidence_findings_by_task_ids(
         for key in extract_rule_lookup_keys(check_id):
             rule_name_candidates.add(key)
 
-    rule_confidence_map: Dict[str, Optional[str]] = {}
+    rule_confidence_map: dict[str, str | None] = {}
     if rule_name_candidates:
         rule_result = await db.execute(
             select(OpengrepRule.name, OpengrepRule.confidence).where(

@@ -1,7 +1,6 @@
 import importlib
 
 
-
 def test_legacy_mcp_and_skill_exports_removed():
     mcp_module = importlib.import_module("app.services.agent.mcp")
     tools_module = importlib.import_module("app.services.agent.tools")

@@ -35,20 +35,15 @@ test("ProjectDetail 最近任务状态 badge 统一使用非加粗字重", () =>
 		"utf8",
 	);
 
-	assert.match(source, /cyber-badge-success font-normal/);
-	assert.match(source, /cyber-badge-info font-normal/);
-	assert.match(source, /cyber-badge-danger font-normal/);
-	assert.match(source, /cyber-badge-muted font-normal/);
-	assert.match(source, /border-orange-500\/30 font-normal/);
+	assert.match(source, /`\$\{getTaskStatusBadgeClassName\(status\)\} font-normal`/);
 });
 
-test("ProjectDetail 通过主前端承载的 Nexus 静态页面展示详情，不再依赖独立端口", () => {
+test("ProjectDetail 通过独立端口展示 Nexus 详情 iframe", () => {
 	const source = readFileSync(
 		"/home/xyf/AuditTool/frontend/src/pages/ProjectDetail.tsx",
 		"utf8",
 	);
 
-	assert.match(source, /src="\/nexus-item-detail\/"/);
-	assert.match(source, /window\.location\.origin/);
-	assert.doesNotMatch(source, /window\.location\.hostname\}:5175/);
+	assert.match(source, /src=\{`http:\/\/\$\{window\.location\.hostname\}:5175`\}/);
+	assert.doesNotMatch(source, /src="\/nexus-item-detail\/"/);
 });

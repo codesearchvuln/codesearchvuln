@@ -2,7 +2,6 @@ import asyncio
 
 from app.services.rule import validate_generic_rule
 
-
 TOP_LEVEL_LIST_RULE_YAML = """
 - id: demo-rule-with-dash
   message: Detect demo usage

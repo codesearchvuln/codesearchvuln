@@ -45,7 +45,7 @@ async def test_agent_queue_status_tool_bypasses_cache_on_repeated_calls():
     """
     Regression test: Verify that get_recon_risk_queue_status is NOT cached
     even when called with identical parameters.
-    
+
     Scenario:
     1. Create queue service and enqueue/dequeue items
     2. Call get_recon_risk_queue_status twice with same parameters
@@ -55,19 +55,19 @@ async def test_agent_queue_status_tool_bypasses_cache_on_repeated_calls():
     """
     queue_service = InMemoryReconRiskQueue()
     task_id = "test-no-cache-regression"
-    
+
     # Setup: Direct tool execution without agent
     status_tool = GetReconRiskQueueStatusTool(
         queue_service=queue_service,
         task_id=task_id,
     )
-    
+
     # First call: queue is empty
     result1 = await status_tool.execute()
     assert result1.success is True
     pending_count_1 = result1.data.get("pending_count", 0)
     assert pending_count_1 == 0, "Queue should be empty initially"
-    
+
     # Add a risk point directly
     queue_service.enqueue(task_id, {
         "file_path": "src/test.py",
@@ -75,13 +75,13 @@ async def test_agent_queue_status_tool_bypasses_cache_on_repeated_calls():
         "description": "test risk point",
     })
     assert queue_service.size(task_id) == 1, "Item should be in queue now"
-    
+
     # Second call with SAME input as first: should give fresh result
     # (In real Agent, this would be blocked by cache_bypass check in execute_tool)
     result2 = await status_tool.execute()
     assert result2.success is True
     pending_count_2 = result2.data.get("pending_count", 0)
-    
+
     # Verify fresh read, not stale
     assert pending_count_2 == 1, (
         f"Tool should return fresh queue status. "
@@ -94,23 +94,23 @@ async def test_agent_queue_status_tool_bypasses_cache_on_repeated_calls():
 def test_agent_tool_cache_respects_bypass_flag():
     """
     Direct unit test of cache bypass logic in Agent.execute_tool.
-    
+
     Verifies that when tool is in NON_CACHEABLE_TOOL_NAMES:
     - Line ~4532: cache_bypass flag prevents cache reuse
     - Line ~5287: cache_bypass flag prevents cache storage
-    
+
     This test verifies the boolean flags and logic without instantiating Agent.
     """
     # Simulate the tool name normalization and bypass check from execute_tool
     tool_name = "get_recon_risk_queue_status"
     normalized_tool_name = str(tool_name or "").strip().lower()
-    
+
     # This is the check from line ~4532
     cache_bypass = normalized_tool_name in NON_CACHEABLE_TOOL_NAMES
     assert cache_bypass is True, (
         f"Tool '{tool_name}' should be marked for cache bypass"
     )
-    
+
     # Verify queue mutation tool also bypasses
     mutation_tool = "push_risk_point_to_queue"
     normalized_mutation = str(mutation_tool or "").strip().lower()
@@ -118,11 +118,11 @@ def test_agent_tool_cache_respects_bypass_flag():
     assert cache_bypass_mutation is True, (
         f"Mutation tool '{mutation_tool}' should bypass cache"
     )
-    
+
     # Simulate cache reuse logic (line ~4537-4543)
     mock_cache = {"get_recon_risk_queue_status:{}": "STALE_VALUE"}
     cached_output = mock_cache.get("get_recon_risk_queue_status:{}")
-    
+
     # With cache_bypass=True, this condition should SHORT-CIRCUIT and NOT reuse
     # (condition from line ~4540: not cache_bypass and cached_output is not None)
     should_reuse_cache = (
@@ -140,7 +140,7 @@ def test_agent_tool_cache_respects_bypass_flag():
 def test_non_queue_tools_still_cached():
     """
     Sanity check: Non-queue tools should NOT be in NON_CACHEABLE_TOOL_NAMES,
-    meaning they will still use cache normally. This ensures our fix didn't 
+    meaning they will still use cache normally. This ensures our fix didn't
     break the general caching behavior.
     """
     # Example non-queue tools that should NOT have cache bypass
@@ -151,29 +151,29 @@ def test_non_queue_tools_still_cached():
         "pattern_match",
         "extract_function",
     ]
-    
+
     for tool in cacheable_tools:
         assert tool not in NON_CACHEABLE_TOOL_NAMES, (
             f"Tool '{tool}' should NOT be non-cacheable; "
             f"it should use normal caching behavior"
         )
-    
+
     # Simulate cache logic for a normal tool
     tool_name = "read_file"
     normalized_tool_name = str(tool_name or "").strip().lower()
     cache_bypass = normalized_tool_name in NON_CACHEABLE_TOOL_NAMES
-    
+
     # cache_bypass should be False for normal tools
     assert cache_bypass is False, (
         f"Normal tools like '{tool_name}' should NOT bypass cache"
     )
-    
+
     # Simulate normal cache reuse logic (line ~4540 in base.py)
     is_write_tool = False
     call_count = 2
     cached_output = "SOME_FILE_CONTENT"
     runtime_cache_priority = False
-    
+
     should_reuse_cache = (
         not is_write_tool
         and not cache_bypass  # <-- This is True for normal tools, so no bypass

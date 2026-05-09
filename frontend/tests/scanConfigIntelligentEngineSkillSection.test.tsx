@@ -8,7 +8,7 @@ import { SsrRouter } from "./ssrTestRouter.tsx";
 
 globalThis.React = React;
 
-test("ScanConfigIntelligentEngine 展示 Skill 管理区与外部工具入口", () => {
+test("ScanConfigIntelligentEngine 展示推理模块与 workflow 并发控制", () => {
 	const markup = renderToStaticMarkup(
 		createElement(
 			SsrRouter,
@@ -17,10 +17,11 @@ test("ScanConfigIntelligentEngine 展示 Skill 管理区与外部工具入口", 
 		),
 	);
 
-	assert.match(markup, /Skill 管理/);
-	assert.match(markup, /Prompt Skill 已迁移到外部工具页/);
-	assert.match(markup, /前往外部工具管理/);
-	assert.match(markup, /\/scan-config\/external-tools/);
+	assert.match(markup, /推理模块/);
+	assert.match(markup, /Workflow 并发控制/);
+	assert.match(markup, /Recon\(SubAgent\) 并发数/);
+	assert.match(markup, /Verification 并发数/);
+	assert.doesNotMatch(markup, /Prompt Skill 已迁移到外部工具页/);
 	assert.doesNotMatch(markup, /Agent 角色/);
 	assert.doesNotMatch(markup, /Skill Key/);
 	assert.doesNotMatch(markup, /business_logic_recon/);

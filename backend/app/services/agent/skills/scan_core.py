@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-
-_SCAN_CORE_SKILLS: List[Dict[str, Any]] = [
+_SCAN_CORE_SKILLS: list[dict[str, Any]] = [
     {"skill_id": "search_code", "name": "search_code", "summary": "在项目中检索代码片段、关键字与命中位置。"},
     {"skill_id": "list_files", "name": "list_files", "summary": "按目录或模式列出候选文件，快速缩小分析范围。"},
     {"skill_id": "get_code_window", "name": "get_code_window", "summary": "围绕锚点返回极小代码窗口，作为唯一代码取证来源。"},
@@ -34,7 +33,7 @@ SCAN_CORE_LOCAL_SKILL_IDS = frozenset(
     skill_id for skill_id in SCAN_CORE_SKILL_IDS if skill_id not in SCAN_CORE_RUNTIME_BOUND_SKILL_IDS
 )
 SCAN_CORE_DEFAULT_TEST_PROJECT_NAME = "libplist"
-SCAN_CORE_STRUCTURED_TOOL_PRESETS: Dict[str, Dict[str, Any]] = {
+SCAN_CORE_STRUCTURED_TOOL_PRESETS: dict[str, dict[str, Any]] = {
     "dataflow_analysis": {
         "project_name": SCAN_CORE_DEFAULT_TEST_PROJECT_NAME,
         "file_path": "src/xplist.c",
@@ -71,7 +70,7 @@ SCAN_CORE_SKILL_TEST_SUPPORTED_IDS = frozenset(
         "quick_audit",
     }
 )
-SCAN_CORE_SKILL_TEST_DISABLED_REASONS: Dict[str, str] = {
+SCAN_CORE_SKILL_TEST_DISABLED_REASONS: dict[str, str] = {
     "dataflow_analysis": "首版仅开放可直接基于 libplist 自然语言提问的 skill；数据流分析依赖更复杂的上下文建模。",
     "controlflow_analysis_light": "首版仅开放可直接基于 libplist 自然语言提问的 skill；控制流分析依赖更复杂的上下文建模。",
     "logic_authz_analysis": "首版仅开放可直接基于 libplist 自然语言提问的 skill；鉴权/业务逻辑分析依赖更复杂的上下文建模。",
@@ -82,7 +81,7 @@ SCAN_CORE_SKILL_TEST_DISABLED_REASONS: Dict[str, str] = {
 }
 
 
-def get_scan_core_skill_test_policy(skill_id: str) -> Dict[str, Any]:
+def get_scan_core_skill_test_policy(skill_id: str) -> dict[str, Any]:
     normalized = str(skill_id or "").strip()
     structured_preset = SCAN_CORE_STRUCTURED_TOOL_PRESETS.get(normalized)
     if structured_preset is not None:
@@ -115,7 +114,7 @@ def get_scan_core_skill_test_policy(skill_id: str) -> Dict[str, Any]:
     }
 
 
-def _base_detail(item: Dict[str, Any]) -> Dict[str, Any]:
+def _base_detail(item: dict[str, Any]) -> dict[str, Any]:
     skill_id = str(item["skill_id"])
     return {
         "skill_id": skill_id,
@@ -139,7 +138,7 @@ def _base_detail(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def get_scan_core_skill_detail(skill_id: str) -> Optional[Dict[str, Any]]:
+def get_scan_core_skill_detail(skill_id: str) -> dict[str, Any] | None:
     item = _SCAN_CORE_BY_ID.get(str(skill_id or "").strip())
     if item is None:
         return None
@@ -149,10 +148,10 @@ def get_scan_core_skill_detail(skill_id: str) -> Optional[Dict[str, Any]]:
 def search_scan_core_skills(
     *,
     query: str = "",
-    namespace: Optional[str] = None,
+    namespace: str | None = None,
     limit: int = 20,
     offset: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     namespace_filter = str(namespace or "").strip().lower()
     if namespace_filter and namespace_filter != "scan-core":
         return {"enabled": True, "total": 0, "limit": limit, "offset": offset, "items": []}
@@ -183,8 +182,8 @@ def search_scan_core_skills(
     return {"enabled": True, "total": total, "limit": limit, "offset": offset, "items": paged}
 
 
-def build_scan_core_skill_availability(catalog: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    availability: Dict[str, Dict[str, Any]] = {}
+def build_scan_core_skill_availability(catalog: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    availability: dict[str, dict[str, Any]] = {}
     for skill_id in SCAN_CORE_SKILL_IDS:
         availability[skill_id] = {
             "enabled": True,

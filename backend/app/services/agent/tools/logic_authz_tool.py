@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel, Field
 
 from app.services.agent.logic.authz_rules import AuthzRuleEngine
+
 from .base import AgentTool, ToolResult
 from .evidence_protocol import (
     build_display_command,
@@ -14,15 +13,15 @@ from .evidence_protocol import (
 
 
 class LogicAuthzAnalysisInput(BaseModel):
-    file_path: Optional[str] = Field(default=None, description="目标文件路径")
-    line_start: Optional[int] = Field(default=None, description="目标行号")
-    vulnerability_type: Optional[str] = Field(default=None, description="漏洞类型")
+    file_path: str | None = Field(default=None, description="目标文件路径")
+    line_start: int | None = Field(default=None, description="目标行号")
+    vulnerability_type: str | None = Field(default=None, description="漏洞类型")
 
 
 class LogicAuthzAnalysisTool(AgentTool):
     """Graph-rule authz/idor analysis without compile dependency."""
 
-    def __init__(self, project_root: str, target_files: Optional[List[str]] = None):
+    def __init__(self, project_root: str, target_files: list[str] | None = None):
         super().__init__()
         self.engine = AuthzRuleEngine(project_root=project_root, target_files=target_files)
 
@@ -53,9 +52,9 @@ class LogicAuthzAnalysisTool(AgentTool):
 
     async def _execute(
         self,
-        file_path: Optional[str] = None,
-        line_start: Optional[int] = None,
-        vulnerability_type: Optional[str] = None,
+        file_path: str | None = None,
+        line_start: int | None = None,
+        vulnerability_type: str | None = None,
         **kwargs,
     ) -> ToolResult:
         if file_path and line_start:

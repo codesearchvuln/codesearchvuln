@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import sys
 
-
 existing_pythonpath = os.environ.get("PYTHONPATH", "")
 prefix = "/opt/yasa/engine/deps/uast4py-src"
 os.environ["PYTHONPATH"] = f"{prefix}:{existing_pythonpath}" if existing_pythonpath else prefix

@@ -4,7 +4,7 @@ Opengrep API 数据模型 - Pydantic Schemas
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -18,12 +18,12 @@ class OpengrepRuleCreateRequest(BaseModel):
 
 class OpengrepRuleValidation(BaseModel):
     is_valid: bool = Field(..., description="规则是否通过验证")
-    message: Optional[str] = Field(None, description="验证失败原因或提示信息")
+    message: str | None = Field(None, description="验证失败原因或提示信息")
 
 
 class OpengrepRuleAttempt(BaseModel):
     attempt: int = Field(..., description="尝试序号")
-    rule: Optional[Dict[str, Any]] = Field(None, description="本次尝试生成的规则")
+    rule: dict[str, Any] | None = Field(None, description="本次尝试生成的规则")
     validation: OpengrepRuleValidation
 
 
@@ -35,10 +35,10 @@ class OpengrepRulePatchRequest(BaseModel):
 
 
 class OpengrepRulePatchResponse(BaseModel):
-    rule: Optional[Dict[str, Any]]
+    rule: dict[str, Any] | None
     validation: OpengrepRuleValidation
-    attempts: List[OpengrepRuleAttempt]
-    meta: Optional[Dict[str, Any]] = None
+    attempts: list[OpengrepRuleAttempt]
+    meta: dict[str, Any] | None = None
 
 
 class OpengrepRuleTextCreateRequest(BaseModel):
@@ -46,18 +46,18 @@ class OpengrepRuleTextCreateRequest(BaseModel):
 
 
 class OpengrepRuleTextResponse(BaseModel):
-    rule: Optional[Dict[str, Any]] = None
+    rule: dict[str, Any] | None = None
     validation: OpengrepRuleValidation
-    test_yaml: Optional[str] = None
-    rule_id: Optional[str] = None
+    test_yaml: str | None = None
+    rule_id: str | None = None
 
 
 class OpengrepRuleUpdateRequest(BaseModel):
-    name: Optional[str] = Field(None, description="规则名称")
-    pattern_yaml: Optional[str] = Field(None, description="规则YAML文本")
-    language: Optional[str] = Field(None, description="编程语言")
-    severity: Optional[str] = Field(None, description="严重程度: ERROR, WARNING, INFO")
-    is_active: Optional[bool] = Field(None, description="是否启用")
+    name: str | None = Field(None, description="规则名称")
+    pattern_yaml: str | None = Field(None, description="规则YAML文本")
+    language: str | None = Field(None, description="编程语言")
+    severity: str | None = Field(None, description="严重程度: ERROR, WARNING, INFO")
+    is_active: bool | None = Field(None, description="是否启用")
 
 
 class OpengrepRuleResponse(BaseModel):

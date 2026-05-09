@@ -1,17 +1,17 @@
-import yaml
-import re
-from typing import Optional, Tuple
 import logging
+import re
+
+import yaml
+
+from app.services.llm.service import LLMService
 
 from .patch_processor import PatchInfo
-from app.services.llm.service import LLMService
-        
 
 logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    def __init__(self, user_config: Optional[dict] = None):
+    def __init__(self, user_config: dict | None = None):
         self.client = LLMService(user_config=user_config)
 
     def extract_response(self, text: str) -> str:
@@ -24,7 +24,7 @@ class LLMClient:
         # Remove any leading/trailing whitespace
         return text.strip()
 
-    def clean_yaml_text(self, text: str) -> Optional[str]:
+    def clean_yaml_text(self, text: str) -> str | None:
         """Clean and validate YAML text with better error handling."""
         if not text:
             return None
@@ -65,7 +65,7 @@ class LLMClient:
             except yaml.YAMLError:
                 return None
 
-    def validate_rule_schema(self, rule: dict) -> Tuple[bool, Optional[str]]:
+    def validate_rule_schema(self, rule: dict) -> tuple[bool, str | None]:
         """Validate that the rule has all required fields."""
         required_fields = ["id", "pattern", "message", "severity", "languages"]
 
@@ -135,8 +135,8 @@ class LLMClient:
         return rule
 
     async def generate_rule(
-        self, patch_info: PatchInfo, error_feedback: Optional[str] = None
-    ) -> Optional[dict]:
+        self, patch_info: PatchInfo, error_feedback: str | None = None
+    ) -> dict | None:
         """Generate a Semgrep rule using the LLM with improved validation."""
         prompt = self._build_prompt(patch_info, error_feedback)
 
@@ -149,7 +149,7 @@ class LLMClient:
                 messages=[
                     {
                         "role": "system",
-                        "content": """You generate Semgrep rules in YAML format. 
+                        "content": """You generate Semgrep rules in YAML format.
     Return only the raw YAML content without any markdown formatting or additional text.
     Always include these required fields: id, pattern, message, severity, languages""",
                     },
@@ -194,7 +194,7 @@ class LLMClient:
             logging.error(f"Error generating rule: {e}")
             return None
 
-    def _build_prompt(self, patch_info: PatchInfo, error_feedback: Optional[str] = None) -> str:
+    def _build_prompt(self, patch_info: PatchInfo, error_feedback: str | None = None) -> str:
         """Build an enhanced prompt for rule generation with examples and detailed guidance."""
         # Combine all file changes with context
         all_changes = []

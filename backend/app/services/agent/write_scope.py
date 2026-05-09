@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 HARD_MAX_WRITABLE_FILES_PER_TASK = 50
 
-_WRITE_TOOL_NAMES: Set[str] = {"edit_file", "write_file"}
-_BLOCKED_WRITE_TOOLS: Set[str] = {"move_file", "create_directory"}
-_FORBIDDEN_SEGMENTS: Set[str] = {
+_WRITE_TOOL_NAMES: set[str] = {"edit_file", "write_file"}
+_BLOCKED_WRITE_TOOLS: set[str] = {"move_file", "create_directory"}
+_FORBIDDEN_SEGMENTS: set[str] = {
     ".git",
     "node_modules",
     "vendor",
@@ -24,7 +25,7 @@ _FORBIDDEN_SEGMENTS: Set[str] = {
 class WriteScopeDecision:
     allowed: bool
     reason: str
-    file_path: Optional[str]
+    file_path: str | None
     total_files: int
     added_to_scope: bool = False
 
@@ -53,10 +54,10 @@ class TaskWriteScopeGuard:
         self.max_writable_files_per_task = min(configured_cap, HARD_MAX_WRITABLE_FILES_PER_TASK)
         self.require_evidence_binding = bool(require_evidence_binding)
         self.forbid_project_wide_writes = bool(forbid_project_wide_writes)
-        self._writable_files: Set[str] = set()
+        self._writable_files: set[str] = set()
 
     @property
-    def writable_files(self) -> Set[str]:
+    def writable_files(self) -> set[str]:
         return set(self._writable_files)
 
     @staticmethod
@@ -87,7 +88,7 @@ class TaskWriteScopeGuard:
             return True
         return "." not in basename
 
-    def _normalize_in_project_path(self, file_path: Any) -> Tuple[Optional[str], Optional[str]]:
+    def _normalize_in_project_path(self, file_path: Any) -> tuple[str | None, str | None]:
         raw = str(file_path or "").strip().replace("\\", "/")
         if not raw:
             return None, "write_scope_not_allowed"
@@ -129,21 +130,21 @@ class TaskWriteScopeGuard:
 
         return rel, None
 
-    def _extract_write_target(self, tool_input: Dict[str, Any]) -> Optional[str]:
+    def _extract_write_target(self, tool_input: dict[str, Any]) -> str | None:
         for key in ("file_path", "path", "target_path", "target_file", "filepath"):
             value = tool_input.get(key)
             if isinstance(value, str) and value.strip():
                 return value
         return None
 
-    def _has_evidence_binding(self, tool_input: Dict[str, Any]) -> bool:
+    def _has_evidence_binding(self, tool_input: dict[str, Any]) -> bool:
         for key in ("finding_id", "todo_id", "reason", "evidence_ref"):
             value = tool_input.get(key)
             if isinstance(value, str) and value.strip():
                 return True
         return False
 
-    def _is_project_wide_write(self, tool_input: Dict[str, Any]) -> bool:
+    def _is_project_wide_write(self, tool_input: dict[str, Any]) -> bool:
         if not self.forbid_project_wide_writes:
             return False
 
@@ -169,7 +170,7 @@ class TaskWriteScopeGuard:
         normalized = str(tool_name or "").strip().lower()
         return normalized in _WRITE_TOOL_NAMES or normalized in _BLOCKED_WRITE_TOOLS
 
-    def evaluate_write_request(self, tool_name: str, tool_input: Dict[str, Any]) -> WriteScopeDecision:
+    def evaluate_write_request(self, tool_name: str, tool_input: dict[str, Any]) -> WriteScopeDecision:
         normalized_tool = str(tool_name or "").strip().lower()
         if normalized_tool in _BLOCKED_WRITE_TOOLS:
             return WriteScopeDecision(
@@ -263,10 +264,10 @@ class TaskWriteScopeGuard:
     def seed_from_task_inputs(
         self,
         *,
-        target_files: Optional[List[str]] = None,
-        findings: Optional[List[Dict[str, Any]]] = None,
+        target_files: list[str] | None = None,
+        findings: list[dict[str, Any]] | None = None,
     ) -> int:
-        seed_paths: List[Any] = []
+        seed_paths: list[Any] = []
         if isinstance(target_files, list):
             seed_paths.extend(target_files)
 
@@ -279,7 +280,7 @@ class TaskWriteScopeGuard:
         return self.register_evidence_paths(seed_paths)
 
     @staticmethod
-    def decision_metadata(decision: WriteScopeDecision) -> Dict[str, Any]:
+    def decision_metadata(decision: WriteScopeDecision) -> dict[str, Any]:
         return {
             "write_scope_allowed": bool(decision.allowed),
             "write_scope_reason": decision.reason,

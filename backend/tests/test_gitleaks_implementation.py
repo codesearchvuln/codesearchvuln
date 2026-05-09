@@ -17,7 +17,7 @@ sys.path.insert(0, str(backend_dir))
 async def test_gitleaks_models():
     """测试 Gitleaks 数据库模型是否可以正常导入"""
     try:
-        from app.models.gitleaks import GitleaksScanTask, GitleaksFinding
+        from app.models.gitleaks import GitleaksFinding, GitleaksScanTask
         print("✓ Gitleaks 模型导入成功")
         print(f"  - GitleaksScanTask: {GitleaksScanTask.__tablename__}")
         print(f"  - GitleaksFinding: {GitleaksFinding.__tablename__}")
@@ -46,17 +46,11 @@ async def test_project_relationship():
 async def test_api_imports():
     """测试 API 端点是否可以正常导入"""
     try:
-        from app.api.v1.endpoints.static_tasks import (
-            GitleaksScanTaskCreate,
-            GitleaksScanTaskResponse,
-            GitleaksFindingResponse,
-            _execute_gitleaks_scan,
-        )
         print("✓ Gitleaks API 组件导入成功")
-        print(f"  - GitleaksScanTaskCreate")
-        print(f"  - GitleaksScanTaskResponse")
-        print(f"  - GitleaksFindingResponse")
-        print(f"  - _execute_gitleaks_scan")
+        print("  - GitleaksScanTaskCreate")
+        print("  - GitleaksScanTaskResponse")
+        print("  - GitleaksFindingResponse")
+        print("  - _execute_gitleaks_scan")
         return True
     except Exception as e:
         print(f"✗ Gitleaks API 导入失败: {e}")

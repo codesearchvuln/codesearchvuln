@@ -1,25 +1,24 @@
 import asyncio
-import docker
 import json
 import os
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+import docker
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.v1.endpoints.static_tasks_shared import (
-    _launch_static_background_job,
     _clear_scan_task_cancel,
-    copy_project_tree_to_scan_dir,
     _force_cleanup_yasa_processes,
     _get_project_root,
     _is_scan_task_cancelled,
+    _launch_static_background_job,
     _pop_scan_container,
     _register_scan_container,
     _release_request_db_session,
@@ -28,6 +27,7 @@ from app.api.v1.endpoints.static_tasks_shared import (
     _sync_task_scan_duration,
     async_session_factory,
     cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
     deps,
     ensure_scan_logs_dir,
     ensure_scan_meta_dir,
@@ -38,15 +38,28 @@ from app.api.v1.endpoints.static_tasks_shared import (
     logger,
     settings,
 )
-from app.models.project import Project
-from app.models.user import User
-from app.models.yasa import YasaFinding, YasaRuleConfig, YasaScanTask
 from app.db.static_finding_paths import (
     normalize_static_scan_file_path,
     resolve_static_finding_location,
 )
+from app.models.project import Project
+from app.models.user import User
+from app.models.yasa import YasaFinding, YasaRuleConfig, YasaScanTask
 from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
+from app.services.yasa_language import (
+    YASA_SUPPORTED_LANGUAGES,
+    collect_yasa_language_counts_from_source_tree,
+    is_yasa_blocked_project_language,
+    parse_programming_languages,
+    resolve_yasa_language_from_programming_languages,
+    resolve_yasa_language_from_source_tree,
+    resolve_yasa_language_profile,
+)
+from app.services.yasa_rules_snapshot import (
+    extract_yasa_snapshot_rules,
+    load_yasa_checker_catalog,
+)
 from app.services.yasa_runtime import (
     YASA_RUNNER_BINARY,
     YASA_RUNNER_RESOURCE_DIR,
@@ -57,32 +70,19 @@ from app.services.yasa_runtime_config import (
     load_global_yasa_runtime_config,
     save_global_yasa_runtime_config,
 )
-from app.services.yasa_rules_snapshot import (
-    extract_yasa_snapshot_rules,
-    load_yasa_checker_catalog,
-)
-from app.services.yasa_language import (
-    YASA_SUPPORTED_LANGUAGES,
-    collect_yasa_language_counts_from_source_tree,
-    is_yasa_blocked_project_language,
-    parse_programming_languages,
-    resolve_yasa_language_from_source_tree,
-    resolve_yasa_language_from_programming_languages,
-    resolve_yasa_language_profile,
-)
 
 router = APIRouter()
 
 
 class YasaScanTaskCreate(BaseModel):
     project_id: str = Field(..., description="项目ID")
-    name: Optional[str] = Field(None, description="任务名称")
+    name: str | None = Field(None, description="任务名称")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
-    language: Optional[str] = Field(None, description="扫描语言，可自动识别映射")
-    checker_pack_ids: Optional[List[str]] = Field(None, description="checkerPackIds")
-    checker_ids: Optional[List[str]] = Field(None, description="checkerIds")
-    rule_config_file: Optional[str] = Field(None, description="自定义 rule config 文件路径")
-    rule_config_id: Optional[str] = Field(None, description="自定义规则配置ID")
+    language: str | None = Field(None, description="扫描语言，可自动识别映射")
+    checker_pack_ids: list[str] | None = Field(None, description="checkerPackIds")
+    checker_ids: list[str] | None = Field(None, description="checkerIds")
+    rule_config_file: str | None = Field(None, description="自定义 rule config 文件路径")
+    rule_config_id: str | None = Field(None, description="自定义规则配置ID")
 
 
 class YasaScanTaskResponse(BaseModel):
@@ -92,19 +92,19 @@ class YasaScanTaskResponse(BaseModel):
     status: str
     target_path: str
     language: str
-    checker_pack_ids: Optional[str]
-    checker_ids: Optional[str]
-    rule_config_file: Optional[str]
-    rule_config_id: Optional[str]
-    rule_config_name: Optional[str]
-    rule_config_source: Optional[str]
+    checker_pack_ids: str | None
+    checker_ids: str | None
+    rule_config_file: str | None
+    rule_config_id: str | None
+    rule_config_name: str | None
+    rule_config_source: str | None
     total_findings: int
     scan_duration_ms: int
     files_scanned: int
-    diagnostics_summary: Optional[str]
-    error_message: Optional[str]
+    diagnostics_summary: str | None
+    error_message: str | None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -112,15 +112,15 @@ class YasaScanTaskResponse(BaseModel):
 class YasaFindingResponse(BaseModel):
     id: str
     scan_task_id: str
-    rule_id: Optional[str]
-    rule_name: Optional[str]
+    rule_id: str | None
+    rule_name: str | None
     level: str
     message: str
     file_path: str
-    start_line: Optional[int]
-    end_line: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
+    start_line: int | None
+    end_line: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
     status: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -128,38 +128,38 @@ class YasaFindingResponse(BaseModel):
 
 class YasaRuleResponse(BaseModel):
     checker_id: str
-    checker_path: Optional[str] = None
-    description: Optional[str] = None
-    checker_packs: List[str] = []
-    languages: List[str] = []
-    demo_rule_config_path: Optional[str] = None
+    checker_path: str | None = None
+    description: str | None = None
+    checker_packs: list[str] = []
+    languages: list[str] = []
+    demo_rule_config_path: str | None = None
     source: str = "builtin"
 
 
 class YasaRuleConfigResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     language: str
-    checker_pack_ids: Optional[str]
+    checker_pack_ids: str | None
     checker_ids: str
     rule_config_json: str
     is_active: bool
     source: str
-    created_by: Optional[str]
+    created_by: str | None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class YasaRuleConfigUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    language: Optional[str] = None
-    checker_pack_ids: Optional[List[str]] = None
-    checker_ids: Optional[List[str]] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    language: str | None = None
+    checker_pack_ids: list[str] | None = None
+    checker_ids: list[str] | None = None
+    is_active: bool | None = None
 
 
 class YasaRuntimeConfigResponse(BaseModel):
@@ -227,7 +227,7 @@ _YASA_FILE_SUFFIX_BY_LANGUAGE: dict[str, tuple[str, ...]] = {
 }
 
 
-def _normalize_csv(values: Optional[List[str]]) -> Optional[str]:
+def _normalize_csv(values: list[str] | None) -> str | None:
     if not values:
         return None
     normalized = [str(item).strip() for item in values if str(item).strip()]
@@ -236,17 +236,17 @@ def _normalize_csv(values: Optional[List[str]]) -> Optional[str]:
     return ",".join(normalized)
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def _split_csv_form(value: Optional[str]) -> List[str]:
+def _split_csv_form(value: str | None) -> list[str]:
     return _split_csv(value)
 
 
-def _is_timeout_like_error(*texts: Optional[str]) -> bool:
+def _is_timeout_like_error(*texts: str | None) -> bool:
     for raw in texts:
         text = str(raw or "").strip().lower()
         if not text:
@@ -270,7 +270,7 @@ def _collect_yasa_scan_target_files(
     project_dir: Path,
     full_target_path: str,
     language: str,
-) -> List[Path]:
+) -> list[Path]:
     target = Path(full_target_path).resolve()
     project_root = project_dir.resolve()
     try:
@@ -281,8 +281,8 @@ def _collect_yasa_scan_target_files(
     if target.is_file():
         return [target]
 
-    suffixes = _YASA_FILE_SUFFIX_BY_LANGUAGE.get(str(language or "").strip().lower(), tuple())
-    collected: List[Path] = []
+    suffixes = _YASA_FILE_SUFFIX_BY_LANGUAGE.get(str(language or "").strip().lower(), ())
+    collected: list[Path] = []
     for current_root, dirs, files in os.walk(target):
         dirs[:] = [
             dirname
@@ -298,15 +298,15 @@ def _collect_yasa_scan_target_files(
     return collected
 
 
-def _resolve_language_profile(language: Optional[str]) -> Dict[str, str]:
+def _resolve_language_profile(language: str | None) -> dict[str, str]:
     return resolve_yasa_language_profile(language)
 
 
 def _detect_language_from_project(
     project: Project,
     *,
-    project_root: Optional[str] = None,
-) -> Optional[str]:
+    project_root: str | None = None,
+) -> str | None:
     resolved_from_source = resolve_yasa_language_from_source_tree(project_root)
     if resolved_from_source:
         return resolved_from_source
@@ -349,7 +349,7 @@ def _resolve_yasa_binary() -> str:
     )
 
 
-def _load_yasa_snapshot_rules_or_http_error() -> List[Dict[str, Any]]:
+def _load_yasa_snapshot_rules_or_http_error() -> list[dict[str, Any]]:
     try:
         return extract_yasa_snapshot_rules()
     except FileNotFoundError as exc:
@@ -358,7 +358,7 @@ def _load_yasa_snapshot_rules_or_http_error() -> List[Dict[str, Any]]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _load_yasa_checker_catalog_or_http_error() -> Dict[str, Any]:
+def _load_yasa_checker_catalog_or_http_error() -> dict[str, Any]:
     try:
         return load_yasa_checker_catalog()
     except FileNotFoundError as exc:
@@ -367,7 +367,7 @@ def _load_yasa_checker_catalog_or_http_error() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _build_default_rule_config_path(profile: Dict[str, str]) -> Optional[str]:
+def _build_default_rule_config_path(profile: dict[str, str]) -> str | None:
     try:
         return build_yasa_rule_config_path(
             profile["rule_config"],
@@ -377,8 +377,8 @@ def _build_default_rule_config_path(profile: Dict[str, str]) -> Optional[str]:
         return None
 
 
-def _parse_rule_config_checker_ids(rule_config_payload: Any) -> List[str]:
-    collected: List[str] = []
+def _parse_rule_config_checker_ids(rule_config_payload: Any) -> list[str]:
+    collected: list[str] = []
 
     def _collect_from_entry(entry: Any) -> None:
         if not isinstance(entry, dict):
@@ -402,7 +402,7 @@ def _parse_rule_config_checker_ids(rule_config_payload: Any) -> List[str]:
             _collect_from_entry(item)
 
     seen: set[str] = set()
-    deduplicated: List[str] = []
+    deduplicated: list[str] = []
     for item in collected:
         if item in seen:
             continue
@@ -411,7 +411,7 @@ def _parse_rule_config_checker_ids(rule_config_payload: Any) -> List[str]:
     return deduplicated
 
 
-def _looks_like_codeql_payload(payload_text: str, filename: Optional[str] = None) -> bool:
+def _looks_like_codeql_payload(payload_text: str, filename: str | None = None) -> bool:
     normalized_name = str(filename or "").strip().lower()
     if normalized_name.endswith(".ql") or normalized_name.endswith(".qls"):
         return True
@@ -427,10 +427,10 @@ def _looks_like_codeql_payload(payload_text: str, filename: Optional[str] = None
     return any(token in normalized for token in indicators)
 
 
-def _normalize_checker_values(values: Optional[List[str]]) -> List[str]:
+def _normalize_checker_values(values: list[str] | None) -> list[str]:
     if not values:
         return []
-    normalized: List[str] = []
+    normalized: list[str] = []
     seen: set[str] = set()
     for raw in values:
         value = str(raw or "").strip()
@@ -443,9 +443,9 @@ def _normalize_checker_values(values: Optional[List[str]]) -> List[str]:
 
 def _validate_checker_bindings(
     *,
-    checker_ids: List[str],
-    checker_pack_ids: List[str],
-    catalog: Dict[str, Any],
+    checker_ids: list[str],
+    checker_pack_ids: list[str],
+    catalog: dict[str, Any],
 ) -> None:
     unknown_checker_ids = [
         checker_id for checker_id in checker_ids if checker_id not in catalog["checker_ids"]
@@ -477,7 +477,7 @@ def _validate_checker_bindings(
 
 
 
-def _extract_sarif_location(result_item: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_sarif_location(result_item: dict[str, Any]) -> dict[str, Any]:
     locations = result_item.get("locations")
     if not isinstance(locations, list) or not locations:
         return {}
@@ -506,14 +506,14 @@ def _extract_sarif_location(result_item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _parse_yasa_sarif_output(payload: Any) -> List[Dict[str, Any]]:
+def _parse_yasa_sarif_output(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
     runs = payload.get("runs")
     if not isinstance(runs, list):
         return []
 
-    findings: List[Dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
     for run in runs:
         if not isinstance(run, dict):
             continue
@@ -551,7 +551,7 @@ def _parse_yasa_sarif_output(payload: Any) -> List[Dict[str, Any]]:
     return findings
 
 
-def _read_diagnostics_summary(report_dir: str) -> Optional[str]:
+def _read_diagnostics_summary(report_dir: str) -> str | None:
     diagnostics_path = Path(report_dir) / "yasa-diagnostics-log.txt"
     if not diagnostics_path.exists():
         return None
@@ -575,15 +575,15 @@ def _truncate_diag_text(text: str, head: int = 4096, tail: int = 4096) -> str:
 def _build_failure_diagnostics_summary(
     *,
     language: str,
-    checker_packs: List[str],
-    rule_config_file: Optional[str],
+    checker_packs: list[str],
+    rule_config_file: str | None,
     source_path: str,
     report_dir: str,
     stderr_text: str,
     stdout_text: str,
-    diagnostics_log: Optional[str],
+    diagnostics_log: str | None,
 ) -> str:
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "failure_type": "yasa_process_failed_without_sarif",
         "language": language,
         "checker_packs": checker_packs,
@@ -607,9 +607,9 @@ def _build_failure_diagnostics_summary(
 
 
 def _merge_task_diagnostics_summary(
-    existing_summary: Optional[str],
-    metadata: Dict[str, Any],
-) -> Optional[str]:
+    existing_summary: str | None,
+    metadata: dict[str, Any],
+) -> str | None:
     cleaned = {k: v for k, v in metadata.items() if v not in (None, "")}
     if not cleaned:
         return existing_summary
@@ -634,7 +634,7 @@ async def _handle_yasa_interrupted(
     task_id: str,
     *,
     message: str,
-    diagnostics: Optional[Dict[str, Any]] = None,
+    diagnostics: dict[str, Any] | None = None,
 ) -> bool:
     result = await db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
     task = result.scalar_one_or_none()
@@ -652,7 +652,7 @@ async def _handle_yasa_interrupted(
     return True
 
 
-def _is_yasa_scan_container_active(container_id: Optional[str]) -> bool:
+def _is_yasa_scan_container_active(container_id: str | None) -> bool:
     normalized = str(container_id or "").strip()
     if not normalized:
         return False
@@ -671,11 +671,11 @@ def _is_yasa_scan_container_active(container_id: Optional[str]) -> bool:
 
 def _stage_runner_rule_config_file(
     *,
-    raw_rule_config_file: Optional[str],
+    raw_rule_config_file: str | None,
     project_root: str,
     project_dir: Path,
     meta_dir: Path,
-) -> Optional[str]:
+) -> str | None:
     normalized = str(raw_rule_config_file or "").strip()
     if not normalized:
         return None
@@ -739,16 +739,16 @@ async def _execute_yasa_scan(
     project_root: str,
     target_path: str,
     language: str,
-    checker_pack_ids: Optional[str],
-    checker_ids: Optional[str],
-    rule_config_file: Optional[str],
-    rule_config_id: Optional[str],
+    checker_pack_ids: str | None,
+    checker_ids: str | None,
+    rule_config_file: str | None,
+    rule_config_id: str | None,
 ) -> None:
-    workspace_dir: Optional[Path] = None
-    output_dir: Optional[Path] = None
-    full_target_path: Optional[str] = None
-    active_container_id: Optional[str] = None
-    runtime_config: Dict[str, int] = {}
+    workspace_dir: Path | None = None
+    output_dir: Path | None = None
+    full_target_path: str | None = None
+    active_container_id: str | None = None
+    runtime_config: dict[str, int] = {}
 
     async def _touch_running_task() -> None:
         async with async_session_factory() as touch_db:
@@ -763,19 +763,19 @@ async def _execute_yasa_scan(
     async def _update_task_state(
         status: str,
         *,
-        error_message: Optional[str] = None,
-        diagnostics_summary: Optional[str] = None,
-        diagnostics_metadata: Optional[Dict[str, Any]] = None,
-        findings: Optional[List[Dict[str, Any]]] = None,
-        language_value: Optional[str] = None,
-        checker_pack_ids_value: Optional[str] = None,
-        checker_ids_value: Optional[str] = None,
-        rule_config_file_value: Optional[str] = None,
-        rule_config_id_value: Optional[str] = None,
-        rule_config_name_value: Optional[str] = None,
-        rule_config_source_value: Optional[str] = None,
+        error_message: str | None = None,
+        diagnostics_summary: str | None = None,
+        diagnostics_metadata: dict[str, Any] | None = None,
+        findings: list[dict[str, Any]] | None = None,
+        language_value: str | None = None,
+        checker_pack_ids_value: str | None = None,
+        checker_ids_value: str | None = None,
+        rule_config_file_value: str | None = None,
+        rule_config_id_value: str | None = None,
+        rule_config_name_value: str | None = None,
+        rule_config_source_value: str | None = None,
         files_scanned_count: int = 0,
-    ) -> Optional[YasaScanTask]:
+    ) -> YasaScanTask | None:
         async with async_session_factory() as update_db:
             result = await update_db.execute(select(YasaScanTask).where(YasaScanTask.id == task_id))
             task = result.scalar_one_or_none()
@@ -905,7 +905,7 @@ async def _execute_yasa_scan(
         packs = _split_csv(checker_pack_ids)
         checker_values = _split_csv(checker_ids)
         resolved_rule_config = str(rule_config_file or "").strip()
-        task_rule_config_name: Optional[str] = None
+        task_rule_config_name: str | None = None
         task_rule_config_source = "builtin"
 
         if rule_config_id:
@@ -954,8 +954,8 @@ async def _execute_yasa_scan(
             full_target_path=full_target_path,
             language=normalized_language,
         )
-        findings_payload: List[Dict[str, Any]] = []
-        timed_out_files: List[str] = []
+        findings_payload: list[dict[str, Any]] = []
+        timed_out_files: list[str] = []
         files_scanned_successfully = 0
 
         def _on_container_started(container_id: str) -> None:
@@ -1030,7 +1030,7 @@ async def _execute_yasa_scan(
             _pop_scan_container("yasa", task_id)
             active_container_id = None
 
-            file_findings: List[Dict[str, Any]] = []
+            file_findings: list[dict[str, Any]] = []
             if local_report_path.exists():
                 try:
                     sarif_data = json.loads(local_report_path.read_text(encoding="utf-8", errors="ignore"))
@@ -1094,7 +1094,7 @@ async def _execute_yasa_scan(
             "rule_config_name": task_rule_config_name or "",
             "rule_config_source": task_rule_config_source,
         }
-        completion_payload: Dict[str, Any] = {
+        completion_payload: dict[str, Any] = {
             "rule_config": metadata_summary,
             "scan_stats": {
                 "files_total": len(scan_targets),
@@ -1258,7 +1258,7 @@ async def create_yasa_scan(
             detail="找不到项目的 zip 文件，请先上传项目 ZIP 文件到 uploads/zip_files 目录",
         )
 
-    selected_rule_config: Optional[YasaRuleConfig] = None
+    selected_rule_config: YasaRuleConfig | None = None
     if request.rule_config_id:
         rule_result = await db.execute(
             select(YasaRuleConfig).where(YasaRuleConfig.id == request.rule_config_id)
@@ -1340,9 +1340,9 @@ async def create_yasa_scan(
     return response
 
 
-@router.get("/yasa/tasks", response_model=List[YasaScanTaskResponse])
+@router.get("/yasa/tasks", response_model=list[YasaScanTaskResponse])
 async def list_yasa_tasks(
-    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
+    project_id: str | None = Query(None, description="按项目ID过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1421,10 +1421,10 @@ async def delete_yasa_task(
     return {"message": "任务已删除", "task_id": task_id}
 
 
-@router.get("/yasa/tasks/{task_id}/findings", response_model=List[YasaFindingResponse])
+@router.get("/yasa/tasks/{task_id}/findings", response_model=list[YasaFindingResponse])
 async def get_yasa_findings(
     task_id: str,
-    status: Optional[str] = Query(None, description="按状态过滤"),
+    status: str | None = Query(None, description="按状态过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1446,12 +1446,12 @@ async def get_yasa_findings(
 @router.post("/yasa/rule-configs/import", response_model=YasaRuleConfigResponse)
 async def import_yasa_rule_config(
     name: str = Form(...),
-    description: Optional[str] = Form(None),
+    description: str | None = Form(None),
     language: str = Form(...),
-    checker_pack_ids: Optional[str] = Form(None),
-    checker_ids: Optional[str] = Form(None),
-    rule_config_json: Optional[str] = Form(None),
-    rule_config_file: Optional[UploadFile] = File(None),
+    checker_pack_ids: str | None = Form(None),
+    checker_ids: str | None = Form(None),
+    rule_config_json: str | None = Form(None),
+    rule_config_file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -1524,11 +1524,11 @@ async def import_yasa_rule_config(
     return row
 
 
-@router.get("/yasa/rule-configs", response_model=List[YasaRuleConfigResponse])
+@router.get("/yasa/rule-configs", response_model=list[YasaRuleConfigResponse])
 async def list_yasa_rule_configs(
-    language: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    keyword: Optional[str] = Query(None),
+    language: str | None = Query(None),
+    is_active: bool | None = Query(None),
+    keyword: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -1650,11 +1650,11 @@ async def delete_yasa_rule_config(
     return {"message": "规则配置已禁用", "id": rule_config_id}
 
 
-@router.get("/yasa/rules", response_model=List[YasaRuleResponse])
+@router.get("/yasa/rules", response_model=list[YasaRuleResponse])
 async def list_yasa_rules(
-    checker_pack_id: Optional[str] = Query(None, description="按 checkerPack 过滤"),
-    language: Optional[str] = Query(None, description="按语言过滤"),
-    keyword: Optional[str] = Query(None, description="按 checkerId/描述过滤"),
+    checker_pack_id: str | None = Query(None, description="按 checkerPack 过滤"),
+    language: str | None = Query(None, description="按语言过滤"),
+    keyword: str | None = Query(None, description="按 checkerId/描述过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=2000),
     current_user: User = Depends(deps.get_current_user),

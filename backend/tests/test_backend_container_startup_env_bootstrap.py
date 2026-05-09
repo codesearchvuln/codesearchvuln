@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from app.runtime import container_startup
 

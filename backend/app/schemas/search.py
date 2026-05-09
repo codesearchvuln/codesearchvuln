@@ -3,10 +3,9 @@
 支持跨 Project、AgentTask、AgentFinding 的统一搜索
 """
 
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
+from pydantic import BaseModel, ConfigDict, Field
 
 # ============ 请求和响应基础模型 ============
 
@@ -27,10 +26,10 @@ class SearchProjectItem(BaseModel):
     """搜索结果中的项目信息"""
     id: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     source_type: str  # repository, zip
-    repository_url: Optional[str] = None
-    repository_type: Optional[str] = None
+    repository_url: str | None = None
+    repository_type: str | None = None
     owner_id: str
     created_at: datetime
     updated_at: datetime
@@ -45,11 +44,11 @@ class SearchAgentTaskItem(BaseModel):
     """搜索结果中的 Agent 任务信息"""
     id: str
     project_id: str
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
     task_type: str
     status: str
-    current_phase: Optional[str] = None
+    current_phase: str | None = None
     total_files: int = 0
     total_iterations: int = 0
     tokens_used: int = 0
@@ -69,14 +68,14 @@ class SearchAgentFindingItem(BaseModel):
     vulnerability_type: str
     severity: str
     title: str
-    description: Optional[str] = None
-    file_path: Optional[str] = None
-    line_start: Optional[int] = None
+    description: str | None = None
+    file_path: str | None = None
+    line_start: int | None = None
     status: str
     is_verified: bool = False
     has_poc: bool = False
-    ai_confidence: Optional[float] = None
-    verdict: Optional[str] = None  # confirmed, likely, uncertain, false_positive
+    ai_confidence: float | None = None
+    verdict: str | None = None  # confirmed, likely, uncertain, false_positive
     created_at: datetime
     updated_at: datetime
 
@@ -100,9 +99,9 @@ class SearchStats(BaseModel):
 
 class SearchResponse(BaseModel):
     """统一搜索响应"""
-    findings: List[SearchAgentFindingItem] = Field(default_factory=list)
-    tasks: List[SearchAgentTaskItem] = Field(default_factory=list)
-    projects: List[SearchProjectItem] = Field(default_factory=list)
+    findings: list[SearchAgentFindingItem] = Field(default_factory=list)
+    tasks: list[SearchAgentTaskItem] = Field(default_factory=list)
+    projects: list[SearchProjectItem] = Field(default_factory=list)
     total: SearchStats = Field(default_factory=SearchStats)
     keyword: str
     limit: int

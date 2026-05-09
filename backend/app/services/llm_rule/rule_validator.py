@@ -1,13 +1,14 @@
-import subprocess
-from pathlib import Path
 import json
-import tempfile
-from .patch_processor import PatchInfo
-from .config import Config
-import yaml
-import git
-from typing import Optional, Tuple, List
 import logging
+import subprocess
+import tempfile
+from pathlib import Path
+
+import git
+import yaml
+
+from .config import Config
+from .patch_processor import PatchInfo
 
 
 class RuleValidator:
@@ -15,8 +16,8 @@ class RuleValidator:
         self.config = config
 
     def check_existing_rules(
-        self, patch_info: PatchInfo, repo_path: Path, existing_rules: List[dict]
-    ) -> Tuple[bool, Optional[str]]:
+        self, patch_info: PatchInfo, repo_path: Path, existing_rules: list[dict]
+    ) -> tuple[bool, str | None]:
         """
         Check if any existing rules can already detect the vulnerability.
 
@@ -97,7 +98,7 @@ class RuleValidator:
             logging.error(f"Error checking existing rules: {e}", exc_info=True)
             return False, None
 
-    def _run_opengrep(self, rule_file: str, target_path: str) -> Tuple[list, Optional[str]]:
+    def _run_opengrep(self, rule_file: str, target_path: str) -> tuple[list, str | None]:
         """Run opengrep with better error classification."""
         try:
             result = subprocess.run(
@@ -153,7 +154,7 @@ class RuleValidator:
 
     def validate_rule(
         self, rule: dict, patch_info: PatchInfo, repo_path: Path
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Validate a generated rule using opengrep with improved error handling."""
         rule_file = None
         try:

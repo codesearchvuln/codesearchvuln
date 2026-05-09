@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, List
+from typing import Any
 from urllib.parse import urlparse
 
 HTTPS_ONLY_REPOSITORY_ERROR = "仅支持 HTTPS 仓库地址，不再支持 SSH 地址"
@@ -16,21 +16,21 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return text in {"1", "true", "yes", "on"}
 
 
-def _split_csv(raw_values: Any) -> List[str]:
+def _split_csv(raw_values: Any) -> list[str]:
     values = [str(item).strip() for item in str(raw_values or "").split(",")]
     return [item for item in values if item]
 
 
-def _split_hosts(raw_hosts: Any) -> List[str]:
+def _split_hosts(raw_hosts: Any) -> list[str]:
     return [item.lower() for item in _split_csv(raw_hosts)]
 
 
-def _split_prefixes(raw_prefixes: Any) -> List[str]:
+def _split_prefixes(raw_prefixes: Any) -> list[str]:
     return _split_csv(raw_prefixes)
 
 
-def _unique_keep_order(values: List[str]) -> List[str]:
-    deduped: List[str] = []
+def _unique_keep_order(values: list[str]) -> list[str]:
+    deduped: list[str] = []
     seen = set()
     for value in values:
         if value in seen:
@@ -60,7 +60,7 @@ def has_url_auth(url: str) -> bool:
     return bool(parsed.username or parsed.password)
 
 
-def _host_in_allow_list(host: str, allow_hosts: List[str]) -> bool:
+def _host_in_allow_list(host: str, allow_hosts: list[str]) -> bool:
     host_lower = str(host or "").strip().lower()
     if not host_lower or not allow_hosts:
         return False
@@ -78,7 +78,7 @@ def should_use_mirror(
     *,
     enabled: bool,
     allow_auth_url: bool,
-    allow_hosts: List[str],
+    allow_hosts: list[str],
 ) -> bool:
     text = str(url or "").strip()
     if not text or not enabled:
@@ -115,7 +115,7 @@ def get_mirror_candidates(
     allow_hosts: Any = None,
     allow_auth_url: Any = None,
     fallback_to_origin: Any = None,
-) -> List[str]:
+) -> list[str]:
     raw_url = str(original_url or "").strip()
     if not raw_url:
         return []
@@ -161,7 +161,7 @@ def get_mirror_candidates(
         if prefix_value:
             prefixes_value = [prefix_value]
 
-    candidates: List[str] = []
+    candidates: list[str] = []
     for prefix in prefixes_value:
         mirror_url = build_mirror_url(raw_url, prefix)
         if mirror_url:

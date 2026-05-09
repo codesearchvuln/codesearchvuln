@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal
-
+from typing import Any, Literal
 
 FlowEngine = Literal["ts_code2flow", "logic_graph"]
 
@@ -13,15 +12,15 @@ class FlowEvidence:
 
     path_found: bool = False
     path_score: float = 0.0
-    call_chain: List[str] = field(default_factory=list)
-    control_conditions: List[str] = field(default_factory=list)
-    taint_paths: List[str] = field(default_factory=list)
+    call_chain: list[str] = field(default_factory=list)
+    control_conditions: list[str] = field(default_factory=list)
+    taint_paths: list[str] = field(default_factory=list)
     entry_inferred: bool = False
-    blocked_reasons: List[str] = field(default_factory=list)
+    blocked_reasons: list[str] = field(default_factory=list)
     engine: FlowEngine = "ts_code2flow"
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "path_found": bool(self.path_found),
             "path_score": float(max(0.0, min(self.path_score, 1.0))),

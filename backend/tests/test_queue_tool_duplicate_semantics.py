@@ -3,16 +3,15 @@ import pytest
 from app.services.agent.business_logic_risk_queue import InMemoryBusinessLogicRiskQueue
 from app.services.agent.recon_risk_queue import InMemoryReconRiskQueue
 from app.services.agent.tools.business_logic_recon_queue_tools import (
-    PushBLRiskPointToQueueTool,
     PushBLRiskPointsBatchToQueueTool,
+    PushBLRiskPointToQueueTool,
 )
 from app.services.agent.tools.queue_tools import PushFindingToQueueTool
 from app.services.agent.tools.recon_queue_tools import (
-    PushRiskPointToQueueTool,
     PushRiskPointsBatchToQueueTool,
+    PushRiskPointToQueueTool,
 )
 from app.services.agent.vulnerability_queue import InMemoryVulnerabilityQueue
-
 
 TASK_ID = "duplicate-semantics"
 

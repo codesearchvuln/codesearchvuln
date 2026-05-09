@@ -5,11 +5,17 @@
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.search_service import SearchService
+
+from app.models.agent_task import (
+    AgentFinding,
+    AgentTask,
+    AgentTaskStatus,
+    FindingStatus,
+    VulnerabilitySeverity,
+)
 from app.models.project import Project
-from app.models.agent_task import AgentTask, AgentTaskStatus, VulnerabilitySeverity, FindingStatus
-from app.models.agent_task import AgentFinding
 from app.models.user import User
+from app.services.search_service import SearchService
 
 
 @pytest.mark.asyncio
@@ -26,7 +32,7 @@ async def test_search_projects(db: AsyncSession, test_user: User):
     )
     db.add(project)
     await db.commit()
-    
+
     # 搜索项目
     projects, total = await SearchService.search_projects(
         db=db,
@@ -35,7 +41,7 @@ async def test_search_projects(db: AsyncSession, test_user: User):
         limit=50,
         offset=0,
     )
-    
+
     assert total == 1
     assert len(projects) == 1
     assert projects[0].name == "测试安全项目"
@@ -59,7 +65,7 @@ async def test_search_findings(db: AsyncSession, test_user: User, test_project: 
     )
     db.add(finding)
     await db.commit()
-    
+
     # 搜索发现
     findings, total = await SearchService.search_findings(
         db=db,
@@ -68,7 +74,7 @@ async def test_search_findings(db: AsyncSession, test_user: User, test_project: 
         limit=50,
         offset=0,
     )
-    
+
     assert total == 1
     assert len(findings) == 1
     assert findings[0].title == "SQL 注入漏洞"
@@ -88,7 +94,7 @@ async def test_search_tasks(db: AsyncSession, test_user: User, test_project: Pro
     )
     db.add(task)
     await db.commit()
-    
+
     # 搜索任务
     tasks, total = await SearchService.search_tasks(
         db=db,
@@ -97,7 +103,7 @@ async def test_search_tasks(db: AsyncSession, test_user: User, test_project: Pro
         limit=50,
         offset=0,
     )
-    
+
     assert total == 1
     assert len(tasks) == 1
     assert tasks[0].name == "安全审计扫描"
@@ -120,7 +126,7 @@ async def test_search_all(db: AsyncSession, test_user: User, test_project: Proje
     )
     db.add(finding)
     await db.commit()
-    
+
     # 全局搜索
     result = await SearchService.search_all(
         db=db,
@@ -129,7 +135,7 @@ async def test_search_all(db: AsyncSession, test_user: User, test_project: Proje
         limit=50,
         offset=0,
     )
-    
+
     assert result["total"]["findings_total"] >= 1
     assert len(result["findings"]) >= 1
 
@@ -147,9 +153,9 @@ async def test_search_pagination(db: AsyncSession, test_user: User, test_project
             is_active=True,
         )
         db.add(project)
-    
+
     await db.commit()
-    
+
     # 第一页
     projects_page1, total = await SearchService.search_projects(
         db=db,
@@ -158,10 +164,10 @@ async def test_search_pagination(db: AsyncSession, test_user: User, test_project
         limit=2,
         offset=0,
     )
-    
+
     assert total >= 5
     assert len(projects_page1) == 2
-    
+
     # 第二页
     projects_page2, _ = await SearchService.search_projects(
         db=db,
@@ -170,7 +176,7 @@ async def test_search_pagination(db: AsyncSession, test_user: User, test_project
         limit=2,
         offset=2,
     )
-    
+
     assert len(projects_page2) == 2
     # 确保两页数据不同
     assert projects_page1[0].id != projects_page2[0].id
@@ -189,28 +195,28 @@ async def test_search_case_insensitive(db: AsyncSession, test_user: User):
     )
     db.add(project)
     await db.commit()
-    
+
     # 搜索：使用小写
     projects_lower, total_lower = await SearchService.search_projects(
         db=db,
         keyword="mysecurityproject",
         user_id=test_user.id,
     )
-    
+
     # 搜索：使用大写
     projects_upper, total_upper = await SearchService.search_projects(
         db=db,
         keyword="MYSECURITYPROJECT",
         user_id=test_user.id,
     )
-    
+
     # 搜索：使用混合大小写
     projects_mixed, total_mixed = await SearchService.search_projects(
         db=db,
         keyword="MySecurityProject",
         user_id=test_user.id,
     )
-    
+
     assert total_lower == total_upper == total_mixed == 1
     assert projects_lower[0].id == projects_upper[0].id == projects_mixed[0].id
 
@@ -228,14 +234,14 @@ async def test_search_partial_match(db: AsyncSession, test_user: User):
     )
     db.add(project)
     await db.commit()
-    
+
     # 模糊搜索
     projects, total = await SearchService.search_projects(
         db=db,
         keyword="Security",
         user_id=test_user.id,
     )
-    
+
     assert total == 1
     assert projects[0].name == "Deep Security Audit Tool"
 
@@ -249,7 +255,7 @@ async def test_search_finding_severity_sort(db: AsyncSession, test_user: User, t
         ("关键漏洞", VulnerabilitySeverity.CRITICAL),
         ("中危漏洞", VulnerabilitySeverity.MEDIUM),
     ]
-    
+
     for title, severity in findings_data:
         finding = AgentFinding(
             task_id=test_agent_task.id,
@@ -260,9 +266,9 @@ async def test_search_finding_severity_sort(db: AsyncSession, test_user: User, t
             is_verified=False,
         )
         db.add(finding)
-    
+
     await db.commit()
-    
+
     # 按严重度降序搜索
     findings, total = await SearchService.search_findings(
         db=db,
@@ -271,7 +277,7 @@ async def test_search_finding_severity_sort(db: AsyncSession, test_user: User, t
         sort_by="severity",
         sort_order="desc",
     )
-    
+
     assert total == 4
     # 应该按 CRITICAL > HIGH > MEDIUM > LOW 排序
     assert findings[0].severity == VulnerabilitySeverity.CRITICAL
@@ -289,7 +295,7 @@ async def test_search_empty_result(db: AsyncSession, test_user: User):
         keyword="不存在的项目名称xxxxxx",
         user_id=test_user.id,
     )
-    
+
     assert total == 0
     assert len(projects) == 0
 
@@ -305,7 +311,7 @@ async def test_search_includes_inactive_projects(db: AsyncSession, test_user: Us
         owner_id=test_user.id,
         is_active=True,
     )
-    
+
     # 创建已删除项目
     deleted_project = Project(
         name="已删除项目",
@@ -314,17 +320,17 @@ async def test_search_includes_inactive_projects(db: AsyncSession, test_user: Us
         owner_id=test_user.id,
         is_active=False,
     )
-    
+
     db.add(active_project)
     db.add(deleted_project)
     await db.commit()
-    
+
     # 搜索"项目"关键词
     projects, total = await SearchService.search_projects(
         db=db,
         keyword="项目",
         user_id=test_user.id,
     )
-    
+
     assert total == 2
     assert {project.name for project in projects} == {"活跃项目", "已删除项目"}

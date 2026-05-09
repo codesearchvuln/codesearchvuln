@@ -7,7 +7,6 @@ import stat
 import subprocess
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "scripts" / "release-bundle-contract.json"
 GENERATE_RELEASE_BRANCH_PATH = REPO_ROOT / "scripts" / "generate-release-branch.sh"

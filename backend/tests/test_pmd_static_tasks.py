@@ -1,8 +1,8 @@
 """PMD 静态扫描后端单元测试。"""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import json
 
 import pytest
 from fastapi import HTTPException

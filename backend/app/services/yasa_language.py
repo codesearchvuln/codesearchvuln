@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 YASA_SUPPORTED_LANGUAGES: tuple[str, ...] = (
     "java",
@@ -18,7 +18,7 @@ YASA_LANGUAGE_ERROR_TEMPLATE = (
     "不支持语言: {language}，YASA 仅支持 java/golang/typescript/python"
 )
 
-YASA_PROFILE_MAPPING: Dict[str, Dict[str, str]] = {
+YASA_PROFILE_MAPPING: dict[str, dict[str, str]] = {
     "python": {
         "language": "python",
         "checker_pack": "taint-flow-python-default",
@@ -41,7 +41,7 @@ YASA_PROFILE_MAPPING: Dict[str, Dict[str, str]] = {
     },
 }
 
-_YASA_LANGUAGE_ALIAS: Dict[str, str] = {
+_YASA_LANGUAGE_ALIAS: dict[str, str] = {
     "py": "python",
     "python": "python",
     "ts": "typescript",
@@ -58,14 +58,14 @@ _YASA_LANGUAGE_PRIORITY: tuple[str, ...] = (
     "python",
 )
 
-_YASA_LANGUAGE_SUFFIX_MAP: Dict[str, Tuple[str, ...]] = {
+_YASA_LANGUAGE_SUFFIX_MAP: dict[str, tuple[str, ...]] = {
     "python": (".py",),
     "typescript": (".ts", ".tsx"),
     "golang": (".go",),
     "java": (".java",),
 }
 
-_YASA_SUFFIX_LANGUAGE_MAP: Dict[str, str] = {}
+_YASA_SUFFIX_LANGUAGE_MAP: dict[str, str] = {}
 for _language, _suffixes in _YASA_LANGUAGE_SUFFIX_MAP.items():
     for _suffix in _suffixes:
         _YASA_SUFFIX_LANGUAGE_MAP[_suffix] = _language
@@ -86,13 +86,13 @@ _YASA_LANGUAGE_SCAN_SKIP_DIRS: set[str] = {
 MAX_YASA_LANGUAGE_DETECTION_FILES = 120000
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def parse_programming_languages(raw_languages: Any) -> List[str]:
+def parse_programming_languages(raw_languages: Any) -> list[str]:
     if isinstance(raw_languages, list):
         return [str(item).strip() for item in raw_languages if str(item).strip()]
 
@@ -125,10 +125,10 @@ def is_yasa_blocked_project_language(raw_languages: Any) -> bool:
 
 
 def normalize_yasa_language(
-    language: Optional[str],
+    language: str | None,
     *,
     allow_auto: bool,
-) -> Optional[str]:
+) -> str | None:
     normalized = str(language or "").strip().lower()
     if not normalized:
         return None
@@ -143,12 +143,12 @@ def normalize_yasa_language(
     raise ValueError(YASA_LANGUAGE_ERROR_TEMPLATE.format(language=normalized))
 
 
-def resolve_yasa_language_from_programming_languages(raw_languages: Any) -> Optional[str]:
+def resolve_yasa_language_from_programming_languages(raw_languages: Any) -> str | None:
     if is_yasa_blocked_project_language(raw_languages):
         return None
 
     candidates = parse_programming_languages(raw_languages)
-    mapped: List[str] = []
+    mapped: list[str] = []
     for item in candidates:
         normalized = str(item).strip().lower()
         resolved = _YASA_LANGUAGE_ALIAS.get(normalized)
@@ -164,7 +164,7 @@ def resolve_yasa_language_from_programming_languages(raw_languages: Any) -> Opti
     return mapped[0]
 
 
-def collect_yasa_language_counts_from_source_tree(source_root: Optional[str]) -> Dict[str, int]:
+def collect_yasa_language_counts_from_source_tree(source_root: str | None) -> dict[str, int]:
     normalized_root = str(source_root or "").strip()
     if not normalized_root:
         return {}
@@ -173,10 +173,10 @@ def collect_yasa_language_counts_from_source_tree(source_root: Optional[str]) ->
     if not root_path.exists() or not root_path.is_dir():
         return {}
 
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     scanned_files = 0
 
-    for current_root, dirs, files in os.walk(root_path):
+    for _current_root, dirs, files in os.walk(root_path):
         dirs[:] = [
             item
             for item in dirs
@@ -195,7 +195,7 @@ def collect_yasa_language_counts_from_source_tree(source_root: Optional[str]) ->
     return counts
 
 
-def resolve_yasa_language_from_source_tree(source_root: Optional[str]) -> Optional[str]:
+def resolve_yasa_language_from_source_tree(source_root: str | None) -> str | None:
     counts = collect_yasa_language_counts_from_source_tree(source_root)
     if not counts:
         return None
@@ -223,10 +223,10 @@ def resolve_yasa_language_from_source_tree(source_root: Optional[str]) -> Option
 
 def resolve_yasa_language_with_preference(
     *,
-    preferred_language: Optional[str],
+    preferred_language: str | None,
     programming_languages: Any,
-    source_root: Optional[str] = None,
-) -> Optional[str]:
+    source_root: str | None = None,
+) -> str | None:
     normalized_preference = normalize_yasa_language(preferred_language, allow_auto=True)
     if is_yasa_blocked_project_language(programming_languages):
         return None
@@ -238,7 +238,7 @@ def resolve_yasa_language_with_preference(
     return resolve_yasa_language_from_programming_languages(programming_languages)
 
 
-def resolve_yasa_language_profile(language: Optional[str]) -> Dict[str, str]:
+def resolve_yasa_language_profile(language: str | None) -> dict[str, str]:
     normalized = normalize_yasa_language(language, allow_auto=False)
     if not normalized:
         raise ValueError("未检测到可用于 YASA 的项目语言，请在创建时手动指定支持语言")

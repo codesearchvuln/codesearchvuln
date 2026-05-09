@@ -3,10 +3,9 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from app.core.config import settings
-
 
 CatalogType = Literal["tool-server", "skill-pack"]
 
@@ -15,9 +14,9 @@ CatalogType = Literal["tool-server", "skill-pack"]
 class DomainStatus:
     enabled: bool
     startup_ready: bool
-    startup_error: Optional[str] = None
+    startup_error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -28,20 +27,20 @@ class CatalogItem:
     type: CatalogType
     enabled: bool
     description: str
-    executionFunctions: List[str]
-    inputInterface: List[str]
-    outputInterface: List[str]
-    includedSkills: List[str]
-    verificationTools: List[str]
+    executionFunctions: list[str]
+    inputInterface: list[str]
+    outputInterface: list[str]
+    includedSkills: list[str]
+    verificationTools: list[str]
     source: str
     runtime_mode: str = "stdio_only"
-    backend: Optional[DomainStatus] = None
-    sandbox: Optional[DomainStatus] = None
+    backend: DomainStatus | None = None
+    sandbox: DomainStatus | None = None
     required: bool = True
     startup_ready: bool = True
-    startup_error: Optional[str] = None
+    startup_error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         output = asdict(self)
         if self.backend is not None:
             output["backend"] = self.backend.to_dict()
@@ -54,9 +53,9 @@ class CatalogItem:
         return output
 
 
-_CORE_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {}
+_CORE_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {}
 
-def _command_ready(command: str) -> tuple[bool, Optional[str]]:
+def _command_ready(command: str) -> tuple[bool, str | None]:
     executable = str(command or "").strip()
     if not executable:
         return False, "missing_command"
@@ -69,7 +68,7 @@ def _command_ready(command: str) -> tuple[bool, Optional[str]]:
     return False, "command_not_found"
 
 
-def _runtime_entry(runtime_policy: Optional[Dict[str, Any]], tool_id: str) -> Dict[str, Any]:
+def _runtime_entry(runtime_policy: dict[str, Any] | None, tool_id: str) -> dict[str, Any]:
     if isinstance(runtime_policy, dict):
         candidate = runtime_policy.get(tool_id)
         if isinstance(candidate, dict):
@@ -79,11 +78,11 @@ def _runtime_entry(runtime_policy: Optional[Dict[str, Any]], tool_id: str) -> Di
 
 def build_tool_catalog(
     *,
-    runtime_enabled_override: Optional[bool] = None,
-    runtime_policy: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+    runtime_enabled_override: bool | None = None,
+    runtime_policy: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     runtime_enabled = bool(getattr(settings, "TOOL_RUNTIME_ENABLED", True) if runtime_enabled_override is None else runtime_enabled_override)
-    catalog: List[Dict[str, Any]] = []
+    catalog: list[dict[str, Any]] = []
 
     for tool_id, definition in _CORE_TOOL_DEFINITIONS.items():
         policy = _runtime_entry(runtime_policy, tool_id)

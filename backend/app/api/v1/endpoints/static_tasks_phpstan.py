@@ -1,79 +1,33 @@
 import asyncio
-import hashlib
 import json
-import logging
 import os
-import uuid
 import shutil
-import subprocess
 import tempfile
-import zipfile
-from datetime import datetime, timezone
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-import yaml
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.bandit import BanditFinding, BanditScanTask
-from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
-from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanRuleState, PhpstanScanTask
-from app.models.project import Project
-from app.models.user import User
-from app.runtime.db_contract import unsupported_database_contract_message
-from app.schemas.gitleaks_rules import (
-    GitleaksRuleBatchUpdateRequest,
-    GitleaksRuleCreateRequest,
-    GitleaksRuleResponse,
-    GitleaksRuleUpdateRequest,
-)
-from app.schemas.opengrep import (
-    OpengrepRuleCreateRequest,
-    OpengrepRulePatchResponse,
-    OpengrepRuleTextCreateRequest,
-    OpengrepRuleTextResponse,
-    OpengrepRuleUpdateRequest,
-)
-from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
-from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
-from app.services.opengrep_confidence import (
-    count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
-    extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
-    extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
-    normalize_confidence as shared_normalize_confidence,
-)
-from app.services.rule import get_rule_by_patch, validate_generic_rule
-from app.services.upload.upload_manager import UploadManager
-
 from app.api.v1.endpoints.static_tasks_shared import (
-    _cleanup_incorrect_rules,
     _clear_scan_task_cancel,
-    copy_project_tree_to_scan_dir,
-    _dt_to_iso,
-    _ensure_opengrep_xdg_dirs,
     _get_project_root,
-    _get_user_config,
     _is_scan_task_cancelled,
-    _is_test_like_directory,
     _launch_static_background_job,
     _pop_scan_container,
     _register_scan_container,
     _release_request_db_session,
-    _normalize_llm_config_error_message,
-    _record_scan_progress,
     _request_scan_task_cancel,
-    _run_subprocess_with_tracking,
     _sync_task_scan_duration,
     _utc_now_iso,
-    _validate_user_llm_config,
     async_session_factory,
     cleanup_scan_workspace,
+    copy_project_tree_to_scan_dir,
     deps,
     ensure_scan_logs_dir,
     ensure_scan_meta_dir,
@@ -84,11 +38,15 @@ from app.api.v1.endpoints.static_tasks_shared import (
     logger,
     settings,
 )
-from app.services.project_metrics import project_metrics_refresher
 from app.db.static_finding_paths import (
     normalize_static_scan_file_path,
     resolve_static_finding_location,
 )
+from app.models.phpstan import PhpstanFinding, PhpstanRuleState, PhpstanScanTask
+from app.models.project import Project
+from app.models.user import User
+from app.runtime.db_contract import unsupported_database_contract_message
+from app.services.project_metrics import project_metrics_refresher
 from app.services.scanner_runner import ScannerRunSpec, run_scanner_container
 
 router = APIRouter()
@@ -97,7 +55,7 @@ class PhpstanScanTaskCreate(BaseModel):
     """创建 PHPStan 扫描任务请求"""
 
     project_id: str = Field(..., description="项目ID")
-    name: Optional[str] = Field(None, description="任务名称")
+    name: str | None = Field(None, description="任务名称")
     target_path: str = Field(".", description="扫描目标路径，相对于项目根目录")
     level: int = Field(8, ge=0, le=9, description="PHPStan 分析级别（0-9）")
 
@@ -114,9 +72,9 @@ class PhpstanScanTaskResponse(BaseModel):
     total_findings: int
     scan_duration_ms: int
     files_scanned: int
-    error_message: Optional[str]
+    error_message: str | None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -127,12 +85,12 @@ class PhpstanFindingResponse(BaseModel):
     id: str
     scan_task_id: str
     file_path: str
-    line: Optional[int]
-    resolved_file_path: Optional[str] = None
-    resolved_line_start: Optional[int] = None
+    line: int | None
+    resolved_file_path: str | None = None
+    resolved_line_start: int | None = None
     message: str
-    identifier: Optional[str]
-    tip: Optional[str]
+    identifier: str | None
+    tip: str | None
     status: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -150,7 +108,7 @@ def _build_phpstan_scan_task_response(task: PhpstanScanTask) -> PhpstanScanTaskR
         scan_duration_ms=int(task.scan_duration_ms or 0),
         files_scanned=int(task.files_scanned or 0),
         error_message=task.error_message,
-        created_at=task.created_at or datetime.now(timezone.utc),
+        created_at=task.created_at or datetime.now(UTC),
         updated_at=task.updated_at,
     )
 
@@ -165,11 +123,11 @@ class PhpstanRuleResponse(BaseModel):
     description_summary: str
     source_file: str
     source: str
-    source_content: Optional[str] = None
+    source_content: str | None = None
     is_active: bool
     is_deleted: bool
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class PhpstanRuleEnabledUpdateRequest(BaseModel):
@@ -177,10 +135,10 @@ class PhpstanRuleEnabledUpdateRequest(BaseModel):
 
 
 class PhpstanRuleBatchEnabledUpdateRequest(BaseModel):
-    rule_ids: Optional[List[str]] = None
-    source: Optional[str] = None
-    keyword: Optional[str] = None
-    current_is_active: Optional[bool] = None
+    rule_ids: list[str] | None = None
+    source: str | None = None
+    keyword: str | None = None
+    current_is_active: bool | None = None
     is_active: bool
 
 
@@ -189,22 +147,22 @@ class PhpstanRuleDeletedUpdateRequest(BaseModel):
 
 
 class PhpstanRuleBatchDeletedUpdateRequest(BaseModel):
-    rule_ids: Optional[List[str]] = None
-    source: Optional[str] = None
-    keyword: Optional[str] = None
-    current_is_deleted: Optional[bool] = None
+    rule_ids: list[str] | None = None
+    source: str | None = None
+    keyword: str | None = None
+    current_is_deleted: bool | None = None
     is_deleted: bool
 
 
 class PhpstanRuleUpdateRequest(BaseModel):
     """PHPStan 规则编辑请求（仅用于规则页展示字段）。"""
 
-    package: Optional[str] = None
-    repo: Optional[str] = None
-    name: Optional[str] = None
-    description_summary: Optional[str] = None
-    source_file: Optional[str] = None
-    source: Optional[str] = None
+    package: str | None = None
+    repo: str | None = None
+    name: str | None = None
+    description_summary: str | None = None
+    source_file: str | None = None
+    source: str | None = None
 
 
 class PhpstanRuleUpdateResponse(BaseModel):
@@ -219,7 +177,7 @@ def _normalize_phpstan_level(value: Any, *, fallback: int = 8) -> int:
     return max(0, min(9, parsed))
 
 
-def _parse_phpstan_output_payload(payload_text: str) -> Dict[str, Any]:
+def _parse_phpstan_output_payload(payload_text: str) -> dict[str, Any]:
     """解析 PHPStan JSON 输出，容忍前缀噪声并返回统一 dict。"""
     text = str(payload_text or "").strip()
     if not text:
@@ -231,7 +189,7 @@ def _parse_phpstan_output_payload(payload_text: str) -> Dict[str, Any]:
         parse_targets.append(text[first_object_index:])
 
     decoder = json.JSONDecoder()
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for candidate in parse_targets:
         try:
             output, _ = decoder.raw_decode(candidate)
@@ -263,7 +221,7 @@ def _phpstan_rule_sources_root_path() -> Path:
     return Path(__file__).resolve().parents[3] / "db" / "rules_phpstan" / "rule_sources"
 
 
-def _read_phpstan_rule_source_content(repo: str, source_file: str) -> Optional[str]:
+def _read_phpstan_rule_source_content(repo: str, source_file: str) -> str | None:
     # PHPStan rules integration: 仅用于规则详情源码展示，不参与扫描执行命令构建。
     repo_name = str(repo or "").strip()
     source_relative = str(source_file or "").strip()
@@ -284,7 +242,7 @@ def _read_phpstan_rule_source_content(repo: str, source_file: str) -> Optional[s
         return None
 
 
-def _load_phpstan_rules_snapshot() -> Dict[str, Any]:
+def _load_phpstan_rules_snapshot() -> dict[str, Any]:
     snapshot_path = _phpstan_rules_snapshot_path()
     if not snapshot_path.exists():
         raise HTTPException(status_code=500, detail=f"PHPStan 规则快照不存在: {snapshot_path}")
@@ -297,7 +255,7 @@ def _load_phpstan_rules_snapshot() -> Dict[str, Any]:
     return payload
 
 
-def _write_phpstan_rules_snapshot(payload: Dict[str, Any]) -> None:
+def _write_phpstan_rules_snapshot(payload: dict[str, Any]) -> None:
     """原子写回 PHPStan 规则快照，避免并发写导致脏文件。"""
     snapshot_path = _phpstan_rules_snapshot_path()
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,7 +281,7 @@ def _write_phpstan_rules_snapshot(payload: Dict[str, Any]) -> None:
         raise
 
 
-def _update_phpstan_snapshot_rule(rule_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+def _update_phpstan_snapshot_rule(rule_id: str, updates: dict[str, Any]) -> dict[str, Any]:
     """更新指定规则展示字段并写回快照。"""
     if not updates:
         raise ValueError("至少需要提供一个可更新字段")
@@ -333,7 +291,7 @@ def _update_phpstan_snapshot_rule(rule_id: str, updates: Dict[str, Any]) -> Dict
     if not isinstance(rules, list):
         raise ValueError("PHPStan 规则快照格式错误")
 
-    target_rule: Optional[Dict[str, Any]] = None
+    target_rule: dict[str, Any] | None = None
     for item in rules:
         if isinstance(item, dict) and str(item.get("id") or "") == rule_id:
             target_rule = item
@@ -351,13 +309,13 @@ def _update_phpstan_snapshot_rule(rule_id: str, updates: Dict[str, Any]) -> Dict
     return target_rule
 
 
-def _extract_phpstan_snapshot_rules() -> List[Dict[str, Any]]:
+def _extract_phpstan_snapshot_rules() -> list[dict[str, Any]]:
     payload = _load_phpstan_rules_snapshot()
     raw_rules = payload.get("rules")
     if not isinstance(raw_rules, list):
         return []
 
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for raw in raw_rules:
         if not isinstance(raw, dict):
             continue
@@ -380,7 +338,7 @@ def _extract_phpstan_snapshot_rules() -> List[Dict[str, Any]]:
     return normalized
 
 
-async def _load_phpstan_rule_states(db: AsyncSession) -> Dict[str, PhpstanRuleState]:
+async def _load_phpstan_rule_states(db: AsyncSession) -> dict[str, PhpstanRuleState]:
     try:
         result = await db.execute(select(PhpstanRuleState))
     except ProgrammingError as exc:
@@ -391,10 +349,10 @@ async def _load_phpstan_rule_states(db: AsyncSession) -> Dict[str, PhpstanRuleSt
 
 def _merge_phpstan_rule_payload(
     *,
-    snapshot_rules: List[Dict[str, Any]],
-    states_by_rule_id: Dict[str, PhpstanRuleState],
-) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = []
+    snapshot_rules: list[dict[str, Any]],
+    states_by_rule_id: dict[str, PhpstanRuleState],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
     for item in snapshot_rules:
         rule_id = item["id"]
         state = states_by_rule_id.get(rule_id)
@@ -470,7 +428,7 @@ _PHPSTAN_SECURITY_FALLBACK_KEYWORDS = (
 )
 
 
-def _is_phpstan_security_finding(message: Dict[str, Any]) -> bool:
+def _is_phpstan_security_finding(message: dict[str, Any]) -> bool:
     """判断 PHPStan 单条消息是否属于安全相关发现。"""
     text = " ".join(
         [
@@ -486,13 +444,13 @@ def _is_phpstan_security_finding(message: Dict[str, Any]) -> bool:
     return any(keyword in text for keyword in _PHPSTAN_SECURITY_FALLBACK_KEYWORDS)
 
 
-def _filter_phpstan_security_messages(messages: Any) -> Dict[str, List[Dict[str, Any]]]:
+def _filter_phpstan_security_messages(messages: Any) -> dict[str, list[dict[str, Any]]]:
     """过滤 PHPStan 消息列表，仅返回安全相关项并保留被过滤项计数能力。"""
     if not isinstance(messages, list):
         return {"kept": [], "dropped": []}
 
-    kept: List[Dict[str, Any]] = []
-    dropped: List[Dict[str, Any]] = []
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
     for item in messages:
         if not isinstance(item, dict):
             dropped.append({})
@@ -510,16 +468,16 @@ async def _execute_phpstan_scan(
     target_path: str,
     level: int = 8,
 ) -> None:
-    workspace_dir: Optional[Path] = None
-    active_container_id: Optional[str] = None
+    workspace_dir: Path | None = None
+    active_container_id: str | None = None
 
     async def _update_task_state(
         status: str,
         *,
-        error_message: Optional[str] = None,
-        findings: Optional[List[Dict[str, Any]]] = None,
+        error_message: str | None = None,
+        findings: list[dict[str, Any]] | None = None,
         files_scanned: int = 0,
-    ) -> Optional[PhpstanScanTask]:
+    ) -> PhpstanScanTask | None:
         async with async_session_factory() as db:
             result = await db.execute(select(PhpstanScanTask).where(PhpstanScanTask.id == task_id))
             task = result.scalar_one_or_none()
@@ -640,8 +598,8 @@ async def _execute_phpstan_scan(
             logger.error(f"PHPStan task {task_id} failed: {error_message}")
             return
 
-        payload: Dict[str, Any] = {}
-        parse_error: Optional[Exception] = None
+        payload: dict[str, Any] = {}
+        parse_error: Exception | None = None
         try:
             payload_text = (
                 report_file.read_text(encoding="utf-8", errors="ignore")
@@ -674,9 +632,9 @@ async def _execute_phpstan_scan(
             return
 
         files_payload = payload.get("files")
-        files_map: Dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
+        files_map: dict[str, Any] = files_payload if isinstance(files_payload, dict) else {}
 
-        persisted_findings: List[Dict[str, Any]] = []
+        persisted_findings: list[dict[str, Any]] = []
         raw_finding_count = 0
         dropped_finding_count = 0
         for file_path, file_data in files_map.items():
@@ -737,11 +695,11 @@ async def _execute_phpstan_scan(
                 logger.warning(f"Failed to clean up temporary directory {project_root}: {e}")
 
 
-@router.get("/phpstan/rules", response_model=List[PhpstanRuleResponse])
+@router.get("/phpstan/rules", response_model=list[PhpstanRuleResponse])
 async def list_phpstan_rules(
-    is_active: Optional[bool] = Query(None, description="按启用状态过滤"),
-    source: Optional[str] = Query(None, description="按来源过滤"),
-    keyword: Optional[str] = Query(None, description="按名称/类名/描述/包关键词过滤"),
+    is_active: bool | None = Query(None, description="按启用状态过滤"),
+    source: str | None = Query(None, description="按来源过滤"),
+    keyword: str | None = Query(None, description="按名称/类名/描述/包关键词过滤"),
     deleted: str = Query("false", description="软删除筛选：false(默认)/true/all"),
     skip: int = Query(0, ge=0),
     limit: int = Query(1000, ge=1, le=2000),
@@ -761,7 +719,7 @@ async def list_phpstan_rules(
     deleted_text = str(deleted or "false").strip().lower()
     if deleted_text not in {"false", "true", "all"}:
         raise HTTPException(status_code=400, detail="deleted 必须为 false/true/all")
-    filtered: List[Dict[str, Any]] = []
+    filtered: list[dict[str, Any]] = []
     for item in merged_rules:
         if deleted_text != "all":
             target_deleted = deleted_text == "true"
@@ -821,7 +779,7 @@ async def update_phpstan_rule(
     if rule_id not in known_rule_ids:
         raise HTTPException(status_code=404, detail="PHPStan 规则不存在")
 
-    updates: Dict[str, Any] = {}
+    updates: dict[str, Any] = {}
     if request.package is not None:
         updates["package"] = str(request.package).strip()
     if request.repo is not None:
@@ -916,7 +874,7 @@ async def batch_update_phpstan_rules_enabled(
     rule_ids_filter = set(request.rule_ids or []) if request.rule_ids else None
     source_text = str(request.source or "").strip()
     keyword_text = str(request.keyword or "").strip().lower()
-    selected_rule_ids: List[str] = []
+    selected_rule_ids: list[str] = []
 
     for item in merged_rules:
         if bool(item["is_deleted"]):
@@ -1090,7 +1048,7 @@ async def _batch_update_phpstan_rules_deleted(
     rule_ids_filter = set(request.rule_ids or []) if request.rule_ids else None
     source_text = str(request.source or "").strip()
     keyword_text = str(request.keyword or "").strip().lower()
-    selected_rule_ids: List[str] = []
+    selected_rule_ids: list[str] = []
 
     for item in merged_rules:
         if rule_ids_filter is not None and item["id"] not in rule_ids_filter:
@@ -1198,9 +1156,9 @@ async def create_phpstan_scan(
     return response
 
 
-@router.get("/phpstan/tasks", response_model=List[PhpstanScanTaskResponse])
+@router.get("/phpstan/tasks", response_model=list[PhpstanScanTaskResponse])
 async def list_phpstan_tasks(
-    project_id: Optional[str] = Query(None, description="按项目ID过滤"),
+    project_id: str | None = Query(None, description="按项目ID过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -1273,10 +1231,10 @@ async def delete_phpstan_task(
     return {"message": "任务已删除", "task_id": task_id}
 
 
-@router.get("/phpstan/tasks/{task_id}/findings", response_model=List[PhpstanFindingResponse])
+@router.get("/phpstan/tasks/{task_id}/findings", response_model=list[PhpstanFindingResponse])
 async def get_phpstan_findings(
     task_id: str,
-    status: Optional[str] = Query(None, description="按状态过滤"),
+    status: str | None = Query(None, description="按状态过滤"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

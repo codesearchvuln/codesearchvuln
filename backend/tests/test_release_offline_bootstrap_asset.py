@@ -466,7 +466,7 @@ def test_offline_bootstrap_deploy_prefers_existing_release_root_over_sibling_arc
     assert result.returncode == 0, combined_output
     log_text = (workdir / "offline-up.log").read_text(encoding="utf-8")
     assert f"cwd={release_root}" in log_text
-    assert f"args=--deploy" not in log_text
+    assert "args=--deploy" not in log_text
 
 
 def test_offline_bootstrap_deploy_supports_existing_release_root_with_bundles_in_images_dir(tmp_path: Path) -> None:

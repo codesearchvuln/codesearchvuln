@@ -4,23 +4,23 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
-from app.schemas.opengrep import OpengrepRuleCreateRequest
 from app.core.config import settings
+from app.schemas.opengrep import OpengrepRuleCreateRequest
 
 from .llm_rule.config import Config
 from .llm_rule.git_manager import GitManager
 from .llm_rule.llm_client import LLMClient
-from .llm_rule.patch_processor import PatchInfo, PatchProcessor
+from .llm_rule.patch_processor import PatchProcessor
 from .llm_rule.rule_manager import RuleManager
 from .llm_rule.rule_validator import RuleValidator
 
 
 class AutoGrep:
-    def __init__(self, config: Config, user_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Config, user_config: dict[str, Any] | None = None):
         self.config = config
         self.rule_manager = RuleManager(config)
         self.patch_processor = PatchProcessor(config)
@@ -28,11 +28,11 @@ class AutoGrep:
         self.git_manager = GitManager(config)
         self.llm_client = LLMClient(user_config=user_config)
 
-    async def process_patch(self, patch_file: Path) -> Optional[Dict[str, Any]]:
+    async def process_patch(self, patch_file: Path) -> dict[str, Any] | None:
         """Process a single patch file with improved rule checking."""
         repo_path = None
         patch_info = None
-        attempts: List[Dict[str, Any]] = []
+        attempts: list[dict[str, Any]] = []
         # Check if patch has already been processed
         if self.config.cache_manager.is_patch_processed(patch_file.name):
             logging.info(f"Skipping already processed patch: {patch_file.name}")
@@ -268,7 +268,7 @@ class AutoGrep:
 
         # Process different repos in parallel using asyncio
         repo_tasks = []
-        for repo_key, patches in repo_patches.items():
+        for _repo_key, patches in repo_patches.items():
             task = self._process_repo_patches(patches)
             repo_tasks.append(task)
 
@@ -282,10 +282,10 @@ class AutoGrep:
 
 async def get_rule_by_patch(
     request: OpengrepRuleCreateRequest,
-    user_config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    user_config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     from .llm_rule.repo_cache_manager import GlobalRepoCacheManager
-    
+
     repo_owner = request.repo_owner
     repo_name = request.repo_name
     commit_hash = request.commit_hash
@@ -294,18 +294,18 @@ async def get_rule_by_patch(
     # 创建临时目录来存储 patch 和生成的规则
     # 注意: Git 克隆缓存会保留在全局缓存中，不在这个临时目录中
     temp_dir = tempfile.mkdtemp(prefix="patch_rule_")
-    
+
     try:
         # 创建临时patch文件
         temp_patches_dir = Path(temp_dir) / "patches"
         temp_patches_dir.mkdir(parents=True, exist_ok=True)
-        
+
         temp_file = temp_patches_dir / f"github.com_{repo_owner}_{repo_name}_{commit_hash}.patch"
         temp_file.write_text(commit_content)
 
         # 检查是否有现有的项目缓存
         cached_repo_dir = GlobalRepoCacheManager.get_repo_cache(repo_owner, repo_name)
-        
+
         # 创建Config并指向合适的目录
         config = Config(
             max_files_changed=1,
@@ -320,7 +320,7 @@ async def get_rule_by_patch(
             # 创建临时缓存目录，后续会注册到全局缓存
             config.repos_cache_dir = Path(temp_dir) / "cache" / "repos"
             config.repos_cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         config.patches_dir = temp_patches_dir
         config.generated_rules_dir = Path(temp_dir) / "generated_rules"
         config.rules_dir = Path(temp_dir) / "rules"
@@ -331,7 +331,7 @@ async def get_rule_by_patch(
         config.generated_rules_dir.mkdir(parents=True, exist_ok=True)
         config.repos_cache_dir.mkdir(parents=True, exist_ok=True)
         config.rules_dir.mkdir(parents=True, exist_ok=True)
-        
+
         try:
             autogen = AutoGrep(config, user_config=user_config)
             logging.info("Starting AutoGrep run for single patch...")
@@ -345,7 +345,7 @@ async def get_rule_by_patch(
                     global_cache_base = Path(settings.CACHE_DIR) / "repos"
                     global_cache_base.mkdir(parents=True, exist_ok=True)
                     global_repo_cache = global_cache_base / f"{repo_owner}_{repo_name}".replace("/", "_")
-                    
+
                     if not global_repo_cache.exists():
                         try:
                             # 尝试将临时缓存移动到全局位置
@@ -358,7 +358,7 @@ async def get_rule_by_patch(
                     else:
                         # 全局位置已存在，清理临时的
                         shutil.rmtree(repo_cache_path, ignore_errors=True)
-                        logging.info(f"全局缓存已存在，使用现有缓存")
+                        logging.info("全局缓存已存在，使用现有缓存")
 
             if result:
                 patch_info = result.get("patch_info")
@@ -411,7 +411,7 @@ async def get_rule_by_patch(
 
 def _normalize_rule_yaml(
     rule_yaml: str, llm_client: LLMClient
-) -> Tuple[Optional[str], Optional[dict], Optional[str]]:
+) -> tuple[str | None, dict | None, str | None]:
     cleaned = llm_client.clean_yaml_text(rule_yaml)
     if not cleaned:
         return None, None, "规则YAML格式错误"
@@ -433,7 +433,7 @@ def _normalize_rule_yaml(
     return cleaned, rule, None
 
 
-def _validate_rule_schema_generic(rule: dict) -> Tuple[bool, Optional[str]]:
+def _validate_rule_schema_generic(rule: dict) -> tuple[bool, str | None]:
     if not isinstance(rule, dict):
         return False, "规则结构不合法"
 
@@ -464,7 +464,7 @@ def _validate_rule_schema_generic(rule: dict) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
-async def validate_generic_rule(rule_yaml: str) -> Dict[str, Any]:
+async def validate_generic_rule(rule_yaml: str) -> dict[str, Any]:
     llm_client = LLMClient()
     cleaned, rule, error = _normalize_rule_yaml(rule_yaml, llm_client)
     if error:

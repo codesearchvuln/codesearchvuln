@@ -4,9 +4,9 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Optional
 
 import docker
 
@@ -20,6 +20,7 @@ _CONTAINER_POLL_INTERVAL_S = 5
 _PROGRESS_LOG_INTERVAL_S = 30
 DOCKER_EXCEPTION = getattr(getattr(docker, "errors", None), "DockerException", Exception)
 DOCKER_NOT_FOUND = getattr(getattr(docker, "errors", None), "NotFound", Exception)
+DOCKER_IMAGE_NOT_FOUND = getattr(getattr(docker, "errors", None), "ImageNotFound", DOCKER_NOT_FOUND)
 
 
 class ScannerCancelledError(Exception):
@@ -62,7 +63,7 @@ class ScannerRunSpec:
     workspace_dir: str
     command: list[str]
     timeout_seconds: int
-    env: Dict[str, str]
+    env: dict[str, str]
     expected_exit_codes: list[int] = field(default_factory=lambda: [0])
     artifact_paths: list[str] = field(default_factory=list)
     capture_stdout_path: str | None = None
@@ -154,7 +155,7 @@ def _rewrite_runner_command(command: list[str], workspace: Path) -> list[str]:
     return [_rewrite_mount_path(part, workspace) for part in command]
 
 
-def _rewrite_runner_env(env: Dict[str, str], workspace: Path) -> Dict[str, str]:
+def _rewrite_runner_env(env: dict[str, str], workspace: Path) -> dict[str, str]:
     return {key: _rewrite_mount_path(str(value), workspace) for key, value in dict(env).items()}
 
 
@@ -168,7 +169,7 @@ def run_scanner_container_sync(
     stderr_log_path = logs_dir / "stderr.log"
     runner_meta_path = meta_dir / "runner.json"
     container = None
-    container_id: Optional[str] = None
+    container_id: str | None = None
     expected_exit_codes = {int(code) for code in (spec.expected_exit_codes or [0])}
 
     try:
@@ -177,6 +178,15 @@ def run_scanner_container_sync(
         rewritten_env = _rewrite_runner_env(spec.env, runner_workspace)
         workspace_volume = _scan_workspace_volume()
         client = docker.from_env()
+        images = getattr(client, "images", None)
+        image_get = getattr(images, "get", None)
+        if callable(image_get):
+            try:
+                image_get(spec.image)
+            except (DOCKER_NOT_FOUND, DOCKER_IMAGE_NOT_FOUND) as exc:
+                raise RuntimeError(
+                    f"scanner runner image is not available locally: {spec.image}"
+                ) from exc
         container = client.containers.run(
             spec.image,
             rewritten_command,

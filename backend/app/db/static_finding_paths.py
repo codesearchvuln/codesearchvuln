@@ -2,9 +2,8 @@ import os
 import posixpath
 import re
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional, Set
-
 
 _PATH_SEPARATORS_RE = re.compile(r"/+")
 _LIKELY_PROJECT_ROOT_SEGMENTS = {
@@ -45,7 +44,7 @@ def _normalize_relative_path(path_value: str) -> str:
 
 def normalize_static_scan_file_path(
     path_value: str,
-    project_root: Optional[str],
+    project_root: str | None,
 ) -> str:
     normalized = _normalize_path_text(path_value)
     if not normalized:
@@ -67,7 +66,7 @@ def normalize_static_scan_file_path(
     return _normalize_relative_path(normalized)
 
 
-def normalize_resolved_line_start(line_value: object) -> Optional[int]:
+def normalize_resolved_line_start(line_value: object) -> int | None:
     if isinstance(line_value, bool) or line_value is None:
         return None
     if isinstance(line_value, (int, float)):
@@ -82,12 +81,12 @@ def normalize_resolved_line_start(line_value: object) -> Optional[int]:
 
 
 def resolve_static_finding_location(
-    file_path: Optional[str],
+    file_path: str | None,
     *,
     line_start: object = None,
-    project_root: Optional[str] = None,
-    known_relative_paths: Optional[Iterable[str]] = None,
-) -> tuple[Optional[str], Optional[int]]:
+    project_root: str | None = None,
+    known_relative_paths: Iterable[str] | None = None,
+) -> tuple[str | None, int | None]:
     normalized_line = normalize_resolved_line_start(line_start)
     raw_file_path = str(file_path or "").strip()
     if not raw_file_path:
@@ -215,7 +214,7 @@ def build_zip_member_path_candidates(file_path: str) -> list[str]:
 def resolve_zip_member_path(
     file_path: str,
     known_relative_paths: Iterable[str],
-) -> Optional[str]:
+) -> str | None:
     normalized_known = {
         _normalize_relative_path(item)
         for item in known_relative_paths
@@ -230,12 +229,12 @@ def resolve_zip_member_path(
 def resolve_legacy_static_finding_path(
     file_path: str,
     known_relative_paths: Iterable[str],
-) -> Optional[str]:
+) -> str | None:
     return resolve_zip_member_path(file_path, known_relative_paths)
 
 
-def collect_zip_relative_paths(zip_path: str | Path) -> Set[str]:
-    normalized_paths: Set[str] = set()
+def collect_zip_relative_paths(zip_path: str | Path) -> set[str]:
+    normalized_paths: set[str] = set()
     with zipfile.ZipFile(Path(zip_path), "r") as archive:
         for member in archive.infolist():
             if member.is_dir():

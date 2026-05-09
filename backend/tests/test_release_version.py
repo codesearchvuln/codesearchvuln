@@ -4,7 +4,6 @@ import json
 import subprocess
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE_VERSION_SCRIPT = REPO_ROOT / "scripts" / "release_version.py"
 

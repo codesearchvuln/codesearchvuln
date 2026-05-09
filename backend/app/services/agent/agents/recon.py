@@ -10,18 +10,16 @@ LLM 是真正的大脑！
 类型: ReAct (真正的!)
 """
 
-import asyncio
 import ast
+import asyncio
 import json
 import logging
 import re
-from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass
+from typing import Any
 
 from app.services.json_safe import dump_json_safe
 
-from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
-from .react_parser import parse_react_response
 from ..json_parser import AgentJsonParser
 from ..workflow.recon_models import (
     ProjectReconModel,
@@ -29,6 +27,8 @@ from ..workflow.recon_models import (
     build_project_recon_model,
     merge_recon_module_results,
 )
+from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent, TaskHandoff
+from .react_parser import parse_react_response
 
 logger = logging.getLogger(__name__)
 
@@ -138,27 +138,27 @@ summary: <工具返回的 summary 与下游分析建议>
 class ReconStep:
     """信息收集步骤"""
     thought: str
-    action: Optional[str] = None
-    action_input: Optional[Dict] = None
-    observation: Optional[str] = None
+    action: str | None = None
+    action_input: dict | None = None
+    observation: str | None = None
     is_final: bool = False
-    final_answer: Optional[Dict] = None
+    final_answer: dict | None = None
 
 
 class ReconAgent(BaseAgent):
     """
     信息收集 Agent - LLM 驱动版
-    
+
     LLM 全程参与，自主决定：
     1. 收集什么信息
     2. 使用什么工具
     3. 何时足够
     """
-    
+
     def __init__(
         self,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
     ):
         # 仅注入运行时白名单，避免提示词指导调用不存在工具
@@ -172,7 +172,7 @@ class ReconAgent(BaseAgent):
             "Action 必须是白名单中的工具名，Action Input 必须是 JSON 对象。\n"
             "禁止使用 `## Action`/`## Action Input` 标题样式。"
         )
-        
+
         config = AgentConfig(
             name="Recon",
             agent_type=AgentType.RECON,
@@ -181,24 +181,24 @@ class ReconAgent(BaseAgent):
             system_prompt=full_system_prompt,
         )
         super().__init__(config, llm_service, tools, event_emitter)
-        
-        self._conversation_history: List[Dict[str, str]] = []
-        self._steps: List[ReconStep] = []
-        self._recon_queue_snapshot: Dict[str, Any] = {}
-        self._risk_points_pushed: List[Dict[str, Any]] = []
-        self._risk_point_identities: Set[Tuple[str, int, str, str, str, str, str, str, str]] = set()
-        self._observed_input_surfaces: List[str] = []
-        self._observed_trust_boundaries: List[str] = []
-        self._observed_target_files: List[str] = []
-        self._coverage_directories: List[str] = []
-        self._coverage_files_discovered: List[str] = []
-        self._coverage_files_read: List[str] = []
-        self._latest_tool_module_results: List[Dict[str, Any]] = []
-        self._latest_tool_project_model: Dict[str, Any] = {}
+
+        self._conversation_history: list[dict[str, str]] = []
+        self._steps: list[ReconStep] = []
+        self._recon_queue_snapshot: dict[str, Any] = {}
+        self._risk_points_pushed: list[dict[str, Any]] = []
+        self._risk_point_identities: set[tuple[str, int, str, str, str, str, str, str, str]] = set()
+        self._observed_input_surfaces: list[str] = []
+        self._observed_trust_boundaries: list[str] = []
+        self._observed_target_files: list[str] = []
+        self._coverage_directories: list[str] = []
+        self._coverage_files_discovered: list[str] = []
+        self._coverage_files_read: list[str] = []
+        self._latest_tool_module_results: list[dict[str, Any]] = []
+        self._latest_tool_project_model: dict[str, Any] = {}
         self._subagent_plan_seen = False
         self._subagent_run_seen = False
         self._subagent_last_plan_module_count = 0
-    
+
     def _parse_llm_response(self, response: str) -> ReconStep:
         """解析 LLM 响应（共享 ReAct 解析器）"""
         parsed = parse_react_response(
@@ -222,11 +222,11 @@ class ReconAgent(BaseAgent):
         return step
 
     @staticmethod
-    def _normalize_string_list(value: Any, *, limit: int = 12) -> List[str]:
+    def _normalize_string_list(value: Any, *, limit: int = 12) -> list[str]:
         if value in (None, "", [], {}):
             return []
         candidates = value if isinstance(value, list) else [value]
-        normalized: List[str] = []
+        normalized: list[str] = []
         for item in candidates:
             text = str(item or "").strip()
             if not text or text in normalized:
@@ -237,7 +237,7 @@ class ReconAgent(BaseAgent):
         return normalized
 
     @staticmethod
-    def _safe_positive_int(value: Any) -> Optional[int]:
+    def _safe_positive_int(value: Any) -> int | None:
         try:
             parsed = int(value)
         except Exception:
@@ -245,14 +245,14 @@ class ReconAgent(BaseAgent):
         return parsed if parsed > 0 else None
 
     @staticmethod
-    def _safe_nonnegative_int(value: Any) -> Optional[int]:
+    def _safe_nonnegative_int(value: Any) -> int | None:
         try:
             parsed = int(value)
         except Exception:
             return None
         return parsed if parsed >= 0 else None
 
-    def _record_subagent_tool_progress(self, metadata: Dict[str, Any]) -> str:
+    def _record_subagent_tool_progress(self, metadata: dict[str, Any]) -> str:
         if not isinstance(metadata, dict):
             return ""
         action = str(metadata.get("action") or "").strip().lower()
@@ -268,9 +268,9 @@ class ReconAgent(BaseAgent):
     def _validate_host_completion_gate(
         self,
         *,
-        final_result: Dict[str, Any],
+        final_result: dict[str, Any],
         in_module_worker_mode: bool,
-    ) -> Tuple[bool, List[str]]:
+    ) -> tuple[bool, list[str]]:
         if in_module_worker_mode:
             return True, []
         if "run_recon_subagent" not in self.tools:
@@ -293,7 +293,7 @@ class ReconAgent(BaseAgent):
             f"当前只完成模块规划{planned_hint}，不能视为 Recon 完成。"
         ]
 
-    def _build_host_continue_prompt(self, missing_items: List[str]) -> str:
+    def _build_host_continue_prompt(self, missing_items: list[str]) -> str:
         checklist = "\n".join(f"- {item}" for item in missing_items[:6])
         return (
             "当前 Recon Host 任务尚未完成，暂不接受 Final Answer。\n"
@@ -310,7 +310,7 @@ class ReconAgent(BaseAgent):
     def _normalize_risk_point_text(value: Any) -> str:
         return " ".join(str(value or "").strip().lower().split())
 
-    def _risk_point_identity(self, point: Dict[str, Any]) -> Tuple[str, int, str, str, str, str, str, str, str]:
+    def _risk_point_identity(self, point: dict[str, Any]) -> tuple[str, int, str, str, str, str, str, str, str]:
         return (
             str(point.get("file_path") or "").strip().lower(),
             int(point.get("line_start") or 1),
@@ -358,7 +358,7 @@ class ReconAgent(BaseAgent):
         self._append_unique(self._coverage_files_read, normalized)
         self._remember_target_file(normalized)
 
-    def _normalize_risk_point(self, candidate: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_risk_point(self, candidate: Any) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):
             return None
         file_path = str(candidate.get("file_path") or "").strip()
@@ -413,7 +413,7 @@ class ReconAgent(BaseAgent):
 
         return normalized
 
-    def _parse_risk_area(self, area: str) -> Optional[Dict[str, Any]]:
+    def _parse_risk_area(self, area: str) -> dict[str, Any] | None:
         text = str(area or "").strip()
         if not text:
             return None
@@ -469,8 +469,8 @@ class ReconAgent(BaseAgent):
             return "hardcoded_secret"
         return "potential_issue"
 
-    def _extract_risk_points(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
-        points: List[Dict[str, Any]] = []
+    def _extract_risk_points(self, result: dict[str, Any]) -> list[dict[str, Any]]:
+        points: list[dict[str, Any]] = []
         seen: set[tuple[str, int, str]] = set()
         if isinstance(result.get("initial_findings"), list):
             for item in result.get("initial_findings", []):
@@ -495,10 +495,10 @@ class ReconAgent(BaseAgent):
                 points.append(parsed)
         return points
 
-    def _ensure_risk_points(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _ensure_risk_points(self, result: dict[str, Any]) -> list[dict[str, Any]]:
         points = result.get("risk_points")
         if isinstance(points, list) and points:
-            normalized_points: List[Dict[str, Any]] = []
+            normalized_points: list[dict[str, Any]] = []
             for item in points:
                 normalized = self._normalize_risk_point(item)
                 if normalized:
@@ -509,7 +509,7 @@ class ReconAgent(BaseAgent):
         result["risk_points"] = extracted
         return extracted
 
-    def _track_risk_point(self, candidate: Any) -> Optional[Dict[str, Any]]:
+    def _track_risk_point(self, candidate: Any) -> dict[str, Any] | None:
         normalized = self._normalize_risk_point(candidate)
         if not normalized:
             return None
@@ -525,9 +525,9 @@ class ReconAgent(BaseAgent):
             self._remember_target_file(target_file)
         return normalized
 
-    def _merge_risk_points(self, *sources: Any) -> List[Dict[str, Any]]:
-        merged: List[Dict[str, Any]] = []
-        seen: Set[Tuple[str, int, str, str, str, str, str, str, str]] = set()
+    def _merge_risk_points(self, *sources: Any) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, int, str, str, str, str, str, str, str]] = set()
         for source in sources:
             if not isinstance(source, list):
                 continue
@@ -542,7 +542,7 @@ class ReconAgent(BaseAgent):
                 merged.append(normalized)
         return merged
 
-    def _build_coverage_summary(self) -> Dict[str, Any]:
+    def _build_coverage_summary(self) -> dict[str, Any]:
         return {
             "directories_scanned": self._coverage_directories[:40],
             "files_discovered": self._coverage_files_discovered[:400],
@@ -554,7 +554,7 @@ class ReconAgent(BaseAgent):
             "tracker_built": False,
         }
 
-    def _apply_runtime_recon_state(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _apply_runtime_recon_state(self, result: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(result, dict):
             return result
 
@@ -607,7 +607,7 @@ class ReconAgent(BaseAgent):
         result["coverage_summary"] = self._build_coverage_summary()
         return result
 
-    async def _update_coverage_from_last_tool(self, action_name: str, action_input: Dict[str, Any]) -> None:
+    async def _update_coverage_from_last_tool(self, action_name: str, action_input: dict[str, Any]) -> None:
         context = getattr(self, "_last_successful_tool_context", None) or {}
         if str(context.get("tool_name") or "") != str(action_name or ""):
             return
@@ -675,7 +675,7 @@ class ReconAgent(BaseAgent):
                 if file_path not in self._coverage_files_discovered:
                     self._remember_discovered_file(file_path)
 
-    def _track_live_push_action(self, action_name: str, action_input: Dict[str, Any], observation: Any) -> None:
+    def _track_live_push_action(self, action_name: str, action_input: dict[str, Any], observation: Any) -> None:
         payload = self._parse_tool_output(observation)
         if action_name == "push_risk_point_to_queue":
             if isinstance(payload, dict) and payload.get("enqueue_status") in {"enqueued", "duplicate_skipped"}:
@@ -700,7 +700,7 @@ class ReconAgent(BaseAgent):
             for candidate in candidates:
                 self._track_risk_point(candidate)
 
-    async def _push_risk_points_to_queue(self, risk_points: List[Dict[str, Any]]):
+    async def _push_risk_points_to_queue(self, risk_points: list[dict[str, Any]]):
         if not risk_points:
             return
         if "push_risk_point_to_queue" not in self.tools and "push_risk_points_to_queue" not in self.tools:
@@ -760,7 +760,7 @@ class ReconAgent(BaseAgent):
         else:
             self._recon_queue_snapshot = {"raw": observation}
 
-    async def _sync_recon_queue(self, result: Dict[str, Any]):
+    async def _sync_recon_queue(self, result: dict[str, Any]):
         if not isinstance(result, dict):
             return
         result = self._apply_runtime_recon_state(result)
@@ -772,7 +772,7 @@ class ReconAgent(BaseAgent):
 
     async def _sync_or_capture_recon_queue(
         self,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         *,
         in_module_worker_mode: bool,
     ) -> None:
@@ -791,7 +791,7 @@ class ReconAgent(BaseAgent):
             result["recon_queue_status"] = self._recon_queue_snapshot
             return
         await self._sync_recon_queue(result)
-    
+
     def _parse_tool_output(self, raw_output: Any) -> Any:
         if isinstance(raw_output, dict) or isinstance(raw_output, list):
             return raw_output
@@ -809,10 +809,10 @@ class ReconAgent(BaseAgent):
                 return {}
 
     @staticmethod
-    def _normalize_module_results_payload(value: Any) -> List[Dict[str, Any]]:
+    def _normalize_module_results_payload(value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
-        normalized: List[Dict[str, Any]] = []
+        normalized: list[dict[str, Any]] = []
         for item in value:
             if isinstance(item, dict):
                 normalized.append(dict(item))
@@ -827,9 +827,9 @@ class ReconAgent(BaseAgent):
                     normalized.append(payload)
         return normalized
 
-    def _merge_module_results_payload(self, *sources: Any) -> List[Dict[str, Any]]:
-        merged: List[Dict[str, Any]] = []
-        seen: Set[str] = set()
+    def _merge_module_results_payload(self, *sources: Any) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
         for source in sources:
             for item in self._normalize_module_results_payload(source):
                 module_id = str(item.get("module_id") or item.get("module", "")).strip() or "__unknown__"
@@ -839,7 +839,7 @@ class ReconAgent(BaseAgent):
                 merged.append(item)
         return merged
 
-    def _apply_subagent_runtime_payload(self, final_result: Dict[str, Any]) -> Dict[str, Any]:
+    def _apply_subagent_runtime_payload(self, final_result: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(final_result, dict):
             return final_result
         module_results = self._merge_module_results_payload(
@@ -870,19 +870,19 @@ class ReconAgent(BaseAgent):
         return final_result
 
 
-    
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         执行信息收集 - LLM 全程参与！
         """
         import time
         start_time = time.time()
-        
+
         project_info = input_data.get("project_info", {})
         config = input_data.get("config", {})
         task = input_data.get("task", "")
         task_context = input_data.get("task_context", "")
-        
+
         #  获取目标文件列表
         target_files = config.get("target_files", [])
         exclude_patterns = config.get("exclude_patterns", [])
@@ -904,7 +904,7 @@ class ReconAgent(BaseAgent):
         for target_file in target_files if isinstance(target_files, list) else []:
             self._remember_target_file(target_file)
             self._remember_discovered_file(target_file)
-        
+
         # 构建初始消息
         initial_message = f"""请开始收集项目信息。
 
@@ -950,7 +950,7 @@ class ReconAgent(BaseAgent):
 3. 重点分析指定的目标文件
 4. 发现并标记所有高风险区域（不限于目标文件）
 """
-        
+
         if exclude_patterns:
             initial_message += f"\n排除模式: {', '.join(exclude_patterns[:5])}\n"
 
@@ -965,7 +965,7 @@ class ReconAgent(BaseAgent):
 ## Prompt Skill（recon）
 {recon_prompt_skill}
 """
-        
+
         module_scope = config.get("recon_module") if isinstance(config, dict) else None
         in_module_worker_mode = isinstance(module_scope, dict)
         if in_module_worker_mode:
@@ -1022,7 +1022,7 @@ class ReconAgent(BaseAgent):
 ## 完成标准
 - 有项目地图（语言/构建/运行形态/入口/关键目录/信任边界）。
 - 有可执行的功能模块划分（具体目录边界）。
-- 有模块执行结果汇总；若回退模式则有结构化风险点。 
+- 有模块执行结果汇总；若回退模式则有结构化风险点。
 
 ## 可用工具
 {self.get_tools_description()}
@@ -1036,24 +1036,24 @@ class ReconAgent(BaseAgent):
             {"role": "system", "content": self.config.system_prompt},
             {"role": "user", "content": initial_message},
         ]
-        
+
         self._steps = []
         final_result = None
         error_message = None  #  跟踪错误信息
-        last_action_signature: Optional[str] = None
+        last_action_signature: str | None = None
         repeated_action_streak = 0
         llm_timeout_streak = 0
         no_action_streak = 0
-        
+
         await self.emit_thinking("Recon Agent 启动，LLM 开始自主收集信息...")
-        
+
         try:
             for iteration in range(self.config.max_iterations):
                 if self.is_cancelled:
                     break
-                
+
                 self._iteration = iteration + 1
-                
+
                 #  再次检查取消标志（在LLM调用之前）
                 if self.is_cancelled:
                     await self.emit_thinking("🛑 任务已取消，停止执行")
@@ -1068,7 +1068,7 @@ class ReconAgent(BaseAgent):
                 except asyncio.CancelledError:
                     logger.info(f"[{self.name}] LLM call cancelled")
                     break
-                
+
                 self._total_tokens += tokens_this_round
 
                 timeout_like_output = str(llm_output or "").strip().startswith("[超时错误:")
@@ -1085,7 +1085,7 @@ class ReconAgent(BaseAgent):
                     )
                     final_result = self._summarize_from_steps()
                     break
-                
+
                 #  Enhanced: Handle empty LLM response with better diagnostics
                 if not llm_output or not llm_output.strip():
                     empty_retry_count = getattr(self, '_empty_retry_count', 0) + 1
@@ -1096,14 +1096,14 @@ class ReconAgent(BaseAgent):
                     chunk_count = int(stream_meta.get("chunk_count") or 0)
                     empty_from_stream = empty_reason in {"empty_response", "empty_stream", "empty_done"}
                     conversation_tokens_estimate = self._estimate_conversation_tokens(self._conversation_history)
-                    
+
                     #  记录更详细的诊断信息
                     logger.warning(
                         f"[{self.name}] Empty LLM response in iteration {self._iteration} "
                         f"(retry {empty_retry_count}/3, tokens_this_round={tokens_this_round}, "
                         f"finish_reason={finish_reason}, empty_reason={empty_reason}, chunk_count={chunk_count})"
                     )
-                    
+
                     if empty_from_stream and targeted_empty_recovery_used:
                         error_message = "连续收到空响应，使用回退结果"
                         await self.emit_event(
@@ -1135,7 +1135,7 @@ class ReconAgent(BaseAgent):
                         )
                         #  不是直接 break，而是尝试生成一个回退结果
                         break
-                    
+
                     if empty_from_stream:
                         targeted_empty_recovery_used = True
                         retry_prompt = (
@@ -1159,30 +1159,30 @@ Action Input: {{}}
 如果你认为信息收集已经完成，请输出：
 Thought: [总结收集到的信息]
 Final Answer: [JSON格式的结果]"""
-                    
+
                     self._conversation_history.append({
                         "role": "user",
                         "content": retry_prompt,
                     })
                     continue
-                
+
                 # 重置空响应计数器
                 self._empty_retry_count = 0
 
                 # 解析 LLM 响应
                 step = self._parse_llm_response(llm_output)
                 self._steps.append(step)
-                
+
                 #  发射 LLM 思考内容事件 - 展示 LLM 在想什么
                 if step.thought:
                     await self.emit_llm_thought(step.thought, iteration + 1)
-                
+
                 # 添加 LLM 响应到历史
                 self._conversation_history.append({
                     "role": "assistant",
                     "content": llm_output,
                 })
-                
+
                 # 检查是否完成
                 if step.is_final:
                     no_action_streak = 0
@@ -1216,7 +1216,7 @@ Final Answer: [JSON格式的结果]"""
                         self._total_tokens
                     )
                     break
-                
+
                 # 执行工具
                 if step.action:
                     no_action_streak = 0
@@ -1246,30 +1246,30 @@ Final Answer: [JSON格式的结果]"""
                             }
                         )
                         continue
-                    
+
                     #  循环检测：追踪工具调用失败历史
                     tool_call_key = f"{step.action}:{dump_json_safe(step.action_input or {}, sort_keys=True)}"
                     if not hasattr(self, '_failed_tool_calls'):
                         self._failed_tool_calls = {}
-                    
+
                     observation = await self.execute_tool(
                         step.action,
                         step.action_input or {}
                     )
-                    
+
                     #  检测工具调用失败并追踪
                     is_tool_error = (
-                        "失败" in observation or 
-                        "错误" in observation or 
+                        "失败" in observation or
+                        "错误" in observation or
                         "不存在" in observation or
                         "文件过大" in observation or
                         "Error" in observation
                     )
-                    
+
                     if is_tool_error:
                         self._failed_tool_calls[tool_call_key] = self._failed_tool_calls.get(tool_call_key, 0) + 1
                         fail_count = self._failed_tool_calls[tool_call_key]
-                        
+
                         #  如果同一调用连续失败3次，添加强制跳过提示
                         if fail_count >= 3:
                             logger.warning(f"[{self.name}] Tool call failed {fail_count} times: {tool_call_key}")
@@ -1278,7 +1278,7 @@ Final Answer: [JSON格式的结果]"""
                             observation += "2. 使用 search_code 工具定位关键代码片段\n"
                             observation += "3. 跳过此文件，继续分析其他文件\n"
                             observation += "4. 如果已有足够信息，直接输出 Final Answer"
-                            
+
                             # 重置计数器但保留记录
                             self._failed_tool_calls[tool_call_key] = 0
                     else:
@@ -1287,17 +1287,17 @@ Final Answer: [JSON格式的结果]"""
                             del self._failed_tool_calls[tool_call_key]
                         await self._update_coverage_from_last_tool(step.action, step.action_input or {})
                         self._track_live_push_action(step.action, step.action_input or {}, observation)
-                    
+
                     #  工具执行后检查取消状态
                     if self.is_cancelled:
                         logger.info(f"[{self.name}] Cancelled after tool execution")
                         break
-                    
+
                     step.observation = observation
-                    
+
                     #  发射 LLM 观察事件
                     await self.emit_llm_observation(observation)
-                    
+
                     # 添加观察结果到历史
                     history_observation = self._prepare_observation_for_history(observation)
                     self._conversation_history.append({
@@ -1322,11 +1322,11 @@ Final Answer: [JSON格式的结果]"""
                         "role": "user",
                         "content": "请继续。你输出了 Thought 但没有输出 Action。请**立即**选择一个工具执行（Action: ...），或者如果信息收集完成，输出 Final Answer。",
                     })
-            
+
             #  如果循环结束但没有 final_result，强制 LLM 总结
             if not final_result and not self.is_cancelled and not error_message:
                 await self.emit_thinking("信息收集阶段结束，正在生成总结...")
-                
+
                 # 添加强制总结的提示
                 self._conversation_history.append({
                     "role": "user",
@@ -1357,13 +1357,13 @@ Final Answer: [JSON格式的结果]"""
 
 Final Answer:""",
                 })
-                
+
                 try:
                     summary_output, _ = await self.stream_llm_call(
                         self._conversation_history,
                         #  不传递 temperature 和 max_tokens，使用用户配置
                     )
-                    
+
                     if summary_output and summary_output.strip():
                         # 解析总结输出
                         summary_text = summary_output.strip()
@@ -1375,10 +1375,10 @@ Final Answer:""",
                         )
                 except Exception as e:
                     logger.warning(f"[{self.name}] Failed to generate summary: {e}")
-            
+
             # 处理结果
             duration_ms = int((time.time() - start_time) * 1000)
-            
+
             #  如果被取消，返回取消结果
             if self.is_cancelled:
                 await self.emit_event(
@@ -1394,7 +1394,7 @@ Final Answer:""",
                     tokens_used=self._total_tokens,
                     duration_ms=duration_ms,
                 )
-            
+
             #  如果有错误，返回失败结果
             if error_message:
                 await self.emit_event(
@@ -1410,7 +1410,7 @@ Final Answer:""",
                     tokens_used=self._total_tokens,
                     duration_ms=duration_ms,
                 )
-            
+
             # 如果没有最终结果，从历史中汇总
             if not final_result:
                 final_result = self._summarize_from_steps()
@@ -1441,7 +1441,7 @@ Final Answer:""",
                     final_result,
                     in_module_worker_mode=in_module_worker_mode,
                 )
-            
+
             #  记录工作和洞察
             self.record_work(f"完成项目信息收集，发现 {len(final_result.get('entry_points', []))} 个入口点")
             self.record_work(f"识别技术栈: {final_result.get('tech_stack', {})}")
@@ -1468,12 +1468,12 @@ Final Answer:""",
                 duration_ms=duration_ms,
                 handoff=handoff,  #  添加 handoff
             )
-            
+
         except Exception as e:
             logger.error(f"Recon Agent failed: {e}", exc_info=True)
             return AgentResult(success=False, error=str(e))
-    
-    def _ensure_project_profile(self, final_result: Dict[str, Any]) -> Dict[str, Any]:
+
+    def _ensure_project_profile(self, final_result: dict[str, Any]) -> dict[str, Any]:
         tech_stack = final_result.get("tech_stack", {})
         frameworks = tech_stack.get("frameworks", []) if isinstance(tech_stack, dict) else []
         framework_lowers = {str(item).strip().lower() for item in frameworks if str(item).strip()}
@@ -1535,21 +1535,21 @@ Final Answer:""",
         return final_result
 
     @staticmethod
-    def _append_unique(values: List[str], value: str) -> None:
+    def _append_unique(values: list[str], value: str) -> None:
         if value and value not in values:
             values.append(value)
 
     def _extend_matches_from_hints(
         self,
-        values: List[str],
+        values: list[str],
         observation: str,
-        hint_map: Dict[str, tuple[str, ...]],
+        hint_map: dict[str, tuple[str, ...]],
     ) -> None:
         for label, hints in hint_map.items():
             if any(hint in observation for hint in hints):
                 self._append_unique(values, label)
 
-    def _summarize_from_steps(self) -> Dict[str, Any]:
+    def _summarize_from_steps(self) -> dict[str, Any]:
         """从步骤中汇总结果 - 增强版，从 LLM 思考过程中提取更多信息"""
         # 默认结果结构
         result = {
@@ -1575,20 +1575,20 @@ Final Answer:""",
             "coverage_summary": {},
             "summary": "",  #  新增：汇总 LLM 的思考
         }
-        
+
         #  收集所有 LLM 的思考内容
         thoughts = []
-        
+
         # 从步骤的观察结果和思考中提取信息
         for step in self._steps:
             # 收集思考内容
             if step.thought:
                 thoughts.append(step.thought)
-            
+
             if step.observation:
                 # 尝试从观察中识别技术栈等信息
                 obs_lower = step.observation.lower()
-                
+
                 # 识别语言
                 has_typescript_signal = any(
                     token in obs_lower
@@ -1623,21 +1623,21 @@ Final Answer:""",
                     self._append_unique(result["tech_stack"]["languages"], "C/C++")
                 if "cargo.toml" in obs_lower or ".rs" in obs_lower:
                     self._append_unique(result["tech_stack"]["languages"], "Rust")
-                
+
                 # 识别框架
                 self._extend_matches_from_hints(
                     result["tech_stack"]["frameworks"],
                     obs_lower,
                     FRAMEWORK_OBSERVATION_HINTS,
                 )
-                
+
                 # 识别数据库
                 self._extend_matches_from_hints(
                     result["tech_stack"]["databases"],
                     obs_lower,
                     DATABASE_OBSERVATION_HINTS,
                 )
-                
+
                 #  识别高风险区域（从观察中提取）
                 risk_keywords = [
                     "api", "auth", "login", "password", "secret", "key", "token",
@@ -1654,7 +1654,7 @@ Final Answer:""",
                         file_matches = SOURCE_FILE_PATTERN.findall(step.observation)
                         for file_path in file_matches[:8]:  # 限制数量
                             self._append_unique(result["high_risk_areas"], file_path)
-        
+
         # 去重
         result["tech_stack"]["languages"] = list(dict.fromkeys(result["tech_stack"]["languages"]))
         result["tech_stack"]["frameworks"] = list(dict.fromkeys(result["tech_stack"]["frameworks"]))
@@ -1669,15 +1669,15 @@ Final Answer:""",
                 result["high_risk_areas"].append(point.get("file_path"))
         result = self._apply_runtime_recon_state(result)
         result = self._ensure_project_profile(result)
-        
+
         #  汇总 LLM 的思考作为 summary
         if thoughts:
             # 取最后几个思考作为总结
             result["summary"] = "\n".join(thoughts[-3:])
-        
+
         return result
 
-    def build_project_recon_model(self, input_data: Dict[str, Any]) -> ProjectReconModel:
+    def build_project_recon_model(self, input_data: dict[str, Any]) -> ProjectReconModel:
         project_info = (
             dict(input_data.get("project_info", {}))
             if isinstance(input_data.get("project_info"), dict)
@@ -1703,25 +1703,25 @@ Final Answer:""",
         self,
         *,
         project_model: ProjectReconModel,
-        module_results: List[ReconModuleResult],
-        project_info: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        module_results: list[ReconModuleResult],
+        project_info: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         merged = merge_recon_module_results(
             project_model=project_model,
             module_results=module_results,
             project_info=project_info,
         )
         return self._ensure_project_profile(merged)
-    
-    def get_conversation_history(self) -> List[Dict[str, str]]:
+
+    def get_conversation_history(self) -> list[dict[str, str]]:
         """获取对话历史"""
         return self._conversation_history
 
-    def get_steps(self) -> List[ReconStep]:
+    def get_steps(self) -> list[ReconStep]:
         """获取执行步骤"""
         return self._steps
 
-    def _create_recon_handoff(self, final_result: Dict[str, Any]) -> TaskHandoff:
+    def _create_recon_handoff(self, final_result: dict[str, Any]) -> TaskHandoff:
         """
         创建 Recon Agent 的任务交接信息
 
@@ -1779,7 +1779,7 @@ Final Answer:""",
         languages = tech_stack.get("languages", [])
         frameworks = tech_stack.get("frameworks", [])
 
-        summary = f"完成项目侦察: "
+        summary = "完成项目侦察: "
         if languages:
             summary += f"语言={', '.join(languages[:3])}; "
         if frameworks:

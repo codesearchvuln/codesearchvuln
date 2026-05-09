@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 import yaml
 from sqlalchemy import select
@@ -13,7 +13,7 @@ USER_AGENT_WORKFLOW_CONFIG_KEY = "agent_workflow_config"
 AgentWorkflowConfigSource = Literal["user_override", "local_file", "settings_default"]
 _RECON_HOST_INSTANCES = 1
 
-_AGENT_COUNT_LIMITS: Dict[str, tuple[int, int]] = {
+_AGENT_COUNT_LIMITS: dict[str, tuple[int, int]] = {
     "recon_count": (1, 32),
     "analysis_count": (1, 32),
     "verification_count": (1, 32),
@@ -21,7 +21,7 @@ _AGENT_COUNT_LIMITS: Dict[str, tuple[int, int]] = {
 _AGENT_COUNT_CONFIG_PATH = Path(__file__).with_name("config.yml")
 
 
-def _build_settings_default_config() -> Dict[str, int]:
+def _build_settings_default_config() -> dict[str, int]:
     return {
         "recon_count": int(getattr(settings, "RECON_MAX_WORKERS", 3) or 3),
         "analysis_count": int(getattr(settings, "ANALYSIS_MAX_WORKERS", 5) or 5),
@@ -29,7 +29,7 @@ def _build_settings_default_config() -> Dict[str, int]:
     }
 
 
-def _load_local_file_default_config() -> tuple[Dict[str, int], AgentWorkflowConfigSource]:
+def _load_local_file_default_config() -> tuple[dict[str, int], AgentWorkflowConfigSource]:
     defaults = _build_settings_default_config()
     config_path = _AGENT_COUNT_CONFIG_PATH
     if not config_path.exists():
@@ -71,12 +71,12 @@ def _load_local_file_default_config() -> tuple[Dict[str, int], AgentWorkflowConf
 
 
 def _normalize_agent_workflow_config(
-    raw_config: Dict[str, Any],
+    raw_config: dict[str, Any],
     *,
-    defaults: Dict[str, int] | None = None,
-) -> Dict[str, int]:
+    defaults: dict[str, int] | None = None,
+) -> dict[str, int]:
     normalized_defaults = dict(defaults or _build_settings_default_config())
-    normalized: Dict[str, int] = {}
+    normalized: dict[str, int] = {}
     for field_name, (min_value, max_value) in _AGENT_COUNT_LIMITS.items():
         fallback = normalized_defaults[field_name]
         raw_value = raw_config.get(field_name, fallback)
@@ -92,7 +92,7 @@ def _normalize_agent_workflow_config(
     return normalized
 
 
-def _parse_saved_agent_workflow_config(raw_other_config: Any) -> Dict[str, Any] | None:
+def _parse_saved_agent_workflow_config(raw_other_config: Any) -> dict[str, Any] | None:
     payload = dict(raw_other_config) if isinstance(raw_other_config, dict) else None
     if payload is None:
         return None
@@ -102,7 +102,7 @@ def _parse_saved_agent_workflow_config(raw_other_config: Any) -> Dict[str, Any] 
     return raw_runtime
 
 
-def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str, Any]:
+def describe_effective_agent_workflow_config(raw_other_config: Any) -> dict[str, Any]:
     default_config, default_source = _load_local_file_default_config()
     saved_runtime = _parse_saved_agent_workflow_config(raw_other_config)
 
@@ -147,7 +147,7 @@ def describe_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str,
     }
 
 
-def resolve_effective_agent_workflow_config(raw_other_config: Any) -> Dict[str, int]:
+def resolve_effective_agent_workflow_config(raw_other_config: Any) -> dict[str, int]:
     described = describe_effective_agent_workflow_config(raw_other_config)
     return {
         "recon_host_instances": int(described.get("recon_host_instances") or _RECON_HOST_INSTANCES),
@@ -161,11 +161,11 @@ async def load_user_agent_workflow_config(
     db: AsyncSession,
     *,
     user_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     result = await db.execute(select(UserConfig).where(UserConfig.user_id == user_id))
     user_config = result.scalar_one_or_none()
 
-    raw_other_config: Dict[str, Any] = {}
+    raw_other_config: dict[str, Any] = {}
     if user_config and str(user_config.other_config or "").strip():
         try:
             parsed_other = json.loads(user_config.other_config)
@@ -181,8 +181,8 @@ async def save_user_agent_workflow_config(
     db: AsyncSession,
     *,
     user_id: str,
-    runtime_config: Dict[str, Any],
-) -> Dict[str, Any]:
+    runtime_config: dict[str, Any],
+) -> dict[str, Any]:
     default_config, _default_source = _load_local_file_default_config()
     normalized = _normalize_agent_workflow_config(runtime_config, defaults=default_config)
 

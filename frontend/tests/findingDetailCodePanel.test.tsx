@@ -128,7 +128,7 @@ test("FindingDetailCodePanel 隐藏完整文件入口并保留朴素三行分组
 	assert.match(markup, /命中代码/);
 	assert.match(markup, /src\/demo\.ts/);
 	assert.doesNotMatch(markup, /文件路径/);
-	assert.match(markup, /rounded-xl border border-border\/70 bg-card\/35/);
+	assert.match(markup, /rounded-2xl border border-border\/70 bg-card px-5 py-5 space-y-4 shadow-sm/);
 	assert.match(markup, /grid-cols-\[48px_minmax\(0,1fr\)\]/);
 	assert.doesNotMatch(markup, /shadow-\[0_14px_32px_rgba\(2,6,23,0\.38\)\]/);
 });

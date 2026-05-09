@@ -16,13 +16,11 @@ BusinessLogicReconAgent (业务逻辑侦察层) - LLM 驱动版
 import asyncio
 import json
 import logging
-import re
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+from typing import Any
 
-from .base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern, TaskHandoff
+from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent
 from .react_parser import parse_react_response
-from ..json_parser import AgentJsonParser
 
 logger = logging.getLogger(__name__)
 
@@ -364,11 +362,11 @@ Final Answer: 业务逻辑侦察完成，已将所有风险点推入队列。
 class BLReconStep:
     """业务逻辑侦察步骤"""
     thought: str
-    action: Optional[str] = None
-    action_input: Optional[Dict] = None
-    observation: Optional[str] = None
+    action: str | None = None
+    action_input: dict | None = None
+    observation: str | None = None
     is_final: bool = False
-    final_answer: Optional[str] = None
+    final_answer: str | None = None
 
 
 class BusinessLogicReconAgent(BaseAgent):
@@ -382,7 +380,7 @@ class BusinessLogicReconAgent(BaseAgent):
     def __init__(
         self,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         event_emitter=None,
     ):
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
@@ -405,10 +403,10 @@ class BusinessLogicReconAgent(BaseAgent):
         )
         super().__init__(config, llm_service, tools, event_emitter)
 
-        self._conversation_history: List[Dict[str, str]] = []
-        self._steps: List[BLReconStep] = []
-        self._risk_points_pushed: List[Dict[str, Any]] = []
-        self._agent_results: Dict[str, Any] = {}
+        self._conversation_history: list[dict[str, str]] = []
+        self._steps: list[BLReconStep] = []
+        self._risk_points_pushed: list[dict[str, Any]] = []
+        self._agent_results: dict[str, Any] = {}
 
     def _parse_llm_response(self, response: str) -> BLReconStep:
         """解析 LLM 响应"""
@@ -425,7 +423,7 @@ class BusinessLogicReconAgent(BaseAgent):
             final_answer=str(parsed.final_answer) if parsed.is_final else None,
         )
 
-    def _normalize_risk_point(self, candidate: Any) -> Optional[Dict[str, Any]]:
+    def _normalize_risk_point(self, candidate: Any) -> dict[str, Any] | None:
         if not isinstance(candidate, dict):
             return None
         file_path = str(candidate.get("file_path") or "").strip()
@@ -484,7 +482,7 @@ class BusinessLogicReconAgent(BaseAgent):
         return result
 
     @staticmethod
-    def _risk_point_fingerprint(candidate: Dict[str, Any]) -> str:
+    def _risk_point_fingerprint(candidate: dict[str, Any]) -> str:
         return "|".join(
             [
                 str(candidate.get("file_path") or "").strip().lower(),
@@ -507,12 +505,12 @@ class BusinessLogicReconAgent(BaseAgent):
         self._risk_points_pushed.append(normalized)
         return True
 
-    def _extract_push_candidates(self, action_name: str, action_input: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_push_candidates(self, action_name: str, action_input: dict[str, Any]) -> list[dict[str, Any]]:
         if action_name == "push_bl_risk_point_to_queue":
             normalized = self._normalize_risk_point(action_input)
             return [normalized] if normalized else []
         if action_name == "push_bl_risk_points_to_queue":
-            candidates: List[Dict[str, Any]] = []
+            candidates: list[dict[str, Any]] = []
             for item in (action_input.get("risk_points") or []):
                 normalized = self._normalize_risk_point(
                     item.model_dump() if hasattr(item, "model_dump") else (
@@ -533,7 +531,7 @@ class BusinessLogicReconAgent(BaseAgent):
                 return queue_service, str(task_id)
         return None, None
 
-    def _get_bl_queue_size(self) -> Optional[int]:
+    def _get_bl_queue_size(self) -> int | None:
         queue_service, task_id = self._resolve_bl_queue_binding()
         if queue_service is None or not task_id:
             return None
@@ -554,10 +552,10 @@ class BusinessLogicReconAgent(BaseAgent):
         self,
         *,
         action_name: str,
-        action_input: Dict[str, Any],
+        action_input: dict[str, Any],
         observation: Any,
-        before_size: Optional[int],
-        after_size: Optional[int],
+        before_size: int | None,
+        after_size: int | None,
     ) -> int:
         candidates = self._extract_push_candidates(action_name, action_input)
         if not candidates:
@@ -597,7 +595,7 @@ class BusinessLogicReconAgent(BaseAgent):
             return "业务逻辑侦察完成，但未成功入队任何业务逻辑风险点。"
         return f"业务逻辑侦察完成，实际成功入队 {count} 个业务逻辑风险点。"
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """
         执行业务逻辑侦察。
 

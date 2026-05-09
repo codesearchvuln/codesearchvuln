@@ -1,6 +1,6 @@
-from app.models.agent_task import AgentTask, AgentTaskPhase, AgentTaskStatus
 import app.models.gitleaks  # noqa: F401
 import app.models.opengrep  # noqa: F401
+from app.models.agent_task import AgentTask, AgentTaskPhase, AgentTaskStatus
 
 
 def test_progress_percentage_cancelled_keeps_phase_progress():

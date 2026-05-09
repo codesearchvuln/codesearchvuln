@@ -100,7 +100,7 @@ test("ProjectsTable renders hover metric popovers without nested trigger frames"
 	assert.match(markup, /大小/);
 	assert.match(markup, /操作/);
 	// assert.match(markup, /执行任务/);
-	assert.match(markup, /发现潜在漏洞/);
+	assert.match(markup, /发现漏洞/);
 	assert.match(markup, /AI验证漏洞/);
 	assert.match(markup, /查看详情/);
 	assert.match(markup, /代码浏览/);
@@ -112,15 +112,15 @@ test("ProjectsTable renders hover metric popovers without nested trigger frames"
 	assert.match(markup, />0</);
 	assert.match(markup, /仅 ZIP 类型项目支持代码浏览/);
 	assert.match(markup, /指标同步中\.\.\./);
-	assert.doesNotMatch(markup, /序号/);
+	assert.match(markup, /序号/);
 	assert.doesNotMatch(markup, /全选当前页/);
 	assert.doesNotMatch(markup, /选择项目/);
 	assert.match(markup, /<thead[\s\S]*?<\/thead>/);
-	assert.match(markup, /<th[^>]*>项目名称<\/th>/);
-	assert.match(markup, /<th[^>]*>项目大小<\/th>/);
+	assert.match(markup, /<th[^>]*>[\s\S]*项目名称[\s\S]*?<\/th>/);
+	assert.match(markup, /<th[^>]*>[\s\S]*项目大小[\s\S]*?<\/th>/);
 	// assert.match(markup, /<th[^>]*>执行任务<\/th>/);
-	assert.match(markup, /<th[^>]*>发现潜在漏洞<\/th>/);
-	assert.match(markup, /<th[^>]*>AI验证漏洞<\/th>/);
+	assert.match(markup, /<th[^>]*>[\s\S]*发现漏洞[\s\S]*?<\/th>/);
+	assert.match(markup, /<th[^>]*>[\s\S]*AI验证漏洞[\s\S]*?<\/th>/);
 	assert.match(markup, /<th[^>]*>操作<\/th>/);
 	assert.doesNotMatch(markup, /项目概览|体量概览|快捷操作|任务概览|风险概览/);
 	assert.doesNotMatch(markup, /名称与入口|规模与体量|详情 \/ 浏览 \/ 扫描|完成 \/ 运行中|按风险等级分布/);
@@ -149,7 +149,7 @@ test("ProjectsTable renders hover metric popovers without nested trigger frames"
 	assert.match(markup, /border-b-2/);
 	assert.match(markup, /border-r-2 border-border\/90/);
 	assert.match(markup, /border-l-2 border-border\/95/);
-	assert.match(markup, /text-\[15px\] font-semibold uppercase/);
+	assert.match(markup, /text-base font-semibold uppercase/);
 	assert.match(markup, /mx-auto block max-w-\[180px\] truncate text-center text-\[18px\] font-semibold/);
 	assert.match(markup, /text-center text-\[17px\] text-muted-foreground/);
 	assert.match(markup, /justify-center gap-2 text-\[16px\]/);

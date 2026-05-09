@@ -20,7 +20,7 @@ test("useAgentAuditState trims the log buffer to a fixed upper bound", async () 
   );
 });
 
-test("TaskDetailPage keeps realtime findings state live and clears timers on unmount", () => {
+test("TaskDetailPage keeps persisted findings as the managed source and clears timers on unmount", () => {
   const source = fs.readFileSync(
     path.resolve(process.cwd(), "src/pages/AgentAudit/TaskDetailPage.tsx"),
     "utf8",
@@ -28,14 +28,14 @@ test("TaskDetailPage keeps realtime findings state live and clears timers on unm
 
   assert.match(
     source,
-    /const \[realtimeFindings, setRealtimeFindings\] = useState<RealtimeMergedFindingItem\[\]>\(\[\]\);/,
+    /const \[, setRealtimeFindings\] = useState<RealtimeMergedFindingItem\[\]>\(\[\]\);/,
   );
   assert.match(
     source,
-    /const visibleManagedFindings = useMemo\(\s*\(\) => realtimeFindings,\s*\[realtimeFindings\],\s*\);/s,
+    /const visibleManagedFindings = useMemo\(\(\) => \{[\s\S]*?return persistedFindingRouteItems;[\s\S]*?\}, \[persistedFindingRouteItems\]\);/s,
   );
   assert.match(
     source,
-    /return \(\) => {\s*if \(agentTreeRefreshTimer\.current\) {\s*clearTimeout\(agentTreeRefreshTimer\.current\);/s,
+    /return \(\) => \{\s*if \(agentTreeRefreshTimer\.current\) \{\s*clearTimeout\(agentTreeRefreshTimer\.current\);/s,
   );
 });

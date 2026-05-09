@@ -3,40 +3,45 @@ Agent 单元测试
 测试各个 Agent 的功能
 """
 
-import pytest
-import asyncio
-import os
 from types import SimpleNamespace
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock
 
-from app.services.agent.agents.base import BaseAgent, AgentConfig, AgentResult, AgentType, AgentPattern
-from app.services.agent.agents.recon import ReconAgent, ReconStep
+import pytest
+
 from app.services.agent.agents.analysis import AnalysisAgent
-from app.services.agent.agents.verification import VerificationAgent
+from app.services.agent.agents.base import (
+    AgentConfig,
+    AgentPattern,
+    AgentResult,
+    AgentType,
+)
+from app.services.agent.agents.recon import ReconAgent, ReconStep
 
 
 class TestReconAgent:
     """Recon Agent 测试"""
-    
+
     @pytest.fixture
     def recon_agent(self, temp_project_dir, mock_llm_service, mock_event_emitter):
         """创建 Recon Agent 实例"""
         from app.services.agent.tools import (
-            FileReadTool, FileSearchTool, ListFilesTool,
+            FileReadTool,
+            FileSearchTool,
+            ListFilesTool,
         )
-        
+
         tools = {
             "list_files": ListFilesTool(temp_project_dir),
             "read_file": FileReadTool(temp_project_dir),
             "search_code": FileSearchTool(temp_project_dir),
         }
-        
+
         return ReconAgent(
             llm_service=mock_llm_service,
             tools=tools,
             event_emitter=mock_event_emitter,
         )
-    
+
     @pytest.mark.asyncio
     async def test_recon_agent_run(self, recon_agent, temp_project_dir):
         """测试 Recon Agent 运行"""
@@ -47,17 +52,17 @@ class TestReconAgent:
             },
             "config": {},
         })
-        
+
         assert result.success is True
         assert result.data is not None
-        
+
         # 验证返回数据结构
         data = result.data
         assert "coverage_summary" in data
         assert "risk_points" in data
         assert isinstance(data.get("risk_points"), list)
         assert isinstance(data.get("high_risk_areas", []), list)
-    
+
     @pytest.mark.asyncio
     async def test_recon_agent_identifies_python(self, recon_agent, temp_project_dir):
         """测试 Recon Agent 识别 Python 技术栈"""
@@ -65,12 +70,12 @@ class TestReconAgent:
             "project_info": {"root": temp_project_dir},
             "config": {},
         })
-        
+
         assert result.success is True
         tech_stack = result.data.get("tech_stack", {})
         assert isinstance(tech_stack, dict)
         assert isinstance(tech_stack.get("languages", []), list)
-    
+
     @pytest.mark.asyncio
     async def test_recon_agent_finds_high_risk_areas(self, recon_agent, temp_project_dir):
         """测试 Recon Agent 发现高风险区域"""
@@ -78,7 +83,7 @@ class TestReconAgent:
             "project_info": {"root": temp_project_dir},
             "config": {},
         })
-        
+
         assert result.success is True
         high_risk_areas = result.data.get("high_risk_areas", [])
         assert isinstance(high_risk_areas, list)
@@ -367,26 +372,28 @@ Final Answer: {"summary":"模块侦查完成"}""",
 
 class TestAnalysisAgent:
     """Analysis Agent 测试"""
-    
+
     @pytest.fixture
     def analysis_agent(self, temp_project_dir, mock_llm_service, mock_event_emitter):
         """创建 Analysis Agent 实例"""
         from app.services.agent.tools import (
-            FileReadTool, FileSearchTool, PatternMatchTool,
+            FileReadTool,
+            FileSearchTool,
+            PatternMatchTool,
         )
-        
+
         tools = {
             "read_file": FileReadTool(temp_project_dir),
             "search_code": FileSearchTool(temp_project_dir),
             "pattern_match": PatternMatchTool(temp_project_dir),
         }
-        
+
         return AnalysisAgent(
             llm_service=mock_llm_service,
             tools=tools,
             event_emitter=mock_event_emitter,
         )
-    
+
     @pytest.mark.asyncio
     async def test_analysis_agent_run(self, analysis_agent, temp_project_dir):
         """测试 Analysis Agent 运行"""
@@ -396,10 +403,10 @@ class TestAnalysisAgent:
             "high_risk_areas": ["src/sql_vuln.py", "src/cmd_vuln.py"],
             "config": {},
         })
-        
+
         assert result.success is True
         assert result.data is not None
-    
+
     @pytest.mark.asyncio
     async def test_analysis_agent_finds_vulnerabilities(self, analysis_agent, temp_project_dir):
         """测试 Analysis Agent 发现漏洞"""
@@ -414,10 +421,10 @@ class TestAnalysisAgent:
             ],
             "config": {},
         })
-        
+
         assert result.success is True
         findings = result.data.get("findings", [])
-        
+
         # 应该发现一些漏洞
         # 注意：具体数量取决于分析逻辑
         assert isinstance(findings, list)
@@ -467,7 +474,7 @@ class TestAnalysisAgent:
 
 class TestAgentResult:
     """Agent 结果测试"""
-    
+
     def test_agent_result_success(self):
         """测试成功的 Agent 结果"""
         result = AgentResult(
@@ -476,21 +483,21 @@ class TestAgentResult:
             iterations=5,
             tool_calls=10,
         )
-        
+
         assert result.success is True
         assert result.iterations == 5
         assert result.tool_calls == 10
-    
+
     def test_agent_result_failure(self):
         """测试失败的 Agent 结果"""
         result = AgentResult(
             success=False,
             error="Test error",
         )
-        
+
         assert result.success is False
         assert result.error == "Test error"
-    
+
     def test_agent_result_to_dict(self):
         """测试 Agent 结果转字典"""
         result = AgentResult(
@@ -498,27 +505,27 @@ class TestAgentResult:
             data={"key": "value"},
             iterations=3,
         )
-        
+
         d = result.to_dict()
-        
+
         assert d["success"] is True
         assert d["iterations"] == 3
 
 
 class TestAgentConfig:
     """Agent 配置测试"""
-    
+
     def test_agent_config_defaults(self):
         """测试 Agent 配置默认值"""
         config = AgentConfig(
             name="Test",
             agent_type=AgentType.RECON,
         )
-        
+
         assert config.pattern == AgentPattern.REACT
         assert config.max_iterations == 20
         assert config.temperature == 0.1
-    
+
     def test_agent_config_custom(self):
         """测试自定义 Agent 配置"""
         config = AgentConfig(
@@ -528,7 +535,7 @@ class TestAgentConfig:
             max_iterations=50,
             temperature=0.5,
         )
-        
+
         assert config.pattern == AgentPattern.PLAN_AND_EXECUTE
         assert config.max_iterations == 50
         assert config.temperature == 0.5

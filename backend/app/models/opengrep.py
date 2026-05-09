@@ -4,20 +4,17 @@ Opengrep 静态分析模型 - 数据库表定义
 """
 
 import uuid
-from datetime import datetime
-from typing import Optional, List, Any
+
 from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    Float,
-    Text,
+    JSON,
     Boolean,
+    Column,
     DateTime,
     ForeignKey,
-    Enum as SQLEnum,
-    JSON,
     Index,
+    Integer,
+    String,
+    Text,
     UniqueConstraint,
     text,
 )

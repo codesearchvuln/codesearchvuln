@@ -1,8 +1,7 @@
-from pathlib import Path
 import json
 import logging
-from typing import Set, Dict, Optional
 from datetime import datetime
+from pathlib import Path
 
 
 class CacheManager:
@@ -10,8 +9,8 @@ class CacheManager:
         self.cache_dir = cache_dir
         self.processed_patches_file = cache_dir / "processed_patches.json"
         self.failed_repos_file = cache_dir / "failed_repos.json"
-        self.processed_patches: Set[str] = set()
-        self.failed_repos: Dict[str, dict] = {}
+        self.processed_patches: set[str] = set()
+        self.failed_repos: dict[str, dict] = {}
         self._load_caches()
 
     def _load_caches(self):
@@ -62,7 +61,7 @@ class CacheManager:
         }
         self._save_caches()
 
-    def get_repo_error(self, repo_key: str) -> Optional[str]:
+    def get_repo_error(self, repo_key: str) -> str | None:
         """Get the error message for a failed repository."""
         if repo_key in self.failed_repos:
             return self.failed_repos[repo_key]["error"]

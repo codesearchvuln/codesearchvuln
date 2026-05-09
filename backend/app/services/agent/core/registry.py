@@ -10,8 +10,8 @@ Agent 注册表和动态Agent树管理
 
 import logging
 import threading
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .state import AgentState
@@ -22,50 +22,50 @@ logger = logging.getLogger(__name__)
 class AgentRegistry:
     """
     Agent 注册表
-    
+
     管理所有Agent实例，维护动态Agent树结构
     """
-    
+
     def __init__(self):
         self._lock = threading.RLock()
-        
+
         # Agent图结构
-        self._agent_graph: Dict[str, Any] = {
+        self._agent_graph: dict[str, Any] = {
             "nodes": {},  # agent_id -> node_info
             "edges": [],  # {from, to, type}
         }
-        
+
         # Agent实例和状态
-        self._agent_instances: Dict[str, Any] = {}  # agent_id -> agent_instance
-        self._agent_states: Dict[str, "AgentState"] = {}  # agent_id -> state
-        
+        self._agent_instances: dict[str, Any] = {}  # agent_id -> agent_instance
+        self._agent_states: dict[str, AgentState] = {}  # agent_id -> state
+
         # 消息队列
-        self._agent_messages: Dict[str, List[Dict[str, Any]]] = {}  # agent_id -> messages
-        
+        self._agent_messages: dict[str, list[dict[str, Any]]] = {}  # agent_id -> messages
+
         # 根Agent
-        self._root_agent_id: Optional[str] = None
-        self._root_agent_ids: Dict[str, str] = {}
-        
+        self._root_agent_id: str | None = None
+        self._root_agent_ids: dict[str, str] = {}
+
         # 运行中的Agent线程
-        self._running_agents: Dict[str, threading.Thread] = {}
-    
+        self._running_agents: dict[str, threading.Thread] = {}
+
     # ============ Agent 注册 ============
-    
+
     def register_agent(
         self,
         agent_id: str,
         agent_name: str,
         agent_type: str,
         task: str,
-        parent_id: Optional[str] = None,
+        parent_id: str | None = None,
         agent_instance: Any = None,
         state: Optional["AgentState"] = None,
-        knowledge_modules: Optional[List[str]] = None,
-        task_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        knowledge_modules: list[str] | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         注册Agent到注册表
-        
+
         Args:
             agent_id: Agent唯一标识
             agent_name: Agent名称
@@ -75,7 +75,7 @@ class AgentRegistry:
             agent_instance: Agent实例
             state: Agent状态
             knowledge_modules: 加载的知识模块
-            
+
         Returns:
             注册的节点信息
         """
@@ -83,7 +83,7 @@ class AgentRegistry:
         logger.debug(f"[AgentRegistry] 当前节点数: {len(self._agent_graph['nodes'])}, 节点列表: {list(self._agent_graph['nodes'].keys())}")
 
         with self._lock:
-            parent_task_id: Optional[str] = None
+            parent_task_id: str | None = None
             if parent_id:
                 parent_node = self._agent_graph["nodes"].get(parent_id)
                 if parent_node:
@@ -109,34 +109,34 @@ class AgentRegistry:
                 "task": task,
                 "status": "running",
                 "parent_id": parent_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "finished_at": None,
                 "result": None,
                 "knowledge_modules": knowledge_modules or [],
                 "children": [],
             }
-            
+
             self._agent_graph["nodes"][agent_id] = node
-            
+
             if agent_instance:
                 self._agent_instances[agent_id] = agent_instance
-            
+
             if state:
                 self._agent_states[agent_id] = state
-            
+
             # 初始化消息队列
             if agent_id not in self._agent_messages:
                 self._agent_messages[agent_id] = []
-            
+
             # 添加边（父子关系）
             if parent_id:
                 self._agent_graph["edges"].append({
                     "from": parent_id,
                     "to": agent_id,
                     "type": "delegation",
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                 })
-                
+
                 # 更新父节点的children列表
                 if parent_id in self._agent_graph["nodes"]:
                     parent_children = self._agent_graph["nodes"][parent_id]["children"]
@@ -183,7 +183,7 @@ class AgentRegistry:
             self._agent_states.pop(agent_id, None)
             self._agent_messages.pop(agent_id, None)
             self._running_agents.pop(agent_id, None)
-            
+
             # 移除相关边
             self._agent_graph["edges"] = [
                 e for e in self._agent_graph["edges"]
@@ -197,55 +197,55 @@ class AgentRegistry:
                 self._root_agent_id = self._resolve_root_agent_id_locked()
 
             logger.debug(f"Unregistered agent: {agent_id}")
-    
+
     # ============ Agent 状态更新 ============
-    
+
     def update_agent_status(
         self,
         agent_id: str,
         status: str,
-        result: Optional[Dict[str, Any]] = None,
+        result: dict[str, Any] | None = None,
     ) -> None:
         """更新Agent状态"""
         with self._lock:
             if agent_id in self._agent_graph["nodes"]:
                 node = self._agent_graph["nodes"][agent_id]
                 node["status"] = status
-                
+
                 if status in ["completed", "failed", "stopped"]:
-                    node["finished_at"] = datetime.now(timezone.utc).isoformat()
-                
+                    node["finished_at"] = datetime.now(UTC).isoformat()
+
                 if result:
                     node["result"] = result
-                
+
                 logger.debug(f"Updated agent {agent_id} status to {status}")
-    
-    def get_agent_status(self, agent_id: str) -> Optional[str]:
+
+    def get_agent_status(self, agent_id: str) -> str | None:
         """获取Agent状态"""
         with self._lock:
             if agent_id in self._agent_graph["nodes"]:
                 return self._agent_graph["nodes"][agent_id]["status"]
             return None
-    
+
     # ============ Agent 查询 ============
-    
-    def get_agent(self, agent_id: str) -> Optional[Any]:
+
+    def get_agent(self, agent_id: str) -> Any | None:
         """获取Agent实例"""
         return self._agent_instances.get(agent_id)
-    
+
     def get_agent_state(self, agent_id: str) -> Optional["AgentState"]:
         """获取Agent状态"""
         return self._agent_states.get(agent_id)
-    
-    def get_agent_node(self, agent_id: str) -> Optional[Dict[str, Any]]:
+
+    def get_agent_node(self, agent_id: str) -> dict[str, Any] | None:
         """获取Agent节点信息"""
         return self._agent_graph["nodes"].get(agent_id)
-    
+
     def get_root_agent_id(
         self,
-        task_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-    ) -> Optional[str]:
+        task_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> str | None:
         """获取根Agent ID"""
         with self._lock:
             resolved_task_id = self._resolve_task_id_locked(
@@ -253,26 +253,26 @@ class AgentRegistry:
                 agent_id=agent_id,
             )
             return self._resolve_root_agent_id_locked(resolved_task_id)
-    
-    def get_children(self, agent_id: str) -> List[str]:
+
+    def get_children(self, agent_id: str) -> list[str]:
         """获取子Agent ID列表"""
         with self._lock:
             node = self._agent_graph["nodes"].get(agent_id)
             if node:
                 return node.get("children", [])
             return []
-    
-    def get_parent(self, agent_id: str) -> Optional[str]:
+
+    def get_parent(self, agent_id: str) -> str | None:
         """获取父Agent ID"""
         with self._lock:
             node = self._agent_graph["nodes"].get(agent_id)
             if node:
                 return node.get("parent_id")
             return None
-    
+
     # ============ Agent 树操作 ============
-    
-    def get_agent_tree(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+
+    def get_agent_tree(self, task_id: str | None = None) -> dict[str, Any]:
         """获取完整的Agent树结构"""
         with self._lock:
             resolved_task_id = self._normalize_task_id(task_id)
@@ -301,8 +301,8 @@ class AgentRegistry:
 
     def get_agent_tree_view(
         self,
-        agent_id: Optional[str] = None,
-        task_id: Optional[str] = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
     ) -> str:
         """获取Agent树的文本视图"""
         with self._lock:
@@ -344,7 +344,7 @@ class AgentRegistry:
             _build_tree(root_id)
             return "\n".join(lines)
 
-    def get_statistics(self, task_id: Optional[str] = None) -> Dict[str, int]:
+    def get_statistics(self, task_id: str | None = None) -> dict[str, int]:
         """获取统计信息"""
         with self._lock:
             resolved_task_id = self._normalize_task_id(task_id)
@@ -426,7 +426,7 @@ class AgentRegistry:
             self._root_agent_id = None
             self._root_agent_ids.clear()
             logger.debug("Agent registry cleared")
-    
+
     def cleanup_finished_agents(self) -> int:
         """清理已完成的Agent"""
         with self._lock:
@@ -434,24 +434,24 @@ class AgentRegistry:
                 aid for aid, node in self._agent_graph["nodes"].items()
                 if node["status"] in ["completed", "failed", "stopped"]
             ]
-            
+
             for aid in finished_ids:
                 # 保留节点信息，但清理实例
                 self._agent_instances.pop(aid, None)
                 self._running_agents.pop(aid, None)
-            
+
             return len(finished_ids)
 
-    def _normalize_task_id(self, task_id: Optional[str]) -> Optional[str]:
+    def _normalize_task_id(self, task_id: str | None) -> str | None:
         value = str(task_id or "").strip()
         return value or None
 
     def _resolve_task_id_locked(
         self,
-        task_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        parent_id: Optional[str] = None,
-    ) -> Optional[str]:
+        task_id: str | None = None,
+        agent_id: str | None = None,
+        parent_id: str | None = None,
+    ) -> str | None:
         resolved_task_id = self._normalize_task_id(task_id)
         if resolved_task_id:
             return resolved_task_id
@@ -467,7 +467,7 @@ class AgentRegistry:
 
         return None
 
-    def _resolve_root_agent_id_locked(self, task_id: Optional[str] = None) -> Optional[str]:
+    def _resolve_root_agent_id_locked(self, task_id: str | None = None) -> str | None:
         resolved_task_id = self._normalize_task_id(task_id)
         if resolved_task_id:
             root_id = self._root_agent_ids.get(resolved_task_id)
@@ -496,10 +496,10 @@ class AgentRegistry:
 
     def _clone_node_for_tree(
         self,
-        node: Dict[str, Any],
+        node: dict[str, Any],
         *,
-        filtered_ids: Optional[set[str]] = None,
-    ) -> Dict[str, Any]:
+        filtered_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
         cloned = dict(node)
         children = list(node.get("children", []))
         if filtered_ids is not None:

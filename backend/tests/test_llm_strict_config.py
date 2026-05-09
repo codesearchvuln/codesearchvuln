@@ -1,6 +1,5 @@
-import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,6 +12,8 @@ from app.api.v1.endpoints.config import (
     LLMTestRequest,
     agent_task_llm_preflight,
     get_default_config,
+)
+from app.api.v1.endpoints.config import (
     test_llm_connection as llm_connection_endpoint,
 )
 from app.models.user_config import UserConfig
@@ -54,7 +55,7 @@ def _build_saved_user_config(llm_config: dict | None):
         other_config=json.dumps({}),
     )
     config.id = "cfg-test"
-    config.created_at = datetime.now(timezone.utc)
+    config.created_at = datetime.now(UTC)
     return config
 
 
@@ -298,7 +299,7 @@ async def test_agent_task_llm_preflight_reports_timeout(monkeypatch):
         close = getattr(_awaitable, "close", None)
         if callable(close):
             close()
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     monkeypatch.setattr(config_module.asyncio, "wait_for", _raise_timeout)
     monkeypatch.setattr(

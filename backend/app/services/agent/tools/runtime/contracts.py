@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -53,7 +53,7 @@ class ToolInputContractRegistry:
         return set()
 
     @classmethod
-    def validate_unknown_fields(cls, *, schema: Any, payload: Dict[str, Any]) -> None:
+    def validate_unknown_fields(cls, *, schema: Any, payload: dict[str, Any]) -> None:
         allowed = cls.allowed_fields(schema)
         if not allowed:
             return
@@ -66,7 +66,7 @@ class ToolInputContractRegistry:
             )
 
     @classmethod
-    def validate_and_dump(cls, *, schema: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_and_dump(cls, *, schema: Any, payload: dict[str, Any]) -> dict[str, Any]:
         if schema is None:
             return dict(payload or {})
         try:
@@ -94,7 +94,7 @@ class ToolInputContractRegistry:
 
 class ToolOutputContractRegistry:
     @staticmethod
-    def _require_keys(payload: Dict[str, Any], keys: list[str]) -> None:
+    def _require_keys(payload: dict[str, Any], keys: list[str]) -> None:
         missing = [key for key in keys if key not in payload]
         if missing:
             raise ToolContractViolation(

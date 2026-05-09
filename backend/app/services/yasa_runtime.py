@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 YASA_RUNNER_BINARY = "/opt/yasa/bin/yasa"
 YASA_RUNNER_RESOURCE_DIR = "/opt/yasa/resource"
@@ -24,10 +23,10 @@ _YASA_RUNNER_UAST_BINARY_BY_LANGUAGE: dict[str, str] = {
 
 
 def resolve_yasa_uast_sdk_path(
-    language: Optional[str],
+    language: str | None,
     *,
     prefer_runner_paths: bool = False,
-) -> Optional[str]:
+) -> str | None:
     normalized = str(language or "").strip().lower()
     binary_name = _YASA_UAST_BINARY_BY_LANGUAGE.get(normalized)
     if not binary_name:
@@ -60,8 +59,8 @@ def build_yasa_scan_command(
     language: str,
     report_dir: str,
     checker_pack_ids: list[str],
-    checker_ids: Optional[list[str]] = None,
-    rule_config_file: Optional[str] = None,
+    checker_ids: list[str] | None = None,
+    rule_config_file: str | None = None,
     use_runner_paths: bool = False,
 ) -> list[str]:
     cmd = [

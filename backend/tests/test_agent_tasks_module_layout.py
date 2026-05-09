@@ -20,16 +20,18 @@ def test_agent_tasks_split_modules_exist():
 
 
 def test_agent_tasks_facade_re_exports_key_symbols():
-    from app.api.v1.endpoints import agent_tasks
-    from app.api.v1.endpoints import agent_tasks_bootstrap
-    from app.api.v1.endpoints import agent_tasks_contracts
-    from app.api.v1.endpoints import agent_tasks_execution
-    from app.api.v1.endpoints import agent_tasks_findings
-    from app.api.v1.endpoints import agent_tasks_reporting
-    from app.api.v1.endpoints import agent_tasks_routes_results
-    from app.api.v1.endpoints import agent_tasks_routes_tasks
-    from app.api.v1.endpoints import agent_tasks_tool_runtime
-    from app.api.v1.endpoints import agent_tasks_runtime
+    from app.api.v1.endpoints import (
+        agent_tasks,
+        agent_tasks_bootstrap,
+        agent_tasks_contracts,
+        agent_tasks_execution,
+        agent_tasks_findings,
+        agent_tasks_reporting,
+        agent_tasks_routes_results,
+        agent_tasks_routes_tasks,
+        agent_tasks_runtime,
+        agent_tasks_tool_runtime,
+    )
 
     assert agent_tasks.AgentTaskCreate is agent_tasks_contracts.AgentTaskCreate
     assert agent_tasks.StepRetryExceededError is agent_tasks_runtime.StepRetryExceededError

@@ -1,8 +1,10 @@
-from app.services.rule import get_rule_by_patch
-from app.schemas.opengrep import OpengrepRuleCreateRequest
 import asyncio
 import json
+
 from litellm import close_litellm_async_clients
+
+from app.schemas.opengrep import OpengrepRuleCreateRequest
+from app.services.rule import get_rule_by_patch
 
 repo_owner = "vim"
 repo_name = "vim"
@@ -37,18 +39,18 @@ index ce30b8d39..0d76b3b27 100644
 --- a/src/ex_cmds2.c
 +++ b/src/ex_cmds2.c
 @@ -197,9 +197,11 @@ dialog_changed(
- 	// restore to empty when write failed
- 	if (empty_bufname)
- 	{
--	    VIM_CLEAR(buf->b_fname);
-+	    // prevent double free
-+	    if (buf->b_sfname != buf->b_ffname)
-+		VIM_CLEAR(buf->b_sfname);
-+	    buf->b_fname = NULL;
- 	    VIM_CLEAR(buf->b_ffname);
--	    VIM_CLEAR(buf->b_sfname);
- 	    unchanged(buf, TRUE, FALSE);
- 	}
+     // restore to empty when write failed
+     if (empty_bufname)
+     {
+-        VIM_CLEAR(buf->b_fname);
++        // prevent double free
++        if (buf->b_sfname != buf->b_ffname)
++        VIM_CLEAR(buf->b_sfname);
++        buf->b_fname = NULL;
+         VIM_CLEAR(buf->b_ffname);
+-        VIM_CLEAR(buf->b_sfname);
+         unchanged(buf, TRUE, FALSE);
+     }
      }
 diff --git a/src/testdir/crash/dialog_changed_uaf b/src/testdir/crash/dialog_changed_uaf
 new file mode 100644
@@ -75,7 +77,7 @@ index 29061aa42..9aef24502 100644
 @@ -196,6 +196,12 @@ func Test_crash1_3()
    call term_sendkeys(buf, args)
    call TermWait(buf, 50)
- 
+
 +  let file = 'crash/dialog_changed_uaf'
 +  let cmn_args = "%s -u NONE -i NONE -n -e -s -S %s -c ':qa!'\<cr>"
 +  let args = printf(cmn_args, vim, file)
@@ -90,7 +92,7 @@ index 0e49ebd7a..3ca600126 100644
 --- a/src/version.c
 +++ b/src/version.c
 @@ -704,6 +704,8 @@ static char *(features[]) =
- 
+
  static int included_patches[] =
  {   /* Add new patch number below this line */
 +/**/
@@ -98,7 +100,7 @@ index 0e49ebd7a..3ca600126 100644
  /**/
      647,
  /**/
--- 
+--
 2.34.1
 """
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Protocol
+from typing import Any, Protocol
 
 from app.services.flow_parser_runner import get_flow_parser_runner_client
 
 
 class DefinitionProvider(Protocol):
-    def extract_definitions_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def extract_definitions_batch(self, items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         ...
 
 
@@ -16,14 +16,14 @@ class LocalDefinitionProvider:
 
         self.parser = TreeSitterParser()
 
-    def extract_definitions_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-        results: Dict[str, Dict[str, Any]] = {}
+    def extract_definitions_batch(self, items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        results: dict[str, dict[str, Any]] = {}
         for item in items:
             file_path = str(item.get("file_path") or "").strip()
             language = str(item.get("language") or "").strip() or "text"
             content = str(item.get("content") or "")
-            definitions: List[Dict[str, Any]] = []
-            diagnostics: List[str] = []
+            definitions: list[dict[str, Any]] = []
+            diagnostics: list[str] = []
             try:
                 tree = self.parser.parse(content, language)
                 if tree is not None:
@@ -48,7 +48,7 @@ class RunnerDefinitionProvider:
     def __init__(self) -> None:
         self.client = get_flow_parser_runner_client()
 
-    def extract_definitions_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def extract_definitions_batch(self, items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         return self.client.extract_definitions_batch(items)
 
 
@@ -62,15 +62,15 @@ class HybridDefinitionProvider:
         self.runner_provider = runner_provider or RunnerDefinitionProvider()
         self.local_provider = local_provider or LocalDefinitionProvider()
 
-    def extract_definitions_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-        results: Dict[str, Dict[str, Any]] = {}
+    def extract_definitions_batch(self, items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        results: dict[str, dict[str, Any]] = {}
 
         try:
             results.update(self.runner_provider.extract_definitions_batch(items))
         except Exception:
             pass
 
-        fallback_items: List[Dict[str, Any]] = []
+        fallback_items: list[dict[str, Any]] = []
         for item in items:
             file_path = str(item.get("file_path") or "").strip()
             payload = results.get(file_path) or {}

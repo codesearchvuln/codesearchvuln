@@ -1,14 +1,15 @@
 """Runtime state and retry/finalization helpers for agent tasks."""
 
 import asyncio
-import json
 import logging
 import time
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, func, inspect as sa_inspect, select
+from sqlalchemy import delete, select
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import NO_VALUE
 
@@ -26,22 +27,22 @@ from app.services.project_metrics import project_metrics_refresher
 
 logger = logging.getLogger(__name__)
 
-_running_tasks: Dict[str, Any] = {}
-_running_asyncio_tasks: Dict[str, asyncio.Task] = {}
-_running_queue_services: Dict[str, Any] = {}
-_running_recon_queue_services: Dict[str, Any] = {}
-_running_bl_queue_services: Dict[str, Any] = {}
-_running_orchestrators: Dict[str, Any] = {}
-_running_event_managers: Dict[str, EventManager] = {}
+_running_tasks: dict[str, Any] = {}
+_running_asyncio_tasks: dict[str, asyncio.Task] = {}
+_running_queue_services: dict[str, Any] = {}
+_running_recon_queue_services: dict[str, Any] = {}
+_running_bl_queue_services: dict[str, Any] = {}
+_running_orchestrators: dict[str, Any] = {}
+_running_event_managers: dict[str, EventManager] = {}
 #  已取消的任务集合（用于前置操作的取消检查）
-_cancelled_tasks: Set[str] = set()
+_cancelled_tasks: set[str] = set()
 TOOL_DRAIN_TIMEOUT_SECONDS = 180
 
 
 async def recompute_task_finding_counters(
     db: AsyncSession,
     task: AgentTask,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     result = await db.execute(
         select(AgentFinding).where(AgentFinding.task_id == task.id)
     )
@@ -90,10 +91,10 @@ async def _refresh_task_finding_counters(
     task_id: str,
     *,
     force: bool = False,
-    sync_state: Optional[Dict[str, Any]] = None,
+    sync_state: dict[str, Any] | None = None,
     min_interval_seconds: float = 0.0,
-    reason: Optional[str] = None,
-) -> Dict[str, Any]:
+    reason: str | None = None,
+) -> dict[str, Any]:
     normalized_task_id = str(task_id or "").strip()
     if not normalized_task_id:
         return {"updated": False, "reason": "missing_task_id"}
@@ -146,7 +147,7 @@ def is_task_cancelled(task_id: str) -> bool:
     return task_id in _cancelled_tasks
 
 
-def _build_tool_drain_metadata(drain_result: Dict[str, Any]) -> Dict[str, Any]:
+def _build_tool_drain_metadata(drain_result: dict[str, Any]) -> dict[str, Any]:
     pending_calls = drain_result.get("pending_tool_calls")
     if not isinstance(pending_calls, list):
         pending_calls = []
@@ -163,17 +164,17 @@ async def _finalize_task_terminal_state(
     task: AgentTask,
     task_id: str,
     event_emitter: Any,
-    event_manager: Optional[EventManager],
+    event_manager: EventManager | None,
     desired_status: str,
-    success_payload: Optional[Dict[str, Any]] = None,
-    failure_message: Optional[str] = None,
-    failure_metadata: Optional[Dict[str, Any]] = None,
-    verification_gate_message: Optional[str] = None,
-    verification_gate_metadata: Optional[Dict[str, Any]] = None,
-    cancel_message: Optional[str] = None,
+    success_payload: dict[str, Any] | None = None,
+    failure_message: str | None = None,
+    failure_metadata: dict[str, Any] | None = None,
+    verification_gate_message: str | None = None,
+    verification_gate_metadata: dict[str, Any] | None = None,
+    cancel_message: str | None = None,
     skip_drain_wait: bool = False,
     timeout_seconds: int = TOOL_DRAIN_TIMEOUT_SECONDS,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if skip_drain_wait:
         drain_result = {
             "ready": True,
@@ -233,7 +234,7 @@ async def _finalize_task_terminal_state(
         }
 
     task.status = final_status
-    task.completed_at = datetime.now(timezone.utc)
+    task.completed_at = datetime.now(UTC)
     if final_status == AgentTaskStatus.FAILED:
         task.error_message = final_failure_message or "Unknown error"
     else:
@@ -279,11 +280,11 @@ async def _finalize_task_terminal_state(
 
 
 def _compute_verification_pending_gate(
-    verification_payload: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
+    verification_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
     candidate_count = 0
     pending_count = 0
-    pending_examples: List[Dict[str, Any]] = []
+    pending_examples: list[dict[str, Any]] = []
     payload = verification_payload if isinstance(verification_payload, dict) else {}
     todo_summary = (
         payload.get("verification_todo_summary")
@@ -358,11 +359,11 @@ def _compute_verification_pending_gate(
 
 async def _wait_for_terminal_tool_drain(
     *,
-    event_manager: Optional[EventManager],
+    event_manager: EventManager | None,
     task_id: str,
     skip_wait: bool = False,
     timeout_seconds: int = TOOL_DRAIN_TIMEOUT_SECONDS,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if skip_wait:
         return {
             "ready": True,
@@ -434,7 +435,7 @@ def _build_retry_message(
     )
 
 
-def _classify_retry_error(exc_or_text: Any) -> Dict[str, Any]:
+def _classify_retry_error(exc_or_text: Any) -> dict[str, Any]:
     text = str(exc_or_text or "").strip()
     lowered = text.lower()
 
@@ -532,7 +533,7 @@ def _classify_retry_error(exc_or_text: Any) -> Dict[str, Any]:
     }
 
 
-def _detect_cancel_origin(task_id: str, error: Optional[BaseException] = None) -> str:
+def _detect_cancel_origin(task_id: str, error: BaseException | None = None) -> str:
     # task_cancel 事件会先写入 _cancelled_tasks，优先视为用户取消。
     if is_task_cancelled(task_id):
         return "user"
@@ -550,7 +551,7 @@ async def _run_with_retries(
     func: Callable[[], Any],
     *,
     max_attempts: int = 3,
-    retryable_predicate: Optional[Callable[[Exception], bool]] = None,
+    retryable_predicate: Callable[[Exception], bool] | None = None,
 ):
     """执行关键步骤并在失败时重试，重试耗尽后抛出 StepRetryExceededError。"""
     safe_attempts = max(1, int(max_attempts))
@@ -638,7 +639,7 @@ async def _run_with_retries(
                 ) from exc
             await asyncio.sleep(min(2, attempt))
 
-def _collect_orchestrator_stats(orchestrator: Any) -> Dict[str, int]:
+def _collect_orchestrator_stats(orchestrator: Any) -> dict[str, int]:
     """
     收集 orchestrator + sub agents 统计快照。
 
@@ -679,7 +680,7 @@ def _collect_orchestrator_stats(orchestrator: Any) -> Dict[str, int]:
     return totals
 
 
-def _snapshot_runtime_stats_to_task(task: AgentTask, orchestrator: Any) -> Dict[str, int]:
+def _snapshot_runtime_stats_to_task(task: AgentTask, orchestrator: Any) -> dict[str, int]:
     """
     将运行时统计快照写入 task，并使用 max 保留历史更大值。
     """
@@ -724,7 +725,6 @@ async def _save_agent_tree(db: AsyncSession, task_id: str) -> None:
 
      在任务完成前调用，将内存中的 Agent 树持久化到数据库
     """
-    from app.models.agent_task import AgentTreeNode
     from app.services.agent.core import agent_registry
 
     try:

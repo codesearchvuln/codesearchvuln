@@ -5,10 +5,10 @@
 
 import json
 import logging
-from enum import Enum
-from typing import Any, Dict, Optional, AsyncGenerator, List
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,43 +22,43 @@ class StreamEventType(str, Enum):
     LLM_ACTION = "llm_action"              # LLM 动作
     LLM_OBSERVATION = "llm_observation"    # LLM 观察结果
     LLM_COMPLETE = "llm_complete"          # LLM 完成
-    
+
     # LLM Token 流 (实时输出)
     THINKING_START = "thinking_start"      # 开始思考
     THINKING_TOKEN = "thinking_token"      # 思考 Token (流式)
     THINKING_END = "thinking_end"          # 思考结束
-    
+
     # 工具调用相关 - LLM 决定调用工具
     TOOL_CALL_START = "tool_call_start"    # 工具调用开始
     TOOL_CALL_INPUT = "tool_call_input"    # 工具输入参数
     TOOL_CALL_OUTPUT = "tool_call_output"  # 工具输出结果
     TOOL_CALL_END = "tool_call_end"        # 工具调用结束
     TOOL_CALL_ERROR = "tool_call_error"    # 工具调用错误
-    
+
     # 节点相关
     NODE_START = "node_start"              # 节点开始
     NODE_END = "node_end"                  # 节点结束
-    
+
     # 阶段相关
     PHASE_START = "phase_start"
     PHASE_END = "phase_end"
-    
+
     # 发现相关
     FINDING_NEW = "finding_new"            # 新发现
     FINDING_VERIFIED = "finding_verified"  # 验证通过
-    
+
     # 状态相关
     PROGRESS = "progress"
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
-    
+
     # 任务相关
     TASK_START = "task_start"
     TASK_COMPLETE = "task_complete"
     TASK_ERROR = "task_error"
     TASK_CANCEL = "task_cancel"
-    
+
     # 心跳
     HEARTBEAT = "heartbeat"
 
@@ -67,15 +67,15 @@ class StreamEventType(str, Enum):
 class StreamEvent:
     """流式事件"""
     event_type: StreamEventType
-    data: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    data: dict[str, Any] = field(default_factory=dict)
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     sequence: int = 0
-    
+
     # 可选字段
-    node_name: Optional[str] = None
-    phase: Optional[str] = None
-    tool_name: Optional[str] = None
-    
+    node_name: str | None = None
+    phase: str | None = None
+    tool_name: str | None = None
+
     def to_sse(self) -> str:
         """转换为 SSE 格式"""
         event_data = {
@@ -84,17 +84,17 @@ class StreamEvent:
             "timestamp": self.timestamp,
             "sequence": self.sequence,
         }
-        
+
         if self.node_name:
             event_data["node"] = self.node_name
         if self.phase:
             event_data["phase"] = self.phase
         if self.tool_name:
             event_data["tool"] = self.tool_name
-        
+
         return f"event: {self.event_type.value}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "event_type": self.event_type.value,
@@ -110,32 +110,32 @@ class StreamEvent:
 class StreamHandler:
     """
     流式事件处理器
-    
+
     最佳实践:
     1. 使用 astream_events 捕获所有 LangGraph 事件
     2. 将内部事件转换为前端友好的格式
     3. 支持多种事件类型的分发
     """
-    
+
     def __init__(self, task_id: str):
         self.task_id = task_id
         self._sequence = 0
         self._current_phase = None
         self._current_node = None
         self._thinking_buffer = []
-        self._tool_states: Dict[str, Dict] = {}
+        self._tool_states: dict[str, dict] = {}
         self._max_payload_chars = 120000
         self._max_collection_items = 200
-    
+
     def _next_sequence(self) -> int:
         """获取下一个序列号"""
         self._sequence += 1
         return self._sequence
-    
-    async def process_langgraph_event(self, event: Dict[str, Any]) -> Optional[StreamEvent]:
+
+    async def process_langgraph_event(self, event: dict[str, Any]) -> StreamEvent | None:
         """
         处理 LangGraph 事件
-        
+
         支持的事件类型:
         - on_chain_start: 链/节点开始
         - on_chain_end: 链/节点结束
@@ -150,50 +150,50 @@ class StreamHandler:
         event_kind = event.get("event", "")
         event_name = event.get("name", "")
         event_data = event.get("data", {})
-        
+
         # LLM Token 流
         if event_kind == "on_chat_model_stream":
             return await self._handle_llm_stream(event_data, event_name)
-        
+
         # LLM 开始
         elif event_kind == "on_chat_model_start":
             return await self._handle_llm_start(event_data, event_name)
-        
+
         # LLM 结束
         elif event_kind == "on_chat_model_end":
             return await self._handle_llm_end(event_data, event_name)
-        
+
         # 工具开始
         elif event_kind == "on_tool_start":
             return await self._handle_tool_start(event_name, event_data)
-        
+
         # 工具结束
         elif event_kind == "on_tool_end":
             return await self._handle_tool_end(event_name, event_data)
-        
+
         # 节点开始
         elif event_kind == "on_chain_start" and self._is_node_event(event_name):
             return await self._handle_node_start(event_name, event_data)
-        
+
         # 节点结束
         elif event_kind == "on_chain_end" and self._is_node_event(event_name):
             return await self._handle_node_end(event_name, event_data)
-        
+
         # 自定义事件
         elif event_kind == "on_custom_event":
             return await self._handle_custom_event(event_name, event_data)
-        
+
         return None
-    
+
     def _is_node_event(self, name: str) -> bool:
         """判断是否是节点事件"""
         node_names = ["recon", "analysis", "verification", "report", "ReconNode", "AnalysisNode", "VerificationNode", "ReportNode"]
         return any(n.lower() in name.lower() for n in node_names)
-    
-    async def _handle_llm_start(self, data: Dict, name: str) -> StreamEvent:
+
+    async def _handle_llm_start(self, data: dict, name: str) -> StreamEvent:
         """处理 LLM 开始事件"""
         self._thinking_buffer = []
-        
+
         return StreamEvent(
             event_type=StreamEventType.THINKING_START,
             sequence=self._next_sequence(),
@@ -204,26 +204,26 @@ class StreamHandler:
                 "message": "🤔 正在思考...",
             },
         )
-    
-    async def _handle_llm_stream(self, data: Dict, name: str) -> Optional[StreamEvent]:
+
+    async def _handle_llm_stream(self, data: dict, name: str) -> StreamEvent | None:
         """处理 LLM Token 流事件"""
         chunk = data.get("chunk")
         if not chunk:
             return None
-        
+
         # 提取 Token 内容
         content = ""
         if hasattr(chunk, "content"):
             content = chunk.content
         elif isinstance(chunk, dict):
             content = chunk.get("content", "")
-        
+
         if not content:
             return None
-        
+
         # 添加到缓冲区
         self._thinking_buffer.append(content)
-        
+
         return StreamEvent(
             event_type=StreamEventType.THINKING_TOKEN,
             sequence=self._next_sequence(),
@@ -234,12 +234,12 @@ class StreamHandler:
                 "accumulated": "".join(self._thinking_buffer),
             },
         )
-    
-    async def _handle_llm_end(self, data: Dict, name: str) -> StreamEvent:
+
+    async def _handle_llm_end(self, data: dict, name: str) -> StreamEvent:
         """处理 LLM 结束事件"""
         full_response = "".join(self._thinking_buffer)
         self._thinking_buffer = []
-        
+
         # 提取使用的 Token 数
         usage = {}
         output = data.get("output")
@@ -248,7 +248,7 @@ class StreamHandler:
                 "input_tokens": getattr(output.usage_metadata, "input_tokens", 0),
                 "output_tokens": getattr(output.usage_metadata, "output_tokens", 0),
             }
-        
+
         return StreamEvent(
             event_type=StreamEventType.THINKING_END,
             sequence=self._next_sequence(),
@@ -261,19 +261,19 @@ class StreamHandler:
                 "message": "💡 思考完成",
             },
         )
-    
-    async def _handle_tool_start(self, tool_name: str, data: Dict) -> StreamEvent:
+
+    async def _handle_tool_start(self, tool_name: str, data: dict) -> StreamEvent:
         """处理工具开始事件"""
         import time
-        
+
         tool_input = data.get("input", {})
-        
+
         # 记录工具状态
         self._tool_states[tool_name] = {
             "start_time": time.time(),
             "input": tool_input,
         }
-        
+
         return StreamEvent(
             event_type=StreamEventType.TOOL_CALL_START,
             sequence=self._next_sequence(),
@@ -286,23 +286,23 @@ class StreamHandler:
                 "message": f"调用工具: {tool_name}",
             },
         )
-    
-    async def _handle_tool_end(self, tool_name: str, data: Dict) -> StreamEvent:
+
+    async def _handle_tool_end(self, tool_name: str, data: dict) -> StreamEvent:
         """处理工具结束事件"""
         import time
-        
+
         # 计算执行时间
         duration_ms = 0
         if tool_name in self._tool_states:
             start_time = self._tool_states[tool_name].get("start_time", time.time())
             duration_ms = int((time.time() - start_time) * 1000)
             del self._tool_states[tool_name]
-        
+
         # 提取输出
         output = data.get("output", "")
         if hasattr(output, "content"):
             output = output.content
-        
+
         return StreamEvent(
             event_type=StreamEventType.TOOL_CALL_END,
             sequence=self._next_sequence(),
@@ -316,11 +316,11 @@ class StreamHandler:
                 "message": f"工具 {tool_name} 完成 ({duration_ms}ms)",
             },
         )
-    
-    async def _handle_node_start(self, node_name: str, data: Dict) -> StreamEvent:
+
+    async def _handle_node_start(self, node_name: str, data: dict) -> StreamEvent:
         """处理节点开始事件"""
         self._current_node = node_name
-        
+
         # 映射节点到阶段
         phase_map = {
             "recon": "reconnaissance",
@@ -328,12 +328,12 @@ class StreamHandler:
             "verification": "verification",
             "report": "reporting",
         }
-        
+
         for key, phase in phase_map.items():
             if key in node_name.lower():
                 self._current_phase = phase
                 break
-        
+
         return StreamEvent(
             event_type=StreamEventType.NODE_START,
             sequence=self._next_sequence(),
@@ -345,12 +345,12 @@ class StreamHandler:
                 "message": f"▶️ 开始节点: {node_name}",
             },
         )
-    
-    async def _handle_node_end(self, node_name: str, data: Dict) -> StreamEvent:
+
+    async def _handle_node_end(self, node_name: str, data: dict) -> StreamEvent:
         """处理节点结束事件"""
         # 提取输出信息
         output = data.get("output", {})
-        
+
         summary = {}
         if isinstance(output, dict):
             # 提取关键信息
@@ -362,7 +362,7 @@ class StreamHandler:
                 summary["high_risk_areas_count"] = len(output["high_risk_areas"])
             if "verified_findings" in output:
                 summary["verified_count"] = len(output["verified_findings"])
-        
+
         return StreamEvent(
             event_type=StreamEventType.NODE_END,
             sequence=self._next_sequence(),
@@ -375,8 +375,8 @@ class StreamHandler:
                 "message": f"⏹️ 节点完成: {node_name}",
             },
         )
-    
-    async def _handle_custom_event(self, event_name: str, data: Dict) -> StreamEvent:
+
+    async def _handle_custom_event(self, event_name: str, data: dict) -> StreamEvent:
         """处理自定义事件"""
         # 映射自定义事件名到事件类型
         event_type_map = {
@@ -386,9 +386,9 @@ class StreamHandler:
             "warning": StreamEventType.WARNING,
             "error": StreamEventType.ERROR,
         }
-        
+
         event_type = event_type_map.get(event_name, StreamEventType.INFO)
-        
+
         return StreamEvent(
             event_type=event_type,
             sequence=self._next_sequence(),
@@ -396,8 +396,8 @@ class StreamHandler:
             phase=self._current_phase,
             data=data,
         )
-    
-    def _truncate_data(self, data: Any, max_length: Optional[int] = None) -> Any:
+
+    def _truncate_data(self, data: Any, max_length: int | None = None) -> Any:
         """截断数据"""
         limit = max_length or self._max_payload_chars
         if isinstance(data, str):
@@ -424,16 +424,16 @@ class StreamHandler:
         else:
             text = str(data)
             return text[:limit] if len(text) > limit else text
-    
+
     def create_progress_event(
         self,
         current: int,
         total: int,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> StreamEvent:
         """创建进度事件"""
         percentage = (current / total * 100) if total > 0 else 0
-        
+
         return StreamEvent(
             event_type=StreamEventType.PROGRESS,
             sequence=self._next_sequence(),
@@ -446,15 +446,15 @@ class StreamHandler:
                 "message": message or f"进度: {current}/{total}",
             },
         )
-    
+
     def create_finding_event(
         self,
-        finding: Dict[str, Any],
+        finding: dict[str, Any],
         is_verified: bool = False,
     ) -> StreamEvent:
         """创建发现事件"""
         event_type = StreamEventType.FINDING_VERIFIED if is_verified else StreamEventType.FINDING_NEW
-        
+
         return StreamEvent(
             event_type=event_type,
             sequence=self._next_sequence(),
@@ -470,7 +470,7 @@ class StreamHandler:
                 "message": f"{'已验证' if is_verified else ' 新发现'}: [{finding.get('severity', 'medium').upper()}] {finding.get('title', 'Unknown')}",
             },
         )
-    
+
     def create_heartbeat(self) -> StreamEvent:
         """创建心跳事件"""
         return StreamEvent(

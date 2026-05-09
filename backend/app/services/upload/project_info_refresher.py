@@ -2,11 +2,10 @@ import asyncio
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.api.v1.endpoints.projects_shared import _resolve_project_description_bundle
 from app.db.session import async_session_factory
@@ -25,15 +24,15 @@ class ProjectInfoRefresher:
     """上传后异步刷新项目语言统计与简介。"""
 
     def __init__(self, max_concurrent_refreshes: int = _DEFAULT_REFRESH_CONCURRENCY) -> None:
-        self._running: dict[str, tuple[asyncio.Task, Optional[str]]] = {}
-        self._next_expected_hash: dict[str, Optional[str]] = {}
+        self._running: dict[str, tuple[asyncio.Task, str | None]] = {}
+        self._next_expected_hash: dict[str, str | None] = {}
         self._refresh_semaphore = asyncio.Semaphore(max(1, int(max_concurrent_refreshes)))
 
     def enqueue(
         self,
-        project_id: Optional[str],
+        project_id: str | None,
         *,
-        expected_zip_hash: Optional[str] = None,
+        expected_zip_hash: str | None = None,
     ) -> None:
         if not project_id:
             return
@@ -70,7 +69,7 @@ class ProjectInfoRefresher:
         self,
         loop: asyncio.AbstractEventLoop,
         project_id: str,
-        expected_zip_hash: Optional[str],
+        expected_zip_hash: str | None,
     ) -> None:
         task_name = f"project_info_refresh:{project_id}"
         task = loop.create_task(
@@ -106,7 +105,7 @@ class ProjectInfoRefresher:
         self,
         project_id: str,
         *,
-        expected_zip_hash: Optional[str],
+        expected_zip_hash: str | None,
     ) -> None:
         initial_zip_hash = ""
         try:
@@ -171,7 +170,7 @@ class ProjectInfoRefresher:
                     return
 
                 project.description = description
-                project.updated_at = datetime.now(timezone.utc)
+                project.updated_at = datetime.now(UTC)
                 project_info_record.language_info = (
                     language_info_json or _DEFAULT_LANGUAGE_INFO_JSON
                 )
@@ -193,7 +192,7 @@ class ProjectInfoRefresher:
         self,
         project_id: str,
         *,
-        expected_zip_hash: Optional[str],
+        expected_zip_hash: str | None,
         initial_zip_hash: str,
         error: str,
     ) -> None:
@@ -241,7 +240,7 @@ class ProjectInfoRefresher:
             status="pending",
             language_info=_DEFAULT_LANGUAGE_INFO_JSON,
             description="",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(project_info_record)
         await db.flush()

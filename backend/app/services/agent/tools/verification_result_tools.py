@@ -16,7 +16,8 @@ import hashlib
 import json
 import logging
 import re
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Literal
+from collections.abc import Callable, Coroutine
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -75,7 +76,7 @@ def _normalize_save_verdict(value: Any) -> str:
     return ""
 
 
-def _normalize_save_status(value: Any, verdict: Optional[str]) -> str:
+def _normalize_save_status(value: Any, verdict: str | None) -> str:
     text = str(value or "").strip().lower()
     if text in {"verified", "true_positive", "exists", "vulnerable", "confirmed"}:
         return "verified"
@@ -105,7 +106,7 @@ def _pick_first_meaningful(*values: Any) -> Any:
     return None
 
 
-def _normalize_text_list(value: Any) -> Optional[List[str]]:
+def _normalize_text_list(value: Any) -> list[str] | None:
     if value in (None, "", [], ()):
         return None
     if isinstance(value, list):
@@ -115,8 +116,8 @@ def _normalize_text_list(value: Any) -> Optional[List[str]]:
     return [text] if text else None
 
 
-def _merge_optional_dicts(*values: Any) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {}
+def _merge_optional_dicts(*values: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
     for value in values:
         if not isinstance(value, dict):
             continue
@@ -127,7 +128,7 @@ def _merge_optional_dicts(*values: Any) -> Dict[str, Any]:
     return merged
 
 
-def build_finding_identity(task_id: str, finding: Dict[str, Any]) -> str:
+def build_finding_identity(task_id: str, finding: dict[str, Any]) -> str:
     file_path = str(finding.get("file_path") or finding.get("file") or "").strip().lower()
     vuln_type = str(finding.get("vulnerability_type") or finding.get("type") or "").strip().lower()
     title = str(finding.get("title") or "").strip().lower()
@@ -150,7 +151,7 @@ def build_finding_identity(task_id: str, finding: Dict[str, Any]) -> str:
     return f"fid:{digest}"
 
 
-def ensure_finding_identity(task_id: str, finding: Dict[str, Any]) -> str:
+def ensure_finding_identity(task_id: str, finding: dict[str, Any]) -> str:
     if not isinstance(finding, dict):
         return ""
     existing = str(
@@ -170,7 +171,7 @@ def ensure_finding_identity(task_id: str, finding: Dict[str, Any]) -> str:
     return identity
 
 
-def merge_finding_patch(base_finding: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+def merge_finding_patch(base_finding: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base_finding or {})
     for key, value in (patch or {}).items():
         if key == "verification_result" and isinstance(value, dict):
@@ -277,7 +278,7 @@ def _pick_more_informative_text(current: Any, incoming: Any) -> Any:
 
 
 def _merge_text_list_values(current: Any, incoming: Any) -> Any:
-    merged: List[str] = []
+    merged: list[str] = []
     for value in (current, incoming):
         if isinstance(value, list):
             candidates = value
@@ -292,7 +293,7 @@ def _merge_text_list_values(current: Any, incoming: Any) -> Any:
     return merged or None
 
 
-def _finding_richness_score(finding: Dict[str, Any]) -> int:
+def _finding_richness_score(finding: dict[str, Any]) -> int:
     if not isinstance(finding, dict):
         return -1
 
@@ -362,7 +363,7 @@ def _finding_richness_score(finding: Dict[str, Any]) -> int:
     return score
 
 
-def _merge_duplicate_dict_fields(primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_duplicate_dict_fields(primary: dict[str, Any], secondary: dict[str, Any]) -> dict[str, Any]:
     merged = dict(primary or {})
     for key, value in (secondary or {}).items():
         if key == "verification_result" and isinstance(value, dict):
@@ -415,7 +416,7 @@ def _merge_duplicate_dict_fields(primary: Dict[str, Any], secondary: Dict[str, A
     return merged
 
 
-def build_verification_dedup_aliases(finding: Dict[str, Any]) -> List[str]:
+def build_verification_dedup_aliases(finding: dict[str, Any]) -> list[str]:
     if not isinstance(finding, dict):
         return []
 
@@ -424,7 +425,7 @@ def build_verification_dedup_aliases(finding: Dict[str, Any]) -> List[str]:
         if isinstance(finding.get("verification_result"), dict)
         else {}
     )
-    aliases: List[str] = []
+    aliases: list[str] = []
     finding_identity = str(
         finding.get("finding_identity")
         or verification_payload.get("finding_identity")
@@ -460,7 +461,7 @@ def build_verification_dedup_aliases(finding: Dict[str, Any]) -> List[str]:
     return aliases
 
 
-def merge_duplicate_findings(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+def merge_duplicate_findings(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     existing_copy = dict(existing or {})
     incoming_copy = dict(incoming or {})
     if _finding_richness_score(incoming_copy) > _finding_richness_score(existing_copy):
@@ -480,11 +481,11 @@ def merge_duplicate_findings(existing: Dict[str, Any], incoming: Dict[str, Any])
 
 
 def deduplicate_verification_findings(
-    findings: List[Dict[str, Any]],
-    task_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    deduped: List[Dict[str, Any]] = []
-    alias_to_index: Dict[str, int] = {}
+    findings: list[dict[str, Any]],
+    task_id: str | None = None,
+) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    alias_to_index: dict[str, int] = {}
 
     for raw_finding in findings or []:
         if not isinstance(raw_finding, dict):
@@ -515,13 +516,13 @@ def deduplicate_verification_findings(
     return deduped
 
 
-def validate_finding_update_patch(fields_to_update: Dict[str, Any]) -> tuple[bool, Optional[str], Dict[str, Any], List[str]]:
+def validate_finding_update_patch(fields_to_update: dict[str, Any]) -> tuple[bool, str | None, dict[str, Any], list[str]]:
     if not isinstance(fields_to_update, dict) or not fields_to_update:
         return False, "fields_to_update 不能为空", {}, []
 
-    sanitized: Dict[str, Any] = {}
-    updated_fields: List[str] = []
-    verification_patch: Dict[str, Any] = {}
+    sanitized: dict[str, Any] = {}
+    updated_fields: list[str] = []
+    verification_patch: dict[str, Any] = {}
 
     for key, value in fields_to_update.items():
         key_text = str(key or "").strip()
@@ -571,14 +572,14 @@ class VerificationResultModel(BaseModel):
             "  - false_positive: 经验证为误报或不存在，confidence < 0.3"
         ),
     )
-    
+
     confidence: float = Field(
         ...,
         ge=0.0,
         le=1.0,
         description="置信度，必须是 [0.0, 1.0] 范围内的浮点数（不能为字符串）",
     )
-    
+
     reachability: Literal["reachable", "likely_reachable", "unknown", "unreachable"] = Field(
         ...,
         description=(
@@ -589,7 +590,7 @@ class VerificationResultModel(BaseModel):
             "  - unreachable: 代码路径无法从外部触发"
         ),
     )
-    
+
     verification_evidence: str = Field(
         ...,
         min_length=10,
@@ -601,34 +602,34 @@ class VerificationResultModel(BaseModel):
             "最少 10 个字符。"
         ),
     )
-    
+
     # 可选字段
-    poc_plan: Optional[str] = Field(
+    poc_plan: str | None = Field(
         default=None,
         description="非武器化 PoC 思路或复现步骤说明（仅用于文档，不能是可直接运行的代码）",
     )
-    
-    code_snippet: Optional[str] = Field(
+
+    code_snippet: str | None = Field(
         default=None,
         description="相关的代码片段，用于上下文说明",
     )
-    
-    suggestion: Optional[str] = Field(
+
+    suggestion: str | None = Field(
         default=None,
         description="修复建议或防御措施",
     )
-    
-    function_trigger_flow: Optional[List[str]] = Field(
+
+    function_trigger_flow: list[str] | None = Field(
         default=None,
         description="函数触发链或调用链，描述从入口点到漏洞的执行路径",
     )
-    
-    code_context: Optional[str] = Field(
+
+    code_context: str | None = Field(
         default=None,
         description="更广泛的代码上下文，帮助理解漏洞背景",
     )
-    
-    localization_status: Optional[str] = Field(
+
+    localization_status: str | None = Field(
         default=None,
         description="代码定位状态：'success'（成功定位函数）、'failed'（定位失败）、'partial'（部分定位）",
     )
@@ -675,7 +676,7 @@ class VerificationResultModel(BaseModel):
 class AgentFindingModel(BaseModel):
     """Agent 发现的漏洞的标准化结构 - 每条 finding 必须符合此模型"""
 
-    finding_identity: Optional[str] = Field(
+    finding_identity: str | None = Field(
         default=None,
         description="漏洞稳定身份标识。若未提供，将在保存时按 task_id + 原始定位信息生成。",
     )
@@ -685,81 +686,81 @@ class AgentFindingModel(BaseModel):
         min_length=1,
         description="完整文件路径（从项目根目录的相对路径或绝对路径）",
     )
-    
+
     line_start: int = Field(
         ...,
         ge=1,
         description="代码起始行号（从 1 开始）",
     )
-    
-    line_end: Optional[int] = Field(
+
+    line_end: int | None = Field(
         default=None,
         ge=1,
         description="代码结束行号（可选，如果不提供则默认等于 line_start）",
     )
-    
+
     title: str = Field(
         ...,
         min_length=5,
         max_length=200,
         description="漏洞标题（5-200 字符）",
     )
-    
+
     vulnerability_type: str = Field(
         ...,
         min_length=1,
         description="漏洞类型（如 sql_injection、xss、command_injection 等）",
     )
-    
+
     severity: Literal["critical", "high", "medium", "low", "info"] = Field(
         ...,
         description="严重程度：critical, high, medium, low, info",
     )
-    
-    cwe_id: Optional[str] = Field(
+
+    cwe_id: str | None = Field(
         default=None,
         description="CWE 编号，格式：CWE-123 或 CWE-123, CWE-456（可选）",
     )
-    
+
     verification_result: VerificationResultModel = Field(
         ...,
         description="验证结果，必须包含 verdict、confidence、reachability、verification_evidence 等必填字段",
     )
-    
+
     function_name: str = Field(
         ...,
         min_length=1,
         description="函数名称（必填）。无法精确定位时可使用语义化占位符（如 <function_at_line_120>）",
     )
-    
-    description: Optional[str] = Field(
+
+    description: str | None = Field(
         default=None,
         description="详细描述",
     )
 
-    status: Optional[Literal["verified", "likely", "false_positive", "uncertain"]] = Field(
+    status: Literal["verified", "likely", "false_positive", "uncertain"] | None = Field(
         default=None,
         description="展示状态。推荐使用 verified|likely|false_positive；传 uncertain 时会在保存时归一化为 likely。",
     )
 
-    confidence: Optional[float] = Field(
+    confidence: float | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
         description="顶层置信度，若提供会与 verification_result.confidence 对齐。",
     )
 
-    source: Optional[str] = Field(default=None, description="Source 描述")
-    sink: Optional[str] = Field(default=None, description="Sink 描述")
-    dataflow_path: Optional[List[str]] = Field(default=None, description="数据流路径")
-    cvss_score: Optional[float] = Field(default=None, description="CVSS3.1 分数")
-    cvss_vector: Optional[str] = Field(default=None, description="CVSS3.1 向量")
-    poc_code: Optional[str] = Field(default=None, description="Fuzzing Harness / PoC 代码")
-    suggestion: Optional[str] = Field(default=None, description="修复建议")
-    code_snippet: Optional[str] = Field(default=None, description="漏洞代码片段")
-    code_context: Optional[str] = Field(default=None, description="漏洞上下文代码")
-    report: Optional[str] = Field(default=None, description="漏洞详情 Markdown 报告")
-    
+    source: str | None = Field(default=None, description="Source 描述")
+    sink: str | None = Field(default=None, description="Sink 描述")
+    dataflow_path: list[str] | None = Field(default=None, description="数据流路径")
+    cvss_score: float | None = Field(default=None, description="CVSS3.1 分数")
+    cvss_vector: str | None = Field(default=None, description="CVSS3.1 向量")
+    poc_code: str | None = Field(default=None, description="Fuzzing Harness / PoC 代码")
+    suggestion: str | None = Field(default=None, description="修复建议")
+    code_snippet: str | None = Field(default=None, description="漏洞代码片段")
+    code_context: str | None = Field(default=None, description="漏洞上下文代码")
+    report: str | None = Field(default=None, description="漏洞详情 Markdown 报告")
+
     @field_validator("line_end", mode="before")
     @classmethod
     def set_line_end_default(cls, v, info):
@@ -814,7 +815,7 @@ class AgentFindingModel(BaseModel):
 class SaveVerificationResultsInput(BaseModel):
     """保存验证结果工具的输入参数 - 严密参数约束"""
 
-    findings: List[AgentFindingModel] = Field(
+    findings: list[AgentFindingModel] = Field(
         ...,
         min_length=1,
         description=(
@@ -842,13 +843,13 @@ class SaveVerificationResultsInput(BaseModel):
             "false_positive 会被标记为 false_positive；likely/uncertain 会统一落到 likely 状态，方便后续展示。"
         ),
     )
-    
-    summary: Optional[str] = Field(
+
+    summary: str | None = Field(
         default=None,
         description="可选的摘要信息，记录本轮验证的整体结论（用于日志）。建议包含：总数、verdict分布等。",
     )
-    
-    strict_mode: Optional[bool] = Field(
+
+    strict_mode: bool | None = Field(
         default=True,
         description=(
             "严格模式（默认 True）：任何单个 finding 的验证失败都会导致整个工具调用失败。\n"
@@ -863,7 +864,7 @@ class SaveVerificationResultsInput(BaseModel):
         if not isinstance(v, list):
             raise ValueError("findings 必须是列表")
 
-        def _normalize_reachability(verdict: Optional[str], reachability: Any) -> str:
+        def _normalize_reachability(verdict: str | None, reachability: Any) -> str:
             text = str(reachability or "").strip().lower()
             if text in _ALLOWED_REACHABILITY:
                 return text
@@ -875,7 +876,7 @@ class SaveVerificationResultsInput(BaseModel):
                 return "unreachable"
             return "unknown"
 
-        def _normalize_verification_payload(item: Dict[str, Any], idx: int) -> Dict[str, Any]:
+        def _normalize_verification_payload(item: dict[str, Any], idx: int) -> dict[str, Any]:
             payload = dict(item)
             payload["severity"] = str(payload.get("severity") or "medium").strip().lower()
             if payload.get("line_end") is None and payload.get("line_start") is not None:
@@ -951,7 +952,7 @@ class SaveVerificationResultsInput(BaseModel):
                 function_name = f"<function_at_line_{line_value}>" if line_value else "<function_not_localized>"
             payload["function_name"] = function_name
             return payload
-        
+
         result = []
         for idx, item in enumerate(v):
             if isinstance(item, dict):
@@ -959,12 +960,12 @@ class SaveVerificationResultsInput(BaseModel):
                     normalized_item = _normalize_verification_payload(item, idx)
                     result.append(AgentFindingModel(**normalized_item))
                 except Exception as e:
-                    raise ValueError(f"findings[{idx}] 验证失败: {str(e)}")
+                    raise ValueError(f"findings[{idx}] 验证失败: {str(e)}") from e
             elif isinstance(item, AgentFindingModel):
                 result.append(item)
             else:
                 raise ValueError(f"findings[{idx}] 必须是 dict 或 AgentFindingModel，得到: {type(item).__name__}")
-        
+
         return result
 
 
@@ -973,84 +974,84 @@ class SaveVerificationResultCallInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    findings: Optional[List[Dict[str, Any]]] = Field(
+    findings: list[dict[str, Any]] | None = Field(
         default=None,
         description="兼容旧链路：批量 findings 列表。",
     )
-    finding: Optional[Dict[str, Any]] = Field(
+    finding: dict[str, Any] | None = Field(
         default=None,
         description="兼容输入：完整的单个 finding 对象（可内含 verification_result）。",
     )
-    verification_result: Optional[Dict[str, Any]] = Field(
+    verification_result: dict[str, Any] | None = Field(
         default=None,
         description="兼容输入：嵌套 verification_result 对象。",
     )
 
-    finding_identity: Optional[str] = None
-    file_path: Optional[str] = None
-    file: Optional[str] = None
-    path: Optional[str] = None
-    line_start: Optional[int] = None
-    line: Optional[int] = None
-    line_end: Optional[int] = None
-    function_name: Optional[str] = None
-    title: Optional[str] = None
-    display_title: Optional[str] = None
-    vulnerability_type: Optional[str] = None
-    type: Optional[str] = None
-    severity: Optional[str] = None
-    description: Optional[str] = None
-    source: Optional[str] = None
-    sink: Optional[str] = None
-    dataflow_path: Optional[Any] = None
-    is_verified: Optional[bool] = None
-    cvss_score: Optional[Any] = None
-    cvss_vector: Optional[str] = None
-    poc_code: Optional[str] = None
-    poc: Optional[Dict[str, Any]] = None
-    poc_plan: Optional[str] = None
-    suggestion: Optional[str] = None
-    verdict: Optional[str] = None
-    authenticity: Optional[str] = None
-    confidence: Optional[Any] = None
-    ai_confidence: Optional[Any] = None
-    status: Optional[str] = None
-    reachability: Optional[str] = None
-    verification_evidence: Optional[str] = None
-    verification_details: Optional[str] = None
-    evidence: Optional[str] = None
-    cwe_id: Optional[str] = None
-    code_snippet: Optional[str] = None
-    function_trigger_flow: Optional[Any] = None
-    code_context: Optional[str] = None
-    localization_status: Optional[str] = None
-    report: Optional[str] = None
-    vulnerability_report: Optional[str] = None
-    flow: Optional[Dict[str, Any]] = None
-    reachability_target: Optional[Dict[str, Any]] = None
-    context_start_line: Optional[int] = None
-    context_end_line: Optional[int] = None
-    function_range_validation: Optional[Dict[str, Any]] = None
-    validation_reason: Optional[str] = None
-    localization_failure_trace: Optional[Any] = None
-    known_facts: Optional[Any] = None
-    inferences_to_verify: Optional[Any] = None
-    final_conclusion: Optional[Any] = None
-    verification_todo_id: Optional[str] = None
-    verification_fingerprint: Optional[str] = None
-    source_sink_authenticity_passed: Optional[bool] = None
-    source_sink_authenticity_errors: Optional[Any] = None
-    finding_metadata: Optional[Dict[str, Any]] = None
-    attacker_flow: Optional[str] = None
-    taint_flow: Optional[Any] = None
-    evidence_chain: Optional[Any] = None
-    missing_checks: Optional[Any] = None
-    fix_code: Optional[str] = None
-    fix_description: Optional[str] = None
-    verification_method: Optional[str] = None
-    sink_reachable: Optional[Any] = None
-    upstream_call_chain: Optional[Any] = None
-    sink_trigger_condition: Optional[str] = None
+    finding_identity: str | None = None
+    file_path: str | None = None
+    file: str | None = None
+    path: str | None = None
+    line_start: int | None = None
+    line: int | None = None
+    line_end: int | None = None
+    function_name: str | None = None
+    title: str | None = None
+    display_title: str | None = None
+    vulnerability_type: str | None = None
+    type: str | None = None
+    severity: str | None = None
+    description: str | None = None
+    source: str | None = None
+    sink: str | None = None
+    dataflow_path: Any | None = None
+    is_verified: bool | None = None
+    cvss_score: Any | None = None
+    cvss_vector: str | None = None
+    poc_code: str | None = None
+    poc: dict[str, Any] | None = None
+    poc_plan: str | None = None
+    suggestion: str | None = None
+    verdict: str | None = None
+    authenticity: str | None = None
+    confidence: Any | None = None
+    ai_confidence: Any | None = None
+    status: str | None = None
+    reachability: str | None = None
+    verification_evidence: str | None = None
+    verification_details: str | None = None
+    evidence: str | None = None
+    cwe_id: str | None = None
+    code_snippet: str | None = None
+    function_trigger_flow: Any | None = None
+    code_context: str | None = None
+    localization_status: str | None = None
+    report: str | None = None
+    vulnerability_report: str | None = None
+    flow: dict[str, Any] | None = None
+    reachability_target: dict[str, Any] | None = None
+    context_start_line: int | None = None
+    context_end_line: int | None = None
+    function_range_validation: dict[str, Any] | None = None
+    validation_reason: str | None = None
+    localization_failure_trace: Any | None = None
+    known_facts: Any | None = None
+    inferences_to_verify: Any | None = None
+    final_conclusion: Any | None = None
+    verification_todo_id: str | None = None
+    verification_fingerprint: str | None = None
+    source_sink_authenticity_passed: bool | None = None
+    source_sink_authenticity_errors: Any | None = None
+    finding_metadata: dict[str, Any] | None = None
+    attacker_flow: str | None = None
+    taint_flow: Any | None = None
+    evidence_chain: Any | None = None
+    missing_checks: Any | None = None
+    fix_code: str | None = None
+    fix_description: str | None = None
+    verification_method: str | None = None
+    sink_reachable: Any | None = None
+    upstream_call_chain: Any | None = None
+    sink_trigger_condition: str | None = None
 
 
 class UpdateVulnerabilityFindingInput(BaseModel):
@@ -1059,7 +1060,7 @@ class UpdateVulnerabilityFindingInput(BaseModel):
         min_length=8,
         description="要修正的漏洞稳定身份标识。",
     )
-    fields_to_update: Dict[str, Any] = Field(
+    fields_to_update: dict[str, Any] = Field(
         ...,
         description=(
             "需要更新的字段。允许顶层字段："
@@ -1084,7 +1085,7 @@ class UpdateVulnerabilityFindingInput(BaseModel):
 
     @field_validator("fields_to_update")
     @classmethod
-    def validate_patch(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_patch(cls, value: dict[str, Any]) -> dict[str, Any]:
         ok, error, sanitized, _ = validate_finding_update_patch(value)
         if not ok:
             raise ValueError(error or "非法更新字段")
@@ -1114,7 +1115,7 @@ class SaveVerificationResultTool(AgentTool):
     def __init__(
         self,
         task_id: str,
-        save_callback: Optional[Callable[[List[Dict[str, Any]]], Coroutine[Any, Any, int]]] = None,
+        save_callback: Callable[[list[dict[str, Any]]], Coroutine[Any, Any, int]] | None = None,
         defer_persistence: bool = False,
     ):
         """
@@ -1130,8 +1131,8 @@ class SaveVerificationResultTool(AgentTool):
         self._save_callback = save_callback
         self._defer_persistence = bool(defer_persistence)
         # 内存缓冲：即使没有注入回调也能暂存结果
-        self._buffered_findings: List[Dict[str, Any]] = []
-        self._saved_count: Optional[int] = None  # None 表示尚未调用过
+        self._buffered_findings: list[dict[str, Any]] = []
+        self._saved_count: int | None = None  # None 表示尚未调用过
         self._seen_payload_digests: set[str] = set()
 
     # ------------------------------------------------------------------ #
@@ -1192,7 +1193,7 @@ class SaveVerificationResultTool(AgentTool):
     # ------------------------------------------------------------------ #
 
     @property
-    def buffered_findings(self) -> List[Dict[str, Any]]:
+    def buffered_findings(self) -> list[dict[str, Any]]:
         """返回最近一次（或历次）累积的 findings 缓冲（无论是否已持久化）"""
         return list(self._buffered_findings)
 
@@ -1202,7 +1203,7 @@ class SaveVerificationResultTool(AgentTool):
         return int(self._saved_count or 0) > 0
 
     @property
-    def saved_count(self) -> Optional[int]:
+    def saved_count(self) -> int | None:
         return self._saved_count
 
     @property
@@ -1221,7 +1222,7 @@ class SaveVerificationResultTool(AgentTool):
         return cloned
 
     @staticmethod
-    def _build_payload_digest(findings: List[Dict[str, Any]]) -> str:
+    def _build_payload_digest(findings: list[dict[str, Any]]) -> str:
         try:
             normalized = json.dumps(findings, ensure_ascii=False, sort_keys=True, default=str)
         except Exception:
@@ -1229,7 +1230,7 @@ class SaveVerificationResultTool(AgentTool):
         return hashlib.sha1(normalized.encode("utf-8", errors="ignore")).hexdigest()
 
     @staticmethod
-    def _build_buffer_key(finding: Dict[str, Any]) -> str:
+    def _build_buffer_key(finding: dict[str, Any]) -> str:
         identity = str(finding.get("finding_identity") or "").strip()
         if identity:
             return f"identity:{identity}"
@@ -1243,7 +1244,7 @@ class SaveVerificationResultTool(AgentTool):
             ]
         )
 
-    def _upsert_buffered_finding(self, finding: Dict[str, Any]) -> None:
+    def _upsert_buffered_finding(self, finding: dict[str, Any]) -> None:
         buffer_key = self._build_buffer_key(finding)
         for idx, existing in enumerate(self._buffered_findings):
             if not isinstance(existing, dict):
@@ -1260,35 +1261,35 @@ class SaveVerificationResultTool(AgentTool):
 
     async def _execute(
         self,
-        file_path: Optional[str] = None,
-        line_start: Optional[int] = None,
-        function_name: Optional[str] = None,
-        title: Optional[str] = None,
-        vulnerability_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        confidence: Optional[float] = None,
-        status: Optional[str] = None,
-        description: Optional[str] = None,
-        finding_identity: Optional[str] = None,
-        line_end: Optional[int] = None,
-        source: Optional[str] = None,
-        sink: Optional[str] = None,
-        dataflow_path: Optional[List[str]] = None,
-        is_verified: Optional[bool] = None,
-        cvss_score: Optional[float] = None,
-        cvss_vector: Optional[str] = None,
-        poc_code: Optional[str] = None,
-        suggestion: Optional[str] = None,
-        verdict: Optional[str] = None,
-        reachability: Optional[str] = None,
-        verification_evidence: Optional[str] = None,
-        cwe_id: Optional[str] = None,
-        poc_plan: Optional[str] = None,
-        code_snippet: Optional[str] = None,
-        function_trigger_flow: Optional[List[str]] = None,
-        code_context: Optional[str] = None,
-        localization_status: Optional[str] = None,
-        report: Optional[str] = None,
+        file_path: str | None = None,
+        line_start: int | None = None,
+        function_name: str | None = None,
+        title: str | None = None,
+        vulnerability_type: str | None = None,
+        severity: str | None = None,
+        confidence: float | None = None,
+        status: str | None = None,
+        description: str | None = None,
+        finding_identity: str | None = None,
+        line_end: int | None = None,
+        source: str | None = None,
+        sink: str | None = None,
+        dataflow_path: list[str] | None = None,
+        is_verified: bool | None = None,
+        cvss_score: float | None = None,
+        cvss_vector: str | None = None,
+        poc_code: str | None = None,
+        suggestion: str | None = None,
+        verdict: str | None = None,
+        reachability: str | None = None,
+        verification_evidence: str | None = None,
+        cwe_id: str | None = None,
+        poc_plan: str | None = None,
+        code_snippet: str | None = None,
+        function_trigger_flow: list[str] | None = None,
+        code_context: str | None = None,
+        localization_status: str | None = None,
+        report: str | None = None,
         **kwargs,
     ) -> ToolResult:
         """
@@ -1579,7 +1580,7 @@ class SaveVerificationResultTool(AgentTool):
         if normalized_function_trigger_flow and "function_trigger_flow" not in flow_payload:
             flow_payload["function_trigger_flow"] = list(normalized_function_trigger_flow)
 
-        normalized_cvss_score: Optional[float]
+        normalized_cvss_score: float | None
         raw_cvss_score = _pick_first_meaningful(
             cvss_score,
             finding_payload.get("cvss_score"),
@@ -1920,14 +1921,14 @@ class SaveVerificationResultTool(AgentTool):
             self._saved_count = previous_saved + saved_delta
             if saved_delta > 0:
                 self._seen_payload_digests.add(payload_digest)
-            
+
             logger.info(
                 "[SaveVerificationResult][%s] 持久化完成：finding=%s, total_saved=%d",
                 task_id,
                 title,
                 self._saved_count,
             )
-            
+
             return ToolResult(
                 success=True,
                 data={
@@ -1965,9 +1966,7 @@ class UpdateVulnerabilityFindingTool(AgentTool):
     def __init__(
         self,
         task_id: str,
-        update_callback: Optional[
-            Callable[[str, Dict[str, Any], str], Coroutine[Any, Any, Dict[str, Any]]]
-        ] = None,
+        update_callback: Callable[[str, dict[str, Any], str], Coroutine[Any, Any, dict[str, Any]]] | None = None,
     ) -> None:
         super().__init__()
         self.task_id = task_id
@@ -1992,7 +1991,7 @@ class UpdateVulnerabilityFindingTool(AgentTool):
     async def _execute(
         self,
         finding_identity: str,
-        fields_to_update: Dict[str, Any],
+        fields_to_update: dict[str, Any],
         update_reason: str,
     ) -> ToolResult:
         ok, error, sanitized, updated_fields = validate_finding_update_patch(fields_to_update)

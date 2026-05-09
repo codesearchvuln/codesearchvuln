@@ -164,7 +164,7 @@ class FileSelectionE2ETest:
             response = self.client.get(health_url)
             print(f"  响应状态: {response.status_code}")
             if response.status_code == 200:
-                print(f"服务运行正常")
+                print("服务运行正常")
             else:
                 print(f"健康检查返回: {response.status_code} - {response.text}")
                 return False
@@ -408,7 +408,7 @@ def run_mock_tests():
     parsed = json.loads(json_str)
     assert "exclude_patterns" in parsed
     assert parsed["target_files"] == ["src/main.py", "src/utils.py"]
-    print(f"扫描请求格式正确")
+    print("扫描请求格式正确")
 
     # 测试 3: ZIP 文件创建和读取
     print("\n[模拟测试 3] ZIP 文件处理...")

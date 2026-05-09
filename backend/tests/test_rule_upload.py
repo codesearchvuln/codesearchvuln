@@ -1,13 +1,10 @@
 """
 测试 Opengrep 规则上传功能
 """
-import asyncio
 import os
 import tempfile
 import zipfile
-from pathlib import Path
 
-import pytest
 import yaml
 
 
@@ -123,8 +120,8 @@ def create_sample_zip_file(output_path: str, num_rules: int = 10):
 
     print(f"创建示例 ZIP 文件: {output_path}")
     print(f"   - {num_rules} 个有效规则")
-    print(f"   - 1 个无效规则")
-    print(f"   - 1 个空文件")
+    print("   - 1 个无效规则")
+    print("   - 1 个空文件")
 
 
 if __name__ == "__main__":
@@ -142,7 +139,7 @@ if __name__ == "__main__":
     create_sample_zip_file(sample_zip_path, num_rules=20)
 
     print("\n所有测试通过！")
-    print(f"\n💡 可以使用以下命令测试上传功能：")
-    print(f"   curl -X POST http://localhost:8000/api/v1/static-tasks/rules/upload \\")
-    print(f"        -H 'Authorization: Bearer YOUR_TOKEN' \\")
+    print("\n💡 可以使用以下命令测试上传功能：")
+    print("   curl -X POST http://localhost:8000/api/v1/static-tasks/rules/upload \\")
+    print("        -H 'Authorization: Bearer YOUR_TOKEN' \\")
     print(f"        -F 'file=@{sample_zip_path}'")

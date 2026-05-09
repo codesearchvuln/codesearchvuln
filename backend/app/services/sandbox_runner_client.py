@@ -11,16 +11,15 @@ Sandbox Runner Client - 高层客户端
 from __future__ import annotations
 
 import uuid
-from typing import Dict, List, Literal, Optional
 from pathlib import Path
+from typing import Literal
 
 from app.core.config import settings
 from app.services.sandbox_runner import (
-    SandboxRunSpec,
     SandboxRunResult,
+    SandboxRunSpec,
     run_sandbox_container,
 )
-
 
 ProfileType = Literal["isolated_exec", "network_verify", "tool_workdir"]
 
@@ -39,7 +38,7 @@ class SandboxRunnerClient:
         self.workspace_root = Path(settings.SCAN_WORKSPACE_ROOT) / "sandbox-runner"
         self.workspace_root.mkdir(parents=True, exist_ok=True)
 
-    def _get_image_candidates(self) -> List[str]:
+    def _get_image_candidates(self) -> list[str]:
         """
         获取唯一的 sandbox-runner 镜像候选列表
         """
@@ -60,7 +59,7 @@ class SandboxRunnerClient:
 
         raise RuntimeError("SANDBOX_RUNNER_IMAGE must be configured before selecting a sandbox runner image")
 
-    def _create_workspace(self, run_id: Optional[str] = None) -> Path:
+    def _create_workspace(self, run_id: str | None = None) -> Path:
         """
         创建运行 workspace
 
@@ -88,7 +87,7 @@ class SandboxRunnerClient:
     def _build_spec_for_profile(
         self,
         profile: ProfileType,
-        command: List[str],
+        command: list[str],
         workspace: Path,
         **kwargs,
     ) -> SandboxRunSpec:
@@ -178,8 +177,8 @@ class SandboxRunnerClient:
     def execute(
         self,
         profile: ProfileType,
-        command: List[str],
-        run_id: Optional[str] = None,
+        command: list[str],
+        run_id: str | None = None,
         **kwargs,
     ) -> SandboxRunResult:
         """
@@ -212,7 +211,7 @@ class SandboxRunnerClient:
 
     def execute_isolated(
         self,
-        command: List[str],
+        command: list[str],
         **kwargs,
     ) -> SandboxRunResult:
         """隔离执行 (无网络)"""
@@ -220,7 +219,7 @@ class SandboxRunnerClient:
 
     def execute_with_network(
         self,
-        command: List[str],
+        command: list[str],
         **kwargs,
     ) -> SandboxRunResult:
         """网络执行 (用于验证)"""
@@ -228,7 +227,7 @@ class SandboxRunnerClient:
 
     def execute_in_project(
         self,
-        command: List[str],
+        command: list[str],
         project_dir: str,
         **kwargs,
     ) -> SandboxRunResult:

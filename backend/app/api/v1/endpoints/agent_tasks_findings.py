@@ -5,10 +5,9 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
-from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func
@@ -21,9 +20,14 @@ from app.services.agent.utils.vulnerability_naming import (
     build_cn_structured_description,
     build_cn_structured_description_markdown,
     build_cn_structured_title,
-    infer_code_fence_language,
+)
+from app.services.agent.utils.vulnerability_naming import (
     normalize_cwe_id as normalize_cwe_id_util,
+)
+from app.services.agent.utils.vulnerability_naming import (
     resolve_cwe_id as resolve_cwe_id_util,
+)
+from app.services.agent.utils.vulnerability_naming import (
     resolve_vulnerability_profile as resolve_vulnerability_profile_util,
 )
 
@@ -48,7 +52,7 @@ def _safe_text(value: Any) -> str:
     return str(value)
 
 
-def _to_int(value: Any) -> Optional[int]:
+def _to_int(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -62,14 +66,14 @@ def _to_int(value: Any) -> Optional[int]:
     return None
 
 
-def _normalize_optional_text(value: Any) -> Optional[str]:
+def _normalize_optional_text(value: Any) -> str | None:
     if value is None:
         return None
     text = _safe_text(value).strip()
     return text or None
 
 
-def _compact_verification_fingerprint(raw_value: str, *, task_id: Optional[str]) -> str:
+def _compact_verification_fingerprint(raw_value: str, *, task_id: str | None) -> str:
     seed = f"{str(task_id or '').strip()}|{raw_value}"
     digest = hashlib.sha256(seed.encode("utf-8", errors="ignore")).hexdigest()[:56]
     return f"fp:{digest}"
@@ -78,8 +82,8 @@ def _compact_verification_fingerprint(raw_value: str, *, task_id: Optional[str])
 def _normalize_verification_fingerprint(
     value: Any,
     *,
-    task_id: Optional[str],
-) -> Optional[str]:
+    task_id: str | None,
+) -> str | None:
     fingerprint = _normalize_optional_text(value)
     if not fingerprint:
         return None
@@ -88,7 +92,7 @@ def _normalize_verification_fingerprint(
     return _compact_verification_fingerprint(fingerprint, task_id=task_id)
 
 
-def _normalize_relative_file_path(path_value: str, project_root: Optional[str]) -> str:
+def _normalize_relative_file_path(path_value: str, project_root: str | None) -> str:
     normalized = path_value.replace("\\", "/").strip()
     if not normalized:
         return normalized
@@ -114,7 +118,7 @@ def _normalize_relative_file_path(path_value: str, project_root: Optional[str]) 
 _ABS_PATH_IN_TEXT_RE = re.compile(r"(?P<path>(?:[A-Za-z]:[\\/]|/)[^\s:]+)")
 
 
-def _sanitize_text_paths(value: Any, project_root: Optional[str]) -> Optional[str]:
+def _sanitize_text_paths(value: Any, project_root: str | None) -> str | None:
     if value is None:
         return None
     text = str(value)
@@ -132,9 +136,9 @@ def _sanitize_text_paths(value: Any, project_root: Optional[str]) -> Optional[st
 
 
 def _resolve_finding_file_path(
-    raw_file_path: Optional[str],
-    project_root: Optional[str],
-) -> Tuple[Optional[str], Optional[str]]:
+    raw_file_path: str | None,
+    project_root: str | None,
+) -> tuple[str | None, str | None]:
     if not raw_file_path:
         return None, None
 
@@ -144,7 +148,7 @@ def _resolve_finding_file_path(
         return None, None
 
     candidate = candidate.replace("\\", "/")
-    path_candidates: List[Path] = []
+    path_candidates: list[Path] = []
     raw_path = Path(candidate)
     path_candidates.append(raw_path)
 
@@ -181,7 +185,7 @@ def _resolve_finding_file_path(
             # 2) basename 唯一匹配兜底（限制匹配数量避免大仓库扫描过慢）
             if candidate_parts:
                 basename = candidate_parts[-1]
-                matches: List[Path] = []
+                matches: list[Path] = []
                 for matched in root_path.rglob(basename):
                     if matched.is_file():
                         matches.append(matched)
@@ -209,9 +213,9 @@ def _resolve_finding_file_path(
 
 
 def _infer_line_range_from_snippet(
-    file_lines: List[str],
-    snippet: Optional[str],
-) -> Tuple[Optional[int], Optional[int]]:
+    file_lines: list[str],
+    snippet: str | None,
+) -> tuple[int | None, int | None]:
     if not snippet:
         return None, None
 
@@ -232,7 +236,7 @@ def _infer_line_range_from_snippet(
     return line_start, line_end
 
 
-def _extract_location_parts(finding: Dict[str, Any]) -> Tuple[Optional[str], Optional[int]]:
+def _extract_location_parts(finding: dict[str, Any]) -> tuple[str | None, int | None]:
     location = finding.get("location")
     if not location or not isinstance(location, str):
         return None, None
@@ -249,11 +253,11 @@ def _extract_location_parts(finding: Dict[str, Any]) -> Tuple[Optional[str], Opt
 
 
 def _build_code_windows(
-    file_lines: List[str],
+    file_lines: list[str],
     line_start: int,
     line_end: int,
     radius: int = 3,
-) -> Tuple[Optional[str], Optional[str], Optional[int], Optional[int]]:
+) -> tuple[str | None, str | None, int | None, int | None]:
     if not file_lines:
         return None, None, None, None
 
@@ -282,7 +286,7 @@ def _build_code_windows(
 def _normalize_function_line_range(
     start_value: Any,
     end_value: Any,
-) -> Tuple[Optional[int], Optional[int]]:
+) -> tuple[int | None, int | None]:
     start_line = _to_int(start_value)
     end_line = _to_int(end_value)
     if start_line is not None and start_line <= 0:
@@ -298,11 +302,11 @@ def _normalize_function_line_range(
 
 def _align_hit_line_to_function_start_if_outside(
     *,
-    line_start: Optional[int],
-    line_end: Optional[int],
+    line_start: int | None,
+    line_end: int | None,
     function_start: Any,
     function_end: Any,
-) -> Tuple[Optional[int], Optional[int], Dict[str, Any]]:
+) -> tuple[int | None, int | None, dict[str, Any]]:
     normalized_start = _to_int(line_start)
     normalized_end = _to_int(line_end)
     if normalized_start is not None and normalized_start <= 0:
@@ -323,7 +327,7 @@ def _align_hit_line_to_function_start_if_outside(
         function_end,
     )
 
-    diagnostics: Dict[str, Any] = {
+    diagnostics: dict[str, Any] = {
         "outside_function_range": False,
         "correction_applied": False,
         "correction_reason": None,
@@ -362,9 +366,9 @@ def _align_hit_line_to_function_start_if_outside(
 
 
 def _extract_declared_function_line_range(
-    finding: Dict[str, Any],
-    verification_payload: Optional[Dict[str, Any]],
-) -> Tuple[Optional[int], Optional[int], str]:
+    finding: dict[str, Any],
+    verification_payload: dict[str, Any] | None,
+) -> tuple[int | None, int | None, str]:
     direct_start, direct_end = _normalize_function_line_range(
         finding.get("function_start_line") or finding.get("function_start"),
         finding.get("function_end_line") or finding.get("function_end"),
@@ -389,9 +393,9 @@ def _extract_declared_function_line_range(
 
 
 def _normalize_authenticity_verdict(
-    finding: Dict[str, Any],
+    finding: dict[str, Any],
     confidence: float,
-) -> Optional[str]:
+) -> str | None:
     verdict = finding.get("authenticity") or finding.get("verdict")
     if isinstance(verdict, str):
         verdict = verdict.strip().lower()
@@ -424,7 +428,7 @@ def _normalize_authenticity_verdict(
 
 def _normalize_verification_status(
     status_value: Any,
-    verdict: Optional[str],
+    verdict: str | None,
 ) -> str:
     text = str(status_value or "").strip().lower()
     if text in {"verified", "true_positive", "exists", "vulnerable"}:
@@ -447,9 +451,9 @@ def _normalize_verification_status(
 
 
 def _normalize_reachability(
-    finding: Dict[str, Any],
+    finding: dict[str, Any],
     verdict: str,
-) -> Optional[str]:
+) -> str | None:
     value = finding.get("reachability")
     if isinstance(value, str):
         normalized = value.strip().lower()
@@ -467,11 +471,11 @@ def _normalize_reachability(
     return "unknown"
 
 
-def _normalize_cwe_id(value: Any) -> Optional[str]:
+def _normalize_cwe_id(value: Any) -> str | None:
     return normalize_cwe_id_util(value)
 
 
-def _extract_cwe_from_references(references: Any) -> Optional[str]:
+def _extract_cwe_from_references(references: Any) -> str | None:
     if references is None:
         return None
     if isinstance(references, list):
@@ -484,12 +488,12 @@ def _extract_cwe_from_references(references: Any) -> Optional[str]:
 
 
 def _resolve_vulnerability_profile(
-    vulnerability_type: Optional[str],
+    vulnerability_type: str | None,
     *,
-    title: Optional[str] = None,
-    description: Optional[str] = None,
-    code_snippet: Optional[str] = None,
-) -> Dict[str, str]:
+    title: str | None = None,
+    description: str | None = None,
+    code_snippet: str | None = None,
+) -> dict[str, str]:
     return resolve_vulnerability_profile_util(
         vulnerability_type,
         title=title,
@@ -500,12 +504,12 @@ def _resolve_vulnerability_profile(
 
 def _resolve_cwe_id(
     explicit_cwe: Any,
-    vulnerability_type: Optional[str],
+    vulnerability_type: str | None,
     *,
-    title: Optional[str] = None,
-    description: Optional[str] = None,
-    code_snippet: Optional[str] = None,
-) -> Optional[str]:
+    title: str | None = None,
+    description: str | None = None,
+    code_snippet: str | None = None,
+) -> str | None:
     return resolve_cwe_id_util(
         explicit_cwe,
         vulnerability_type,
@@ -517,19 +521,19 @@ def _resolve_cwe_id(
 
 def _build_structured_cn_description(
     *,
-    file_path: Optional[str],
-    function_name: Optional[str],
-    vulnerability_type: Optional[str],
-    title: Optional[str],
-    description: Optional[str],
-    code_snippet: Optional[str],
-    cwe_id: Optional[str],
-    raw_description: Optional[str],
-    line_start: Optional[int] = None,
-    line_end: Optional[int] = None,
-    verification_evidence: Optional[str] = None,
-    function_trigger_flow: Optional[List[str]] = None,
-    code_context: Optional[str] = None,
+    file_path: str | None,
+    function_name: str | None,
+    vulnerability_type: str | None,
+    title: str | None,
+    description: str | None,
+    code_snippet: str | None,
+    cwe_id: str | None,
+    raw_description: str | None,
+    line_start: int | None = None,
+    line_end: int | None = None,
+    verification_evidence: str | None = None,
+    function_trigger_flow: list[str] | None = None,
+    code_context: str | None = None,
 ) -> str:
     return build_cn_structured_description(
         file_path=file_path,
@@ -550,19 +554,19 @@ def _build_structured_cn_description(
 
 def _build_structured_cn_description_markdown(
     *,
-    file_path: Optional[str],
-    function_name: Optional[str],
-    vulnerability_type: Optional[str],
-    title: Optional[str],
-    description: Optional[str],
-    code_snippet: Optional[str],
-    code_context: Optional[str],
-    cwe_id: Optional[str],
-    raw_description: Optional[str],
-    line_start: Optional[int] = None,
-    line_end: Optional[int] = None,
-    verification_evidence: Optional[str] = None,
-    function_trigger_flow: Optional[List[str]] = None,
+    file_path: str | None,
+    function_name: str | None,
+    vulnerability_type: str | None,
+    title: str | None,
+    description: str | None,
+    code_snippet: str | None,
+    code_context: str | None,
+    cwe_id: str | None,
+    raw_description: str | None,
+    line_start: int | None = None,
+    line_end: int | None = None,
+    verification_evidence: str | None = None,
+    function_trigger_flow: list[str] | None = None,
 ) -> str:
     return build_cn_structured_description_markdown(
         file_path=file_path,
@@ -583,12 +587,12 @@ def _build_structured_cn_description_markdown(
 
 def _build_structured_cn_display_title(
     *,
-    file_path: Optional[str],
-    function_name: Optional[str],
-    vulnerability_type: Optional[str],
-    title: Optional[str],
-    description: Optional[str],
-    code_snippet: Optional[str],
+    file_path: str | None,
+    function_name: str | None,
+    vulnerability_type: str | None,
+    title: str | None,
+    description: str | None,
+    code_snippet: str | None,
 ) -> str:
     return build_cn_structured_title(
         file_path=file_path,
@@ -601,9 +605,9 @@ def _build_structured_cn_display_title(
 
 
 def _extract_flow_call_chain(
-    verification_payload: Dict[str, Any],
-    dataflow_path: Optional[List[str]],
-) -> List[str]:
+    verification_payload: dict[str, Any],
+    dataflow_path: list[str] | None,
+) -> list[str]:
     if isinstance(verification_payload, dict):
         flow_payload = verification_payload.get("flow")
         if isinstance(flow_payload, dict):
@@ -621,13 +625,13 @@ def _extract_flow_call_chain(
 
 def _build_function_trigger_flow(
     *,
-    call_chain: List[str],
-    function_name: Optional[str],
-    file_path: Optional[str],
-    line_start: Optional[int],
-    line_end: Optional[int],
-) -> List[str]:
-    filtered: List[str] = []
+    call_chain: list[str],
+    function_name: str | None,
+    file_path: str | None,
+    line_start: int | None,
+    line_end: int | None,
+) -> list[str]:
+    filtered: list[str] = []
     if call_chain:
         if function_name:
             needle = function_name.lower()
@@ -660,9 +664,9 @@ def _build_function_trigger_flow(
     return filtered
 
 
-def _build_default_remediation(vuln_type: str) -> Tuple[str, str]:
+def _build_default_remediation(vuln_type: str) -> tuple[str, str]:
     normalized = (vuln_type or "").lower()
-    mapping: Dict[str, Tuple[str, str]] = {
+    mapping: dict[str, tuple[str, str]] = {
         "sql_injection": (
             "使用参数化查询并对输入进行严格校验，避免字符串拼接 SQL。",
             'query = "SELECT * FROM users WHERE id = %s"\ncursor.execute(query, (user_id,))',
@@ -693,13 +697,13 @@ def _build_default_remediation(vuln_type: str) -> Tuple[str, str]:
 
 
 async def _enrich_findings_with_flow_and_logic(
-    findings: List[Dict[str, Any]],
+    findings: list[dict[str, Any]],
     *,
-    project_root: Optional[str],
-    target_files: Optional[List[str]],
-    llm_service: Optional[Any] = None,
-    event_emitter: Optional[Any] = None,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    project_root: str | None,
+    target_files: list[str] | None,
+    llm_service: Any | None = None,
+    event_emitter: Any | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """三轨流分析增强（Smart Audit 已禁用）。
 
     Smart audit policy disables the whole "flow enrichment / evidence generation" stage:
@@ -710,7 +714,7 @@ async def _enrich_findings_with_flow_and_logic(
     returns the input findings unchanged with a disabled summary.
     """
     _ = (project_root, target_files, llm_service, event_emitter)  # keep signature stable
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "total": len(findings or []),
         "enabled": False,
         "blocked_reason": "disabled_by_policy",
@@ -721,9 +725,9 @@ async def _enrich_findings_with_flow_and_logic(
 async def _save_findings(
     db: AsyncSession,
     task_id: str,
-    findings: List[Dict],
-    project_root: Optional[str] = None,
-    save_diagnostics: Optional[Dict[str, Any]] = None,
+    findings: list[dict],
+    project_root: str | None = None,
+    save_diagnostics: dict[str, Any] | None = None,
     _retry_on_conflict: bool = True,
 ) -> int:
     """
@@ -782,20 +786,22 @@ async def _save_findings(
     }
 
     saved_count = 0
-    filtered_reasons: Dict[str, int] = {}
+    filtered_reasons: dict[str, int] = {}
     logger.info(f"Saving {len(findings)} findings for task {task_id}")
 
     function_locator = None
     if project_root:
         try:
-            from app.services.agent.flow.lightweight.function_locator import EnclosingFunctionLocator
+            from app.services.agent.flow.lightweight.function_locator import (
+                EnclosingFunctionLocator,
+            )
 
             function_locator = EnclosingFunctionLocator(project_root=project_root)
         except Exception as exc:
             logger.warning("[SaveFindings] Function locator init failed: %s", exc)
             function_locator = None
 
-    def mark_filtered(reason: str, payload: Optional[Dict[str, Any]] = None) -> None:
+    def mark_filtered(reason: str, payload: dict[str, Any] | None = None) -> None:
         filtered_reasons[reason] = filtered_reasons.get(reason, 0) + 1
         if payload:
             logger.warning(
@@ -803,7 +809,7 @@ async def _save_findings(
                 f"title={str(payload.get('title', 'N/A'))[:80]}"
             )
 
-    def _infer_function_name_for_save(payload: Dict[str, Any], normalized_line_start: Optional[int]) -> str:
+    def _infer_function_name_for_save(payload: dict[str, Any], normalized_line_start: int | None) -> str:
         direct_name = str(payload.get("function_name") or "").strip()
         if direct_name:
             return direct_name
@@ -834,9 +840,9 @@ async def _save_findings(
         return "<function_not_localized>"
 
     def _merge_finding_metadata_payload(
-        existing_payload: Optional[Dict[str, Any]],
-        incoming_payload: Optional[Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
+        existing_payload: dict[str, Any] | None,
+        incoming_payload: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
         merged = dict(existing_payload or {})
         incoming = dict(incoming_payload or {})
         if not incoming:
@@ -1093,7 +1099,7 @@ async def _save_findings(
             line_end = _to_int(finding.get("line_end"))
             stored_file_path = None
             full_file_path = None
-            file_lines: List[str] = []
+            file_lines: list[str] = []
             snippet_text = code_snippet_text
             context_text = None
             context_start_line = None
@@ -1190,10 +1196,6 @@ async def _save_findings(
             reachability_target_function = _infer_function_name_for_save(finding, line_start)
             reachability_target_start_line = declared_function_start_line
             reachability_target_end_line = declared_function_end_line
-            locator_language = None
-            locator_resolution_engine = None
-            locator_diagnostics = None
-            locator_resolution_method = None
             localization_status = "unknown"  # success|failed|partial
             function_locator_anchor_line = (
                 line_start if line_start is not None else declared_function_start_line
@@ -1245,10 +1247,10 @@ async def _save_findings(
                             function_range_correction_applied = True
                     else:
                         localization_status = "failed"
-                    locator_language = located.get("language")
-                    locator_resolution_engine = located.get("resolution_engine")
-                    locator_resolution_method = located.get("resolution_method")
-                    locator_diagnostics = located.get("diagnostics")
+                    located.get("language")
+                    located.get("resolution_engine")
+                    located.get("resolution_method")
+                    located.get("diagnostics")
                 except Exception as loc_exc:
                     logger.debug(f"[SaveFindings] Function locator error: {loc_exc}")
                     localization_status = "failed"
@@ -1268,7 +1270,7 @@ async def _save_findings(
                     line_start or 0,
                 )
                 localization_status = "partial"
-            
+
             # 降级策略：函数定位失败时仍允许保存，且确保 function_name 始终非空
             if not reachability_target_function:
                 reachability_target_function = _infer_function_name_for_save(finding, line_start)
@@ -1487,8 +1489,8 @@ async def _save_findings(
                 db_status = FindingStatus.VERIFIED
             else:
                 db_status = FindingStatus.NEEDS_REVIEW
-            verified_at_value = datetime.now(timezone.utc) if is_verified else None
-            
+            verified_at_value = datetime.now(UTC) if is_verified else None
+
             # verification_result_payload 中添加新字段
             existing_reachability_target = (
                 verification_result_payload_input.get("reachability_target")
@@ -1525,7 +1527,7 @@ async def _save_findings(
             source_text = _normalize_optional_text(finding.get("source"))
             sink_text = _normalize_optional_text(finding.get("sink"))
             raw_finding_metadata = finding.get("finding_metadata")
-            finding_metadata_payload: Dict[str, Any] = (
+            finding_metadata_payload: dict[str, Any] = (
                 dict(raw_finding_metadata) if isinstance(raw_finding_metadata, dict) else {}
             )
             if verification_todo_id:
@@ -1770,7 +1772,7 @@ async def _save_findings(
                     fingerprint=fingerprint,
                 )
                 db.add(db_finding)
-            
+
             saved_count += 1
             logger.debug(f"[SaveFindings] Prepared finding: {title_text[:50]}... ({severity_enum})")
 
@@ -1831,7 +1833,7 @@ async def _save_findings(
     return saved_count
 
 
-def _calculate_security_score(findings: List[Dict]) -> float:
+def _calculate_security_score(findings: list[dict]) -> float:
     """计算安全评分"""
     if not findings:
         return 100.0
@@ -1855,11 +1857,11 @@ def _calculate_security_score(findings: List[Dict]) -> float:
     return float(score)
 
 def _serialize_agent_findings(
-    findings: List[AgentFinding],
+    findings: list[AgentFinding],
     *,
     include_false_positive: bool,
-) -> List[AgentFindingResponse]:
-    responses: List[AgentFindingResponse] = []
+) -> list[AgentFindingResponse]:
+    responses: list[AgentFindingResponse] = []
     for item in findings:
         verification_payload = (
             item.verification_result

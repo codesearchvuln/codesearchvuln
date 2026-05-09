@@ -7,7 +7,6 @@ import pytest
 from app.services.agent.tools import external_tools
 from app.services.agent.tools.external_tools import PMDTool
 
-
 SECURITY_RULESET = "category/java/security.xml,category/java/errorprone.xml,category/apex/security.xml"
 QUICKSTART_RULESET = "category/java/security.xml,category/jsp/security.xml,category/javascript/security.xml"
 ALL_RULESET = (

@@ -1,17 +1,17 @@
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
-import app.models.opengrep  # noqa: F401
 import app.models.gitleaks  # noqa: F401
+import app.models.opengrep  # noqa: F401
 from app.services.agent.agents.verification import VerificationAgent
 from app.services.agent.tools.base import ToolResult
 
 
 class _CapturedEmitter:
     def __init__(self) -> None:
-        self.events: List[Any] = []
+        self.events: list[Any] = []
 
     async def emit(self, event_data: Any) -> None:
         self.events.append(event_data)
@@ -46,8 +46,8 @@ def _make_agent(emitter: _CapturedEmitter) -> VerificationAgent:
     )
 
 
-def _todo_updates_by_scope(events: List[Any], scope: str) -> List[Dict[str, Any]]:
-    output: List[Dict[str, Any]] = []
+def _todo_updates_by_scope(events: list[Any], scope: str) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
     for ev in events:
         if getattr(ev, "event_type", "") != "todo_update":
             continue

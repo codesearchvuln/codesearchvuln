@@ -8,9 +8,10 @@ PHPStan 静态扫描模型
 """
 
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Index, Boolean
-from sqlalchemy.sql import func
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 

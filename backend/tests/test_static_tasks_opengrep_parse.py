@@ -18,7 +18,6 @@ from app.api.v1.endpoints.static_tasks import _parse_opengrep_output
 from app.core.config import settings
 from app.models.opengrep import OpengrepFinding
 
-
 pytestmark = pytest.mark.integration
 
 

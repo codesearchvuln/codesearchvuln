@@ -1,7 +1,7 @@
-from datetime import datetime, timezone
 import signal
 import sys
 import types
+from datetime import UTC, datetime
 
 import pytest
 
@@ -19,14 +19,14 @@ sys.modules.setdefault("fastmcp.client", fastmcp_client_stub)
 sys.modules.setdefault("fastmcp.client.transports", fastmcp_transports_stub)
 sys.modules.setdefault("git", git_stub)
 
-import app.models.agent_task  # noqa: F401
-import app.models.gitleaks  # noqa: F401
-import app.models.opengrep  # noqa: F401
-import app.models.bandit  # noqa: F401
-import app.models.phpstan  # noqa: F401
-import app.models.pmd_scan  # noqa: F401
-import app.models.yasa  # noqa: F401
-from app.main import (
+import app.models.agent_task  # noqa: E402,F401
+import app.models.bandit  # noqa: E402,F401
+import app.models.gitleaks  # noqa: E402,F401
+import app.models.opengrep  # noqa: E402,F401
+import app.models.phpstan  # noqa: E402,F401
+import app.models.pmd_scan  # noqa: E402,F401
+import app.models.yasa  # noqa: E402,F401
+from app.main import (  # noqa: E402
     INTERRUPTED_ERROR_MESSAGE,
     RECOVERABLE_AGENT_TASK_STATUSES,
     RECOVERABLE_BANDIT_TASK_STATUSES,
@@ -39,13 +39,13 @@ from app.main import (
     cleanup_stale_yasa_processes,
     recover_interrupted_tasks,
 )
-from app.models.agent_task import AgentTask, AgentTaskStatus
-from app.models.gitleaks import GitleaksScanTask
-from app.models.opengrep import OpengrepScanTask
-from app.models.bandit import BanditScanTask
-from app.models.phpstan import PhpstanScanTask
-from app.models.pmd_scan import PmdScanTask
-from app.models.yasa import YasaScanTask
+from app.models.agent_task import AgentTask, AgentTaskStatus  # noqa: E402
+from app.models.bandit import BanditScanTask  # noqa: E402
+from app.models.gitleaks import GitleaksScanTask  # noqa: E402
+from app.models.opengrep import OpengrepScanTask  # noqa: E402
+from app.models.phpstan import PhpstanScanTask  # noqa: E402
+from app.models.pmd_scan import PmdScanTask  # noqa: E402
+from app.models.yasa import YasaScanTask  # noqa: E402
 
 
 class _FakeScalarResult:
@@ -203,7 +203,7 @@ async def test_recover_interrupted_tasks_marks_running_and_pending_tasks(monkeyp
 
 @pytest.mark.asyncio
 async def test_recover_interrupted_tasks_preserves_terminal_statuses_and_existing_errors(monkeypatch):
-    completed_at = datetime(2026, 3, 8, 12, 0, tzinfo=timezone.utc)
+    completed_at = datetime(2026, 3, 8, 12, 0, tzinfo=UTC)
     agent_interrupted = AgentTask(
         id="agent-interrupted",
         project_id="project-1",

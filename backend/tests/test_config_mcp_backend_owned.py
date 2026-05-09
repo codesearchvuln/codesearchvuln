@@ -1,15 +1,14 @@
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
-from app.api.v1.endpoints import config as config_module
 from app.api.v1.endpoints.config import (
     OtherConfigSchema,
     UserConfigRequest,
-    get_my_config,
     get_default_config,
+    get_my_config,
     update_my_config,
 )
 from app.models.user_config import UserConfig
@@ -40,7 +39,7 @@ class _FakeDB:
         if not getattr(config, "id", None):
             config.id = "cfg-test"
         if not getattr(config, "created_at", None):
-            config.created_at = datetime.now(timezone.utc)
+            config.created_at = datetime.now(UTC)
 
 
 @pytest.mark.asyncio
@@ -96,7 +95,7 @@ async def test_get_my_config_strips_legacy_mcp_config_from_response(
         ),
     )
     existing.id = "cfg-existing"
-    existing.created_at = datetime.now(timezone.utc)
+    existing.created_at = datetime.now(UTC)
 
     fake_db = _FakeDB(existing)
 
@@ -125,7 +124,7 @@ async def test_get_my_config_strips_legacy_git_tokens_from_other_config(
         ),
     )
     existing.id = "cfg-existing"
-    existing.created_at = datetime.now(timezone.utc)
+    existing.created_at = datetime.now(UTC)
 
     fake_db = _FakeDB(existing)
 
@@ -154,7 +153,7 @@ async def test_get_my_config_strips_legacy_output_language_from_response(
         ),
     )
     existing.id = "cfg-existing"
-    existing.created_at = datetime.now(timezone.utc)
+    existing.created_at = datetime.now(UTC)
 
     fake_db = _FakeDB(existing)
 
@@ -182,7 +181,7 @@ async def test_update_my_config_strips_legacy_output_language_from_persisted_con
         ),
     )
     existing.id = "cfg-existing"
-    existing.created_at = datetime.now(timezone.utc)
+    existing.created_at = datetime.now(UTC)
 
     fake_db = _FakeDB(existing)
 

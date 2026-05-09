@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 from app.services.flow_parser_runtime import get_default_definition_provider
 from app.services.parser import TreeSitterParser
-
 
 SUPPORTED_EXTENSIONS = {
     ".py",
@@ -50,8 +50,8 @@ class FunctionSymbol:
     start_line: int
     end_line: int
     content: str
-    callees: Set[str] = field(default_factory=set)
-    control_conditions: List[str] = field(default_factory=list)
+    callees: set[str] = field(default_factory=set)
+    control_conditions: list[str] = field(default_factory=list)
     is_entry: bool = False
 
 
@@ -59,7 +59,7 @@ class ASTCallIndex:
     def __init__(
         self,
         project_root: str,
-        target_files: Optional[List[str]] = None,
+        target_files: list[str] | None = None,
         max_files: int = 2000,
         definition_provider: Any = None,
     ):
@@ -69,8 +69,8 @@ class ASTCallIndex:
         self.parser = TreeSitterParser()
         self.definition_provider = definition_provider or get_default_definition_provider()
 
-        self.symbols_by_id: Dict[str, FunctionSymbol] = {}
-        self.symbols_by_name: Dict[str, List[FunctionSymbol]] = {}
+        self.symbols_by_id: dict[str, FunctionSymbol] = {}
+        self.symbols_by_name: dict[str, list[FunctionSymbol]] = {}
         self._built = False
 
     def _normalize_path(self, raw_path: str) -> str:
@@ -111,8 +111,8 @@ class ASTCallIndex:
             return "c"
         return "text"
 
-    def _extract_conditions(self, content: str) -> List[str]:
-        conditions: List[str] = []
+    def _extract_conditions(self, content: str) -> list[str]:
+        conditions: list[str] = []
         for line in content.splitlines():
             raw = line.strip()
             if not raw:
@@ -124,8 +124,8 @@ class ASTCallIndex:
                 break
         return conditions
 
-    def _extract_callees(self, content: str) -> Set[str]:
-        callees: Set[str] = set()
+    def _extract_callees(self, content: str) -> set[str]:
+        callees: set[str] = set()
         for match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", content):
             name = match.group(1)
             if name in RESERVED_CALL_NAMES:
@@ -158,12 +158,12 @@ class ASTCallIndex:
         ]
         return any(pattern in body for pattern in route_patterns)
 
-    def _regex_extract_definitions(self, code: str, language: str) -> List[Tuple[str, int, int, str]]:
+    def _regex_extract_definitions(self, code: str, language: str) -> list[tuple[str, int, int, str]]:
         """Fallback definition extractor: returns (name, start_line, end_line, content)."""
         lines = code.splitlines()
-        defs: List[Tuple[str, int, int, str]] = []
+        defs: list[tuple[str, int, int, str]] = []
 
-        patterns: List[re.Pattern[str]] = []
+        patterns: list[re.Pattern[str]] = []
         if language == "python":
             patterns = [re.compile(r"^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")]
         elif language in {"javascript", "typescript", "tsx"}:
@@ -185,7 +185,7 @@ class ASTCallIndex:
             ]
 
         for idx, line in enumerate(lines):
-            matched_name: Optional[str] = None
+            matched_name: str | None = None
             for pattern in patterns:
                 m = pattern.match(line)
                 if m:
@@ -198,7 +198,7 @@ class ASTCallIndex:
 
             start = idx + 1
             end = start
-            body_lines: List[str] = []
+            body_lines: list[str] = []
 
             if language == "python":
                 # Indentation-based block end for python fallback.
@@ -238,7 +238,7 @@ class ASTCallIndex:
         if self._built:
             return
 
-        file_entries: List[Tuple[Path, str, str, str]] = []
+        file_entries: list[tuple[Path, str, str, str]] = []
         for file_path in self._iter_source_files():
             try:
                 rel = self._normalize_path(str(file_path.relative_to(self.project_root)))
@@ -248,7 +248,7 @@ class ASTCallIndex:
             except Exception:
                 continue
 
-        definition_results: Dict[str, Dict[str, Any]] = {}
+        definition_results: dict[str, dict[str, Any]] = {}
         if self.definition_provider is not None and file_entries:
             definition_results = self.definition_provider.extract_definitions_batch(
                 [
@@ -257,9 +257,9 @@ class ASTCallIndex:
                 ]
             )
 
-        for file_path, rel, code, language in file_entries:
+        for _file_path, rel, code, language in file_entries:
             try:
-                definitions: List[Tuple[str, int, int, str]] = []
+                definitions: list[tuple[str, int, int, str]] = []
                 runner_payload = definition_results.get(rel) or {}
                 runner_definitions = runner_payload.get("definitions")
                 if isinstance(runner_definitions, list):
@@ -311,7 +311,7 @@ class ASTCallIndex:
 
         self._built = True
 
-    def infer_entry_points(self) -> List[FunctionSymbol]:
+    def infer_entry_points(self) -> list[FunctionSymbol]:
         self.build()
         entries = [sym for sym in self.symbols_by_id.values() if sym.is_entry]
         if entries:
@@ -321,7 +321,7 @@ class ASTCallIndex:
         fallback = sorted(self.symbols_by_id.values(), key=lambda s: (s.file_path, s.start_line))
         return fallback[:15]
 
-    def find_symbol_by_location(self, file_path: str, line: int) -> Optional[FunctionSymbol]:
+    def find_symbol_by_location(self, file_path: str, line: int) -> FunctionSymbol | None:
         self.build()
         normalized = self._normalize_path(file_path)
         for sym in self.symbols_by_id.values():
@@ -331,12 +331,12 @@ class ASTCallIndex:
                 return sym
         return None
 
-    def _neighbors(self, symbol: FunctionSymbol, extra_edges: Optional[Dict[str, Set[str]]] = None) -> List[FunctionSymbol]:
-        candidates: Set[str] = set(symbol.callees)
+    def _neighbors(self, symbol: FunctionSymbol, extra_edges: dict[str, set[str]] | None = None) -> list[FunctionSymbol]:
+        candidates: set[str] = set(symbol.callees)
         if extra_edges:
             candidates.update(extra_edges.get(symbol.name, set()))
 
-        neighbors: List[FunctionSymbol] = []
+        neighbors: list[FunctionSymbol] = []
         for callee in candidates:
             for target in self.symbols_by_name.get(callee, []):
                 neighbors.append(target)
@@ -347,11 +347,11 @@ class ASTCallIndex:
         target_file: str,
         target_line: int,
         max_depth: int = 8,
-        entry_points: Optional[List[str]] = None,
-        extra_edges: Optional[Dict[str, Set[str]]] = None,
-    ) -> Dict[str, object]:
+        entry_points: list[str] | None = None,
+        extra_edges: dict[str, set[str]] | None = None,
+    ) -> dict[str, object]:
         self.build()
-        blocked_reasons: List[str] = []
+        blocked_reasons: list[str] = []
 
         target_symbol = self.find_symbol_by_location(target_file, target_line)
         if not target_symbol:
@@ -387,8 +387,8 @@ class ASTCallIndex:
                 "blocked_reasons": blocked_reasons,
             }
 
-        queue: List[Tuple[FunctionSymbol, List[FunctionSymbol], int]] = []
-        visited: Set[str] = set()
+        queue: list[tuple[FunctionSymbol, list[FunctionSymbol], int]] = []
+        visited: set[str] = set()
         for entry in entries:
             queue.append((entry, [entry], 0))
             visited.add(entry.id)
@@ -396,7 +396,7 @@ class ASTCallIndex:
         while queue:
             current, path, depth = queue.pop(0)
             if current.id == target_symbol.id:
-                conditions: List[str] = []
+                conditions: list[str] = []
                 for item in path:
                     conditions.extend(item.control_conditions[:2])
                 call_chain = [f"{item.file_path}:{item.name}" for item in path]

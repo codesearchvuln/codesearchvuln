@@ -57,16 +57,15 @@ test("reduceNexusEmbedLoadState 将错误/超时视为终态失败，只有 rese
 	);
 });
 
-test("AgentAudit 首页在 GitNexus 背景加载失败后停止继续挂载 iframe", () => {
+test("AgentAudit 首页通过独立 GitNexus 端口挂载背景 iframe", () => {
 	const source = fs.readFileSync(
 		path.resolve(process.cwd(), "src/pages/AgentAudit/index.tsx"),
 		"utf8",
 	);
 
-	assert.match(source, /reduceNexusEmbedLoadState/);
-	assert.match(source, /nexusIframeState !== "failed" \?/);
-	assert.match(source, /dispatchNexusIframeState\("load-timeout"\)/);
-	assert.match(source, /dispatchNexusIframeState\("iframe-error"\)/);
+	assert.match(source, /src=\{`http:\/\/\$\{window\.location\.hostname\}:5174`\}/);
+	assert.match(source, /"http:\/\/localhost:5174"/);
+	assert.match(source, /title="GitNexus"/);
 	assert.doesNotMatch(source, /GitNexus 背景加载失败，已停止继续加载。/);
 	assert.doesNotMatch(
 		source,
@@ -74,28 +73,27 @@ test("AgentAudit 首页在 GitNexus 背景加载失败后停止继续挂载 ifra
 	);
 });
 
-test("ProjectDetail 在 nexus-item-detail 加载失败后停止继续挂载 iframe", () => {
+test("ProjectDetail 通过独立 nexus-itemDetail 端口挂载详情 iframe", () => {
 	const source = fs.readFileSync(
 		path.resolve(process.cwd(), "src/pages/ProjectDetail.tsx"),
 		"utf8",
 	);
 
-	assert.match(source, /reduceNexusEmbedLoadState/);
-	assert.match(source, /dispatchItemDetailIframeState\("load-timeout"\)/);
-	assert.match(source, /dispatchItemDetailIframeState\("iframe-error"\)/);
-	assert.match(source, /itemDetailIframeState === "failed" \? null :/);
+	assert.match(source, /src=\{`http:\/\/\$\{window\.location\.hostname\}:5175`\}/);
+	assert.match(source, /title="Nexus-itemDetail"/);
+	assert.match(source, /onLoad=\{handleIframeLoad\}/);
 	assert.doesNotMatch(source, /项目详情背景加载失败，已停止继续加载。/);
 	assert.doesNotMatch(source, /可返回列表后重新进入/);
 	assert.doesNotMatch(source, /min-h-\[600px\]/);
 });
 
-test("ProjectDetail 在项目切换时会重置 iframe 状态与归档发送标记", () => {
+test("ProjectDetail 在项目变化且 iframe 已就绪时发送项目归档", () => {
 	const source = fs.readFileSync(
 		path.resolve(process.cwd(), "src/pages/ProjectDetail.tsx"),
 		"utf8",
 	);
 
-	assert.match(source, /dispatchItemDetailIframeState\("reset"\)/);
-	assert.match(source, /iframeReadyRef\.current = false/);
+	assert.match(source, /iframeReadyRef\.current = true/);
 	assert.match(source, /archiveSentRef\.current = false/);
+	assert.match(source, /postMessage\([\s\S]*LOAD_PROJECT_ZIP[\s\S]*\*/);
 });

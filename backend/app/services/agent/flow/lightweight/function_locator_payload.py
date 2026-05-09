@@ -3,10 +3,10 @@ from __future__ import annotations
 import ast
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
-def _safe_positive_int(value: Any) -> Optional[int]:
+def _safe_positive_int(value: Any) -> int | None:
     try:
         parsed = int(value)
     except Exception:
@@ -14,14 +14,14 @@ def _safe_positive_int(value: Any) -> Optional[int]:
     return parsed if parsed > 0 else None
 
 
-def parse_locator_payload(raw_output: Any) -> Optional[Dict[str, Any]]:
+def parse_locator_payload(raw_output: Any) -> dict[str, Any] | None:
     text = str(raw_output or "").strip()
     if not text:
         return None
     if text.lower() in {"none", "null"}:
         return None
 
-    candidates: List[str] = [text]
+    candidates: list[str] = [text]
     if "```" in text:
         fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", text)
         if fence_match:
@@ -50,17 +50,17 @@ def parse_locator_payload(raw_output: Any) -> Optional[Dict[str, Any]]:
 
 
 def select_locator_function(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     *,
-    line_start: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
+    line_start: int | None = None,
+) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
 
     safe_line = _safe_positive_int(line_start)
     payload_language = payload.get("language")
     diagnostics = payload.get("diagnostics")
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
 
     def _append_candidate(
         raw_name: Any,

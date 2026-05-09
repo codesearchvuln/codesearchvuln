@@ -4,7 +4,6 @@ import pytest
 
 from app.api.v1.endpoints.agent_tasks import _initialize_tools
 
-
 REMOVED_TOOL_NAMES = {
     "skill_lookup",
     "qmd_query",

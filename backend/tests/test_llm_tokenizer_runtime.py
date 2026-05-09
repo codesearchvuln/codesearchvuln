@@ -1,4 +1,3 @@
-import pytest
 
 from app.services.llm import memory_compressor, tokenizer
 from app.services.llm.memory_compressor import MemoryCompressor

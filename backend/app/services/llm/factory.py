@@ -5,16 +5,15 @@ LLM工厂类 - 统一创建和管理LLM适配器
 对于 API 格式特殊的提供商（百度、MiniMax、豆包），使用原生适配器。
 """
 
-from typing import Dict, List
-from .types import LLMConfig, LLMProvider, DEFAULT_MODELS
-from .base_adapter import BaseLLMAdapter
-from .adapters import (
-    LiteLLMAdapter,
-    BaiduAdapter,
-    MinimaxAdapter,
-    DoubaoAdapter,
-)
 
+from .adapters import (
+    BaiduAdapter,
+    DoubaoAdapter,
+    LiteLLMAdapter,
+    MinimaxAdapter,
+)
+from .base_adapter import BaseLLMAdapter
+from .types import DEFAULT_MODELS, LLMConfig, LLMProvider
 
 # 必须使用原生适配器的提供商（API 格式特殊）
 NATIVE_ONLY_PROVIDERS = {
@@ -28,7 +27,7 @@ class LLMFactory:
     """LLM工厂类"""
 
     # 保留该字段仅为兼容 clear_cache 等既有调用；create_adapter 不再复用缓存。
-    _adapters: Dict[str, BaseLLMAdapter] = {}
+    _adapters: dict[str, BaseLLMAdapter] = {}
 
     @classmethod
     def create_adapter(cls, config: LLMConfig) -> BaseLLMAdapter:
@@ -80,7 +79,7 @@ class LLMFactory:
         cls._adapters.clear()
 
     @classmethod
-    def get_supported_providers(cls) -> List[LLMProvider]:
+    def get_supported_providers(cls) -> list[LLMProvider]:
         """获取支持的提供商列表"""
         return list(LLMProvider)
 
@@ -90,7 +89,7 @@ class LLMFactory:
         return DEFAULT_MODELS.get(provider, "gpt-4o-mini")
 
     @classmethod
-    def get_available_models(cls, provider: LLMProvider) -> List[str]:
+    def get_available_models(cls, provider: LLMProvider) -> list[str]:
         """获取提供商的可用模型列表 (2025年最新)"""
         models = {
             LLMProvider.GEMINI: [

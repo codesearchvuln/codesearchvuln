@@ -9,7 +9,6 @@ from app.models.gitleaks import GitleaksRule
 from app.models.opengrep import OpengrepRule
 from app.services.chat2rule.service import Chat2RuleService
 
-
 VALID_RULE_YAML = """rules:
   - id: python-subprocess-shell-injection
     message: Detect subprocess shell=True usage

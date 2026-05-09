@@ -1,14 +1,14 @@
 """Bandit 静态扫描后端单元测试。"""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import json
 
 import pytest
 from fastapi import HTTPException
 
 from app.api.v1.endpoints import static_tasks
-from app.models.bandit import BanditScanTask, BanditFinding
+from app.models.bandit import BanditFinding, BanditScanTask
 
 
 class _ScalarOneOrNoneResult:
@@ -167,7 +167,7 @@ async def test_execute_bandit_scan_transitions_to_completed(monkeypatch, tmp_pat
     load_session = _FakeAsyncSession(task)
     persist_session = _FakeAsyncSession(task)
     session_factory = _SessionFactory(load_session, persist_session)
-    workspace_dir = SimpleNamespace()
+    SimpleNamespace()
     monkeypatch.setattr(static_tasks, "async_session_factory", session_factory)
     monkeypatch.setattr(static_tasks, "_is_scan_task_cancelled", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(static_tasks, "_clear_scan_task_cancel", lambda *_args, **_kwargs: None)

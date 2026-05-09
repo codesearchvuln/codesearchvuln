@@ -7,25 +7,20 @@ from app.api.v1.endpoints import static_tasks_cache as _cache
 from app.api.v1.endpoints import static_tasks_gitleaks as _gitleaks
 from app.api.v1.endpoints import static_tasks_opengrep as _opengrep
 from app.api.v1.endpoints import static_tasks_opengrep_rules as _opengrep_rules
-from app.api.v1.endpoints import static_tasks_pmd as _pmd
 from app.api.v1.endpoints import static_tasks_phpstan as _phpstan
+from app.api.v1.endpoints import static_tasks_pmd as _pmd
 from app.api.v1.endpoints import static_tasks_unified_findings as _unified
 from app.api.v1.endpoints import static_tasks_yasa as _yasa
 from app.api.v1.endpoints.static_tasks_shared import (
     _clear_scan_task_cancel,
-    _resolve_backend_venv_executable,
     _get_project_root,
     _is_scan_task_cancelled,
     _request_scan_task_cancel,
+    _resolve_backend_venv_executable,
     _run_subprocess_with_tracking,
     _sync_task_scan_duration,
     async_session_factory,
-    deps,
-    get_db,
-    logger,
-    settings,
 )
-
 
 router = APIRouter()
 router.include_router(_opengrep.router)

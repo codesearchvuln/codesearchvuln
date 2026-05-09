@@ -4,19 +4,15 @@ RunCodeTool 测试脚本
 测试通用代码执行工具的各项功能
 """
 
-import asyncio
 import os
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from app.core.config import settings
-from app.services.agent.tools.run_code import RunCodeTool, RunCodeInput, ExtractFunctionTool
-from app.services.agent.tools.base import ToolResult
-from app.services.agent.tools.sandbox_tool import SandboxManager, SandboxConfig
-from app.services.agent.tools.sandbox_tool import SandboxTool
 import app.services.sandbox_runner_client as sandbox_runner_client_module
+from app.core.config import settings
+from app.services.agent.tools.run_code import ExtractFunctionTool, RunCodeInput, RunCodeTool
+from app.services.agent.tools.sandbox_tool import SandboxConfig, SandboxManager, SandboxTool
 
 
 class TestRunCodeInput:
@@ -56,7 +52,7 @@ class TestRunCodeToolBasic:
     def test_tool_properties(self):
         """测试工具属性"""
         tool = RunCodeTool(project_root="/tmp/test")
-        
+
         assert tool.name == "run_code"
         assert tool.project_root == "/tmp/test"
         assert "通用代码执行工具" in tool.description
@@ -67,7 +63,7 @@ class TestRunCodeToolBasic:
         # 参考 agent_tasks.py 的做法
         sandbox_manager = SandboxManager()
         tool = RunCodeTool(sandbox_manager=sandbox_manager, project_root="/test")
-        
+
         assert tool.sandbox_manager == sandbox_manager
         assert tool.project_root == "/test"
         assert isinstance(tool.sandbox_manager, SandboxManager)
@@ -75,7 +71,7 @@ class TestRunCodeToolBasic:
     def test_initialization_default(self):
         """测试默认初始化"""
         tool = RunCodeTool(project_root="/test")
-        
+
         assert tool.sandbox_manager is not None
         assert isinstance(tool.sandbox_manager, SandboxManager)
 
@@ -302,7 +298,7 @@ class TestRunCodeToolExecution:
         # 使用真实的 SandboxManager（参考 agent_tasks.py）
         sandbox_manager = SandboxManager()
         await sandbox_manager.initialize()
-        
+
         # 如果沙箱不可用则跳过
         if not sandbox_manager.is_available:
             pytest.skip("沙箱不可用，跳过测试")
@@ -326,7 +322,7 @@ class TestRunCodeToolExecution:
         sandbox_manager = SandboxManager()
         # 不初始化它，这样 is_available 会是 False
         # 或者如果已初始化，我们可以手动配置
-        
+
         tool = RunCodeTool(sandbox_manager=sandbox_manager, project_root="/test")
 
         result = await tool._execute(
@@ -361,7 +357,7 @@ class TestRunCodeToolExecution:
         """测试执行出错"""
         sandbox_manager = SandboxManager()
         await sandbox_manager.initialize()
-        
+
         if not sandbox_manager.is_available:
             pytest.skip("沙箱不可用，跳过测试")
 
@@ -380,7 +376,7 @@ class TestRunCodeToolExecution:
         """测试输出截断"""
         sandbox_manager = SandboxManager()
         await sandbox_manager.initialize()
-        
+
         if not sandbox_manager.is_available:
             pytest.skip("沙箱不可用，跳过测试")
 
@@ -402,7 +398,7 @@ class TestRunCodeToolExecution:
         """测试带描述的执行"""
         sandbox_manager = SandboxManager()
         await sandbox_manager.initialize()
-        
+
         if not sandbox_manager.is_available:
             pytest.skip("沙箱不可用，跳过测试")
 
@@ -421,7 +417,7 @@ class TestRunCodeToolExecution:
         """测试返回的元数据"""
         sandbox_manager = SandboxManager()
         await sandbox_manager.initialize()
-        
+
         if not sandbox_manager.is_available:
             pytest.skip("沙箱不可用，跳过测试")
 
@@ -480,7 +476,7 @@ class TestExtractFunctionToolBasic:
     def test_tool_properties(self):
         """测试工具属性"""
         tool = ExtractFunctionTool(project_root="/test")
-        
+
         assert tool.name == "extract_function"
         assert "提取指定函数" in tool.description
         assert tool.project_root == "/test"
@@ -801,7 +797,7 @@ for payload in payloads:
 def test_run_code_tool_description_format():
     """测试工具描述格式"""
     tool = RunCodeTool(project_root="/test")
-    
+
     # 验证描述包含必要信息
     assert "输入：" in tool.description or "输入:" in tool.description
     assert "code" in tool.description
@@ -844,7 +840,7 @@ if __name__ == "__main__":
     print("=" * 80)
     print("RunCodeTool 测试套件")
     print("=" * 80)
-    
+
     # 运行所有测试
     pytest.main([
         __file__,
@@ -853,7 +849,7 @@ if __name__ == "__main__":
         "--tb=short",
         "-m", "not integration"  # 默认跳过集成测试
     ])
-    
+
     print("\n" + "=" * 80)
     print("提示：运行集成测试请使用以下命令：")
     print(f"pytest {__file__} -v -m integration")

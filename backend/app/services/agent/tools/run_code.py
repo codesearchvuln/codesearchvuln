@@ -12,12 +12,11 @@
 - LLM 编写 mock 代码隔离测试函数
 """
 
-import asyncio
 import logging
 import os
 import re
-import tempfile
-from typing import Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from .base import AgentTool, ToolResult
@@ -30,7 +29,7 @@ from .evidence_protocol import (
     unique_command_chain,
     validate_evidence_metadata,
 )
-from .sandbox_tool import SandboxManager, SandboxConfig
+from .sandbox_tool import SandboxConfig, SandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ class RunCodeTool(AgentTool):
     工具不做任何假设，完全由 LLM 控制测试逻辑。
     """
 
-    def __init__(self, sandbox_manager: Optional[SandboxManager] = None, project_root: str = "."):
+    def __init__(self, sandbox_manager: SandboxManager | None = None, project_root: str = "."):
         super().__init__()
         # 使用更宽松的沙箱配置
         config = SandboxConfig(
@@ -203,7 +202,7 @@ for payload in payloads:
         )
 
         # 格式化输出
-        output_parts = [f"🔬 代码执行结果"]
+        output_parts = ["🔬 代码执行结果"]
         if description:
             output_parts.append(f"目的: {description}")
         output_parts.append(f"语言: {language}")
@@ -260,19 +259,19 @@ for payload in payloads:
         *,
         success: bool,
         language: str,
-        command: Optional[str],
+        command: str | None,
         description: str,
-        result_payload: Dict[str, Any],
+        result_payload: dict[str, Any],
         fallback_data: str,
         code: str,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> ToolResult:
         effective_description = description or "代码执行请求"
         final_error = error_message or result_payload.get("error")
         command_chain = unique_command_chain(["run_code", self._command_binary_for_language(language)])
         display_command = build_display_command(command_chain)
         exit_code = int(result_payload.get("exit_code", -1))
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             "language": language,
             "exit_code": exit_code,
             "status": build_execution_status(
@@ -344,9 +343,9 @@ for payload in payloads:
         *,
         language: str,
         exit_code: int,
-        result_payload: Dict[str, Any],
-    ) -> list[Dict[str, str]]:
-        artifacts: list[Dict[str, str]] = [
+        result_payload: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        artifacts: list[dict[str, str]] = [
             {"label": "语言", "value": language},
             {"label": "退出码", "value": str(exit_code)},
         ]
@@ -359,7 +358,7 @@ for payload in payloads:
             )
         return artifacts
 
-    def _build_command(self, code: str, language: str) -> Optional[str]:
+    def _build_command(self, code: str, language: str) -> str | None:
         """根据语言构建执行命令"""
 
         # 转义单引号的通用方法
@@ -475,7 +474,7 @@ class ExtractFunctionTool(AgentTool):
         if not os.path.exists(full_path):
             return ToolResult(success=False, error=f"文件不存在: {file_path}")
 
-        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(full_path, encoding='utf-8', errors='ignore') as f:
             code = f.read()
 
         # 检测语言
@@ -535,7 +534,7 @@ class ExtractFunctionTool(AgentTool):
                 ],
             }
             validate_evidence_metadata(**metadata)
-            output_parts = [f"函数提取结果\n"]
+            output_parts = ["函数提取结果\n"]
             output_parts.append(f"文件: {file_path}")
             output_parts.append(f"函数: {symbol_name}")
 
@@ -563,7 +562,7 @@ class ExtractFunctionTool(AgentTool):
             )
 
     @staticmethod
-    def _locate_snippet_lines(code: str, snippet: str) -> tuple[Optional[int], Optional[int]]:
+    def _locate_snippet_lines(code: str, snippet: str) -> tuple[int | None, int | None]:
         full_text = str(code or "")
         snippet_text = str(snippet or "")
         if not full_text or not snippet_text:
@@ -581,7 +580,7 @@ class ExtractFunctionTool(AgentTool):
         safe_offset = max(0, min(len(code), int(offset)))
         return code.count("\n", 0, safe_offset) + 1
 
-    def _extract_python(self, code: str, function_name: str, include_imports: bool) -> Dict:
+    def _extract_python(self, code: str, function_name: str, include_imports: bool) -> dict:
         """提取 Python 函数"""
         import ast
 
@@ -619,7 +618,7 @@ class ExtractFunctionTool(AgentTool):
 
         return {"success": False, "error": f"未找到函数 '{function_name}'"}
 
-    def _extract_php(self, code: str, function_name: str) -> Dict:
+    def _extract_php(self, code: str, function_name: str) -> dict:
         """提取 PHP 函数（支持类方法、独立函数）"""
 
         # 支持类方法（访问修饰符 + static/abstract/final）和独立函数
@@ -634,9 +633,9 @@ class ExtractFunctionTool(AgentTool):
         # 检查是否为接口/抽象方法（以分号结尾）
         matched_text = match.group(0)
         is_abstract = matched_text.rstrip().endswith(';')
-        
+
         start_pos = match.start()
-        
+
         if is_abstract:
             # 接口/抽象方法，到分号结束
             end_pos = match.end()
@@ -675,7 +674,7 @@ class ExtractFunctionTool(AgentTool):
             "line_end": self._line_number_from_offset(code, line_end_offset),
         }
 
-    def _extract_javascript(self, code: str, function_name: str) -> Dict:
+    def _extract_javascript(self, code: str, function_name: str) -> dict:
         """提取 JavaScript / TypeScript 函数与类方法"""
 
         patterns = [
@@ -846,7 +845,7 @@ class ExtractFunctionTool(AgentTool):
 
         return normalized
 
-    def _extract_c_like(self, code: str, function_name: str, include_imports: bool) -> Dict:
+    def _extract_c_like(self, code: str, function_name: str, include_imports: bool) -> dict:
         """提取 C/C++ 风格函数定义。"""
 
         function_pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
@@ -908,7 +907,7 @@ class ExtractFunctionTool(AgentTool):
 
         return {"success": False, "error": f"未找到函数 '{function_name}'"}
 
-    def _extract_generic(self, code: str, function_name: str) -> Dict:
+    def _extract_generic(self, code: str, function_name: str) -> dict:
         """通用函数提取（正则）"""
 
         # 尝试多种模式

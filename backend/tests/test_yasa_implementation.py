@@ -44,7 +44,9 @@ def test_yasa_resolve_language_profile_rejects_empty():
 
 
 def test_detect_language_supports_csv_and_json_string():
-    from app.api.v1.endpoints.static_tasks_yasa import _detect_language_from_project  # noqa: PLC0415
+    from app.api.v1.endpoints.static_tasks_yasa import (
+        _detect_language_from_project,  # noqa: PLC0415
+    )
 
     csv_project = SimpleNamespace(programming_languages="php,javascript")
     assert _detect_language_from_project(csv_project) == "javascript"
@@ -57,7 +59,9 @@ def test_detect_language_supports_csv_and_json_string():
 
 
 def test_detect_language_prefers_source_tree_suffix(tmp_path):
-    from app.api.v1.endpoints.static_tasks_yasa import _detect_language_from_project  # noqa: PLC0415
+    from app.api.v1.endpoints.static_tasks_yasa import (
+        _detect_language_from_project,  # noqa: PLC0415
+    )
 
     (tmp_path / "main.py").write_text("print('x')", encoding="utf-8")
     project = SimpleNamespace(programming_languages='["java"]')

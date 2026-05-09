@@ -17,7 +17,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent
 from .react_parser import parse_react_response
@@ -369,14 +369,14 @@ class BusinessLogicFinding:
     file_path: str
     function_name: str
     line_start: int
-    line_end: Optional[int] = None
-    entry_point: Optional[str] = None
+    line_end: int | None = None
+    entry_point: str | None = None
     description: str = ""
     source: str = ""
     sink: str = ""
-    taint_flow: List[str] = field(default_factory=list)
-    taint_path: List[str] = field(default_factory=list)  # backward compat alias
-    missing_checks: List[str] = field(default_factory=list)
+    taint_flow: list[str] = field(default_factory=list)
+    taint_path: list[str] = field(default_factory=list)  # backward compat alias
+    missing_checks: list[str] = field(default_factory=list)
     code_snippet: str = ""
     confidence: float = 0.0
     poc_plan: str = ""
@@ -386,14 +386,14 @@ class BusinessLogicFinding:
 
 class BusinessLogicScanAgent(BaseAgent):
     """业务逻辑漏洞扫描子 Agent。"""
-    
+
     # 类级别的参数化缓存：根据 entry_points_hint 独立缓存
     # key: 缓存 key（通过 entry_points_hint 生成）
     # value: 缓存的 AgentResult 数据
-    _cache_dict: Dict[str, Dict[str, Any]] = {}
+    _cache_dict: dict[str, dict[str, Any]] = {}
     _cache_lock = asyncio.Lock()
 
-    def __init__(self, llm_service, tools: Dict[str, Any], event_emitter=None):
+    def __init__(self, llm_service, tools: dict[str, Any], event_emitter=None):
         tool_whitelist = ", ".join(sorted(tools.keys())) if tools else "无"
         config = AgentConfig(
             name="BusinessLogicScan",
@@ -407,8 +407,8 @@ class BusinessLogicScanAgent(BaseAgent):
             ),
         )
         super().__init__(config, llm_service, tools, event_emitter)
-        self.findings: List[BusinessLogicFinding] = []
-        self.phases: List[ScanPhase] = [
+        self.findings: list[BusinessLogicFinding] = []
+        self.phases: list[ScanPhase] = [
             ScanPhase(1, "HTTP Entry Discovery", "发现所有 HTTP 入口点与路由"),
             ScanPhase(2, "Entry Function Analysis", "分析入口函数的业务逻辑与校验"),
             ScanPhase(3, "Sensitive Operation Anchors", "识别敏感操作与关键检查点"),
@@ -416,7 +416,7 @@ class BusinessLogicScanAgent(BaseAgent):
             ScanPhase(5, "Logic Vulnerability Confirm", "确认漏洞类型、严重程度与修复建议"),
         ]
         # 聚焦模式下的简化阶段（跳过第 1 阶段全局入口发现）
-        self.focused_phases: List[ScanPhase] = [
+        self.focused_phases: list[ScanPhase] = [
             ScanPhase(1, "HTTP Entry Discovery", "分析相关 HTTP 入口点与路由"),
             ScanPhase(2, "Entry Function Analysis", "分析指定接口的业务逻辑、鉴权和权限检查"),
             ScanPhase(3, "Sensitive Operation Anchors", "识别敏感操作与关键检查点"),
@@ -426,23 +426,23 @@ class BusinessLogicScanAgent(BaseAgent):
         self._focused_mode = False  # 标记是否为聚焦模式
 
     @staticmethod
-    def _get_cache_key(entry_points_hint: Optional[List[str]]) -> str:
+    def _get_cache_key(entry_points_hint: list[str] | None) -> str:
         """
         根据 entry_points_hint 生成缓存 key。
-        
+
         - 如果 entry_points_hint 为空或 None，返回 "global_scan"
         - 如果 entry_points_hint 非空，生成基于内容的 key
-        
+
         这允许不同的接口列表被独立缓存。
         """
         if not entry_points_hint:
             return "global_scan"
-        
+
         # 创建标准化类型
         normalized = sorted([str(ep).strip() for ep in entry_points_hint if ep])
         if not normalized:
             return "global_scan"
-        
+
         # 使用简单的字符串连接作为 key（而非复杂的哈希）
         key_str = "::".join(normalized)
         # 如果 key 太长，使用 hash
@@ -452,14 +452,14 @@ class BusinessLogicScanAgent(BaseAgent):
         return f"focused_scan_{key_str}"
 
     @classmethod
-    def reset_cache(cls, entry_points_hint: Optional[List[str]] = None) -> None:
+    def reset_cache(cls, entry_points_hint: list[str] | None = None) -> None:
         """
         重置扫描缓存状态。
-        
+
         Args:
             entry_points_hint: 如果指定，仅重置该 entry_points_hint 对应的缓存；
                               如果为 None，重置所有缓存。
-        
+
         用于测试、调试或需要重新执行扫描的场景。
         """
         if entry_points_hint is None:
@@ -477,45 +477,45 @@ class BusinessLogicScanAgent(BaseAgent):
                 )
 
     @classmethod
-    def is_scan_cached(cls, entry_points_hint: Optional[List[str]] = None) -> bool:
+    def is_scan_cached(cls, entry_points_hint: list[str] | None = None) -> bool:
         """检查指定的 entry_points_hint 是否已有缓存的扫描结果"""
         cache_key = cls._get_cache_key(entry_points_hint)
         return cache_key in cls._cache_dict
 
     @classmethod
-    def get_cache_info(cls) -> Dict[str, Any]:
+    def get_cache_info(cls) -> dict[str, Any]:
         """获取缓存信息（用于诊断）"""
         if not cls._cache_dict:
             return {"cached_entries": 0, "total_keys": 0}
-        
+
         info = {
             "cached_entries": len(cls._cache_dict),
             "total_keys": len(cls._cache_dict),
             "caches": {}
         }
-        
+
         for key, cached in cls._cache_dict.items():
             info["caches"][key] = {
                 "success": cached.get("success"),
                 "cached_at": cached.get("cached_at"),
                 "findings_count": len(cached.get("data", {}).get("findings", [])),
             }
-        
+
         return info
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         """执行业务逻辑扫描 - 支持参数化缓存和聚焦模式"""
         start_time = time.time()
-        
+
         target = str(input_data.get("target") or ".")
         framework_hint = input_data.get("framework_hint")
         entry_points_hint = input_data.get("entry_points_hint") or []
         quick_mode = bool(input_data.get("quick_mode", False))
         max_iterations = int(input_data.get("max_iterations") or self.config.max_iterations)
-        
+
         # 生成缓存 key
         cache_key = self._get_cache_key(entry_points_hint)
-        
+
         # === 参数化缓存检查机制 ===
         async with self._cache_lock:
             if cache_key in self._cache_dict:
@@ -528,7 +528,7 @@ class BusinessLogicScanAgent(BaseAgent):
                     "info",
                     f"业务逻辑扫描缓存命中 ({cache_key})，返回之前的扫描结果"
                 )
-                
+
                 cached = self._cache_dict[cache_key]
                 duration_ms = int((time.time() - start_time) * 1000)
                 # 标记为缓存调用
@@ -544,12 +544,12 @@ class BusinessLogicScanAgent(BaseAgent):
                     duration_ms=duration_ms,
                     handoff=cached.get("handoff"),
                 )
-            
+
             logger.info(
                 "[BusinessLogicScanAgent] 缓存不存在: %s，执行新的扫描",
                 cache_key,
             )
-        
+
         # === 判断执行模式 ===
         self._focused_mode = bool(entry_points_hint)
         if self._focused_mode:
@@ -562,7 +562,7 @@ class BusinessLogicScanAgent(BaseAgent):
             await self.emit_thinking("🌍 业务逻辑扫描全局模式：完整 5 阶段分析")
             logger.info("[BusinessLogicScanAgent] 进入全局模式，执行完整扫描")
 
-        scan_context: Dict[str, Any] = {
+        scan_context: dict[str, Any] = {
             "target": target,
             "framework_hint": framework_hint or "unknown",
             "entry_points_hint": entry_points_hint,
@@ -582,7 +582,7 @@ class BusinessLogicScanAgent(BaseAgent):
         try:
             # 根据模式选择要执行的阶段
             phases_to_run = self.focused_phases if self._focused_mode else self.phases
-            
+
             for phase in phases_to_run:
                 if self.is_cancelled:
                     break
@@ -655,7 +655,7 @@ class BusinessLogicScanAgent(BaseAgent):
                 duration_ms=duration_ms,
                 handoff=handoff,
             )
-            
+
             # === 缓存本次结果供后续调用使用 ===
             self._cache_dict[cache_key] = {
                 "success": result.success,
@@ -672,7 +672,7 @@ class BusinessLogicScanAgent(BaseAgent):
                 "后续同样的 entry_points_hint 调用将返回此缓存结果。",
                 cache_key,
             )
-            
+
             return result
         except Exception as exc:
             duration_ms = int((time.time() - start_time) * 1000)
@@ -686,7 +686,7 @@ class BusinessLogicScanAgent(BaseAgent):
                 tokens_used=self._total_tokens,
                 duration_ms=duration_ms,
             )
-            
+
             # === 即使失败也缓存结果，但标记为失败状态 ===
             self._cache_dict[cache_key] = {
                 "success": False,
@@ -703,15 +703,15 @@ class BusinessLogicScanAgent(BaseAgent):
                 "后续同样的 entry_points_hint 调用将返回此失败状态。",
                 cache_key,
             )
-            
+
             return result
 
-    async def _run_phase_with_react(self, phase: ScanPhase, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def _run_phase_with_react(self, phase: ScanPhase, context: dict[str, Any]) -> dict[str, Any]:
         if not self.llm_service:
             return self._generate_demo_phase_result(phase.phase_num)
 
         phase_prompt = self._build_phase_prompt(phase, context)
-        conversation_history: List[Dict[str, str]] = [
+        conversation_history: list[dict[str, str]] = [
             {"role": "system", "content": self.config.system_prompt or BUSINESS_LOGIC_SYSTEM_PROMPT},
             {"role": "user", "content": phase_prompt},
         ]
@@ -762,7 +762,7 @@ class BusinessLogicScanAgent(BaseAgent):
 
         return {"success": False, "error": f"阶段 {phase.phase_num} 未能在限定轮次内完成"}
 
-    def _build_phase_prompt(self, phase: ScanPhase, context: Dict[str, Any]) -> str:
+    def _build_phase_prompt(self, phase: ScanPhase, context: dict[str, Any]) -> str:
         framework = context.get("framework_hint") or "unknown"
         base_prompt = f"""你正在执行业务逻辑扫描第 {phase.phase_num} 阶段。
 
@@ -808,7 +808,7 @@ search_code: {route_hint}
 
 ## 优先关注的路径模式
 - `/user`, `/account`, `/profile` → IDOR / 越权风险
-- `/admin`, `/manage`, `/dashboard` → 权限绕过风险  
+- `/admin`, `/manage`, `/dashboard` → 权限绕过风险
 - `/order`, `/pay`, `/checkout`, `/refund` → 金额篡改风险
 - `/role`, `/permission`, `/grant` → 权限提升风险
 - `/password`, `/reset`, `/verify` → 认证逻辑漏洞风险
@@ -1057,7 +1057,7 @@ search_code: {route_hint}
 """
         )
 
-    def _generate_demo_phase_result(self, phase: int) -> Dict[str, Any]:
+    def _generate_demo_phase_result(self, phase: int) -> dict[str, Any]:
         if phase == 1:
             return {
                 "success": True,
@@ -1147,7 +1147,7 @@ search_code: {route_hint}
             "summary": "确认 1 个业务逻辑漏洞（IDOR）",
         }
 
-    def _update_context_from_phase_result(self, context: Dict[str, Any], phase: ScanPhase, result: Dict[str, Any]) -> None:
+    def _update_context_from_phase_result(self, context: dict[str, Any], phase: ScanPhase, result: dict[str, Any]) -> None:
         if phase.phase_num == 1 and isinstance(result.get("entries"), list):
             context["discovered_entries"].extend(result.get("entries", []))
             return
@@ -1170,7 +1170,7 @@ search_code: {route_hint}
                 self.findings.append(finding)
                 context["findings"].append(finding_dict)
 
-    def _dict_to_finding(self, payload: Dict[str, Any]) -> BusinessLogicFinding:
+    def _dict_to_finding(self, payload: dict[str, Any]) -> BusinessLogicFinding:
         # taint_flow is the canonical field; taint_path is a legacy alias
         taint_flow = (
             payload.get("taint_flow")
@@ -1200,7 +1200,7 @@ search_code: {route_hint}
             suggestion=suggestion,
         )
 
-    def _finding_to_dict(self, finding: BusinessLogicFinding) -> Dict[str, Any]:
+    def _finding_to_dict(self, finding: BusinessLogicFinding) -> dict[str, Any]:
         return {
             "title": finding.title,
             "vulnerability_type": finding.vulnerability_type,
@@ -1225,7 +1225,7 @@ search_code: {route_hint}
             "agent_source": "business_logic_scan_sub_agent",
         }
 
-    def _generate_report(self, context: Dict[str, Any]) -> Dict[str, str]:
+    def _generate_report(self, context: dict[str, Any]) -> dict[str, str]:
         findings_count = len(self.findings)
         by_severity = self._count_by_severity()
 
@@ -1245,7 +1245,7 @@ search_code: {route_hint}
                 lines.append(f"- {level.upper()}: {by_severity[level]}")
 
         if findings_count <= 0:
-            lines.extend(["", "未发现明确业务逻辑漏洞候选"]) 
+            lines.extend(["", "未发现明确业务逻辑漏洞候选"])
         else:
             lines.extend(["", " Top Findings:"])
             sorted_findings = sorted(
@@ -1259,7 +1259,7 @@ search_code: {route_hint}
 
         return {"text": "\n".join(lines)}
 
-    def _count_by_severity(self) -> Dict[str, int]:
+    def _count_by_severity(self) -> dict[str, int]:
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for finding in self.findings:
             key = finding.severity.lower().strip()

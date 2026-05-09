@@ -1,9 +1,10 @@
-from sqlalchemy import Column, String, Integer, Float, ForeignKey, DateTime, JSON, Index, UniqueConstraint
-from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-from app.db.base import Base
 import uuid
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
+from app.db.base import Base
 
 
 class ProjectInfo(Base):

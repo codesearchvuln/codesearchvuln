@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
 
 from app.services.flow_parser_runner import get_flow_parser_runner_client
 
@@ -32,10 +30,10 @@ SUPPORTED_EXTENSIONS = {
 
 @dataclass
 class Code2FlowGraphResult:
-    edges: Dict[str, Set[str]] = field(default_factory=dict)
-    blocked_reasons: List[str] = field(default_factory=list)
+    edges: dict[str, set[str]] = field(default_factory=dict)
+    blocked_reasons: list[str] = field(default_factory=list)
     used_engine: str = "fallback"
-    diagnostics: Dict[str, str] = field(default_factory=dict)
+    diagnostics: dict[str, str] = field(default_factory=dict)
 
     def add_edge(self, src: str, dst: str) -> None:
         if not src or not dst:
@@ -53,7 +51,7 @@ class Code2FlowCallGraph:
     def __init__(
         self,
         project_root: str,
-        target_files: Optional[List[str]] = None,
+        target_files: list[str] | None = None,
         timeout_sec: int = 40,
         max_files: int = 400,
     ):
@@ -65,8 +63,8 @@ class Code2FlowCallGraph:
     def _normalize_rel_path(self, raw_path: str) -> str:
         return str(raw_path).replace("\\", "/").lstrip("./")
 
-    def _iter_candidate_files(self) -> List[Path]:
-        files: List[Path] = []
+    def _iter_candidate_files(self) -> list[Path]:
+        files: list[Path] = []
         if self.target_files:
             for rel in sorted(set(self.target_files)):
                 path = (self.project_root / rel).resolve()
@@ -104,8 +102,8 @@ class Code2FlowCallGraph:
         token = tokens[-1] if tokens else node
         return token.strip()
 
-    def _parse_dot_edges(self, dot_text: str) -> Dict[str, Set[str]]:
-        edges: Dict[str, Set[str]] = {}
+    def _parse_dot_edges(self, dot_text: str) -> dict[str, set[str]]:
+        edges: dict[str, set[str]] = {}
         for src_raw, dst_raw in DOT_EDGE_RE.findall(dot_text):
             src = self._normalize_symbol_name(src_raw)
             dst = self._normalize_symbol_name(dst_raw)
@@ -117,8 +115,8 @@ class Code2FlowCallGraph:
     @staticmethod
     def _normalize_runner_blocked_reasons(
         blocked_reasons: object,
-        diagnostics: Dict[str, str],
-    ) -> List[str]:
+        diagnostics: dict[str, str],
+    ) -> list[str]:
         raw_reasons = [
             str(item).strip()
             for item in (blocked_reasons or [])
@@ -145,7 +143,7 @@ class Code2FlowCallGraph:
             result.blocked_reasons.append("code2flow_no_candidate_files")
             return result
 
-        files_payload: List[Dict[str, str]] = []
+        files_payload: list[dict[str, str]] = []
         for file_path in file_paths:
             try:
                 files_payload.append(
@@ -201,7 +199,7 @@ class Code2FlowCallGraph:
             result.blocked_reasons.append("code2flow_no_edges")
             return result
 
-        parsed_edges: Dict[str, Set[str]] = {}
+        parsed_edges: dict[str, set[str]] = {}
         for src, targets in raw_edges.items():
             src_name = str(src or "").strip()
             if not src_name:

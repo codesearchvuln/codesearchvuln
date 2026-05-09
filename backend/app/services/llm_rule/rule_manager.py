@@ -1,14 +1,14 @@
-import yaml
-from pathlib import Path
-from typing import List, Dict
-from .config import Config
 import logging
+
+import yaml
+
+from .config import Config
 
 
 class RuleManager:
     def __init__(self, config: Config):
         self.config = config
-        self.rules: Dict[str, List[dict]] = {}  # language -> rules
+        self.rules: dict[str, list[dict]] = {}  # language -> rules
 
     def load_initial_rules(self):
         """Load all existing Semgrep rules from the rules directory."""

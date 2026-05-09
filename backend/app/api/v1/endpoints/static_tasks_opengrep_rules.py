@@ -1,37 +1,37 @@
 import asyncio
 import hashlib
-import json
-import logging
 import os
 import re
 import shutil
 import subprocess
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError, ProgrammingError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.models.bandit import BanditFinding, BanditScanTask
-from app.models.gitleaks import GitleaksFinding, GitleaksRule, GitleaksScanTask
-from app.models.opengrep import OpengrepFinding, OpengrepRule, OpengrepScanTask
-from app.models.phpstan import PhpstanFinding, PhpstanScanTask
-from app.models.project import Project
-from app.models.user import User
-from app.schemas.gitleaks_rules import (
-    GitleaksRuleBatchUpdateRequest,
-    GitleaksRuleCreateRequest,
-    GitleaksRuleResponse,
-    GitleaksRuleUpdateRequest,
+from app.api.v1.endpoints.static_tasks_shared import (
+    _cleanup_incorrect_rules,
+    _ensure_opengrep_xdg_dirs,
+    _get_user_config,
+    _is_llm_config_error,
+    _normalize_llm_config_error_message,
+    _validate_user_llm_config,
+    async_session_factory,
+    deps,
+    get_db,
+    logger,
 )
+from app.models.opengrep import OpengrepRule
+from app.models.user import User
 from app.schemas.opengrep import (
     OpengrepRuleCreateRequest,
     OpengrepRulePatchResponse,
@@ -39,56 +39,25 @@ from app.schemas.opengrep import (
     OpengrepRuleTextResponse,
     OpengrepRuleUpdateRequest,
 )
-from app.services.gitleaks_rules_seed import ensure_builtin_gitleaks_rules
-from app.services.llm.service import LLMConfigError, LLMService
 from app.services.llm_rule.repo_cache_manager import GlobalRepoCacheManager
-from app.services.opengrep_confidence import (
-    count_high_confidence_findings_by_task_ids as shared_count_high_confidence_findings_by_task_ids,
-    extract_finding_payload_confidence as shared_extract_finding_payload_confidence,
-    extract_rule_lookup_keys as shared_extract_rule_lookup_keys,
-    normalize_confidence as shared_normalize_confidence,
-)
 from app.services.rule import get_rule_by_patch, validate_generic_rule
 from app.services.upload.upload_manager import UploadManager
-
-from app.api.v1.endpoints.static_tasks_shared import (
-    _cleanup_incorrect_rules,
-    _clear_scan_task_cancel,
-    _dt_to_iso,
-    _ensure_opengrep_xdg_dirs,
-    _get_project_root,
-    _get_user_config,
-    _is_scan_task_cancelled,
-    _is_test_like_directory,
-    _normalize_llm_config_error_message,
-    _record_scan_progress,
-    _request_scan_task_cancel,
-    _run_subprocess_with_tracking,
-    _sync_task_scan_duration,
-    _utc_now_iso,
-    _validate_user_llm_config,
-    async_session_factory,
-    deps,
-    get_db,
-    logger,
-    settings,
-)
 
 router = APIRouter()
 
 class OpengrepRuleSingleUploadRequest(BaseModel):
     """上传单条规则请求"""
 
-    id: Optional[str] = Field(None, description="规则ID，不提供时自动生成")
+    id: str | None = Field(None, description="规则ID，不提供时自动生成")
     name: str = Field(..., description="规则名称")
     pattern_yaml: str = Field(..., description="规则的 YAML 内容")
     language: str = Field(..., description="编程语言，如 python, java, javascript")
     severity: str = Field("WARNING", description="严重程度: ERROR, WARNING, INFO")
-    confidence: Optional[str] = Field(None, description="置信度: HIGH, MEDIUM, LOW")
-    description: Optional[str] = Field(None, description="规则描述")
-    cwe: Optional[List[str]] = Field(None, description="CWE列表")
+    confidence: str | None = Field(None, description="置信度: HIGH, MEDIUM, LOW")
+    description: str | None = Field(None, description="规则描述")
+    cwe: list[str] | None = Field(None, description="CWE列表")
     source: str = Field("json", description="规则来源，默认为 json")
-    patch: Optional[str] = Field(None, description="补丁或相关链接")
+    patch: str | None = Field(None, description="补丁或相关链接")
     correct: bool = Field(True, description="规则是否正确")
     is_active: bool = Field(True, description="规则是否启用")
 
@@ -100,9 +69,9 @@ class OpengrepRuleSingleUploadResponse(BaseModel):
     name: str
     language: str
     severity: str
-    confidence: Optional[str]
-    description: Optional[str]
-    cwe: Optional[List[str]]
+    confidence: str | None
+    description: str | None
+    cwe: list[str] | None
     source: str
     is_active: bool
     created_at: datetime
@@ -114,13 +83,13 @@ class OpengrepRuleSingleUploadResponse(BaseModel):
 class OpengrepRuleBatchUpdateRequest(BaseModel):
     """批量更新规则状态请求"""
 
-    rule_ids: Optional[List[str]] = Field(None, description="规则ID列表")
-    language: Optional[str] = Field(None, description="按编程语言过滤")
-    source: Optional[str] = Field(None, description="按来源过滤: internal, patch")
-    severity: Optional[str] = Field(None, description="按严重程度过滤: ERROR, WARNING, INFO")
-    confidence: Optional[str] = Field(None, description="按置信度过滤: HIGH, MEDIUM, LOW")
-    keyword: Optional[str] = Field(None, description="按规则ID或名称过滤（大小写不敏感）")
-    current_is_active: Optional[bool] = Field(
+    rule_ids: list[str] | None = Field(None, description="规则ID列表")
+    language: str | None = Field(None, description="按编程语言过滤")
+    source: str | None = Field(None, description="按来源过滤: internal, patch")
+    severity: str | None = Field(None, description="按严重程度过滤: ERROR, WARNING, INFO")
+    confidence: str | None = Field(None, description="按置信度过滤: HIGH, MEDIUM, LOW")
+    keyword: str | None = Field(None, description="按规则ID或名称过滤（大小写不敏感）")
+    current_is_active: bool | None = Field(
         None,
         description="按当前启用状态过滤（true=仅当前已启用，false=仅当前已禁用）",
     )
@@ -134,25 +103,25 @@ class OpengrepRulePatchUploadResponse(BaseModel):
     success_count: int = Field(..., description="成功生成规则的数量")
     failed_count: int = Field(..., description="失败的数量")
     skipped_count: int = Field(0, description="跳过的文件数（不符合命名规范）")
-    details: List[Dict[str, Any]] = Field(default_factory=list, description="详细结果")
+    details: list[dict[str, Any]] = Field(default_factory=list, description="详细结果")
 
 
 class PatchRuleCreationResponse(BaseModel):
     """Patch 文件上传创建占位符规则响应"""
 
-    rule_ids: List[str] = Field(..., description="创建的规则ID列表")
+    rule_ids: list[str] = Field(..., description="创建的规则ID列表")
     total_files: int = Field(..., description="处理的 patch 文件数")
     message: str = Field(..., description="状态消息")
 async def _get_unique_rule_name(db: AsyncSession, base_name: str) -> str:
     """
     获取唯一的规则名称
-    
+
     如果规则名已存在，则在后面追加 _1, _2, _3 等递增数字
-    
+
     Args:
         db: 数据库会话
         base_name: 基础规则名
-        
+
     Returns:
         唯一的规则名
     """
@@ -162,7 +131,7 @@ async def _get_unique_rule_name(db: AsyncSession, base_name: str) -> str:
     )
     if not result.scalar_one_or_none():
         return base_name
-    
+
     # 如果存在，尝试添加递增数字
     counter = 1
     while True:
@@ -175,13 +144,13 @@ async def _get_unique_rule_name(db: AsyncSession, base_name: str) -> str:
         counter += 1
 
 
-async def _validate_opengrep_rule(yaml_content: str) -> tuple[bool, Optional[str]]:
+async def _validate_opengrep_rule(yaml_content: str) -> tuple[bool, str | None]:
     """
     使用 opengrep --validate 验证规则是否有效
-    
+
     Args:
         yaml_content: 规则的 YAML 内容
-        
+
     Returns:
         (is_valid, error_message): 验证是否通过，失败时返回错误信息
     """
@@ -191,7 +160,7 @@ async def _validate_opengrep_rule(yaml_content: str) -> tuple[bool, Optional[str
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False, encoding="utf-8") as tmp_file:
             tmp_file.write(yaml_content)
             tmp_file_path = tmp_file.name
-        
+
         try:
             # 在线程池中执行 opengrep 验证
             loop = asyncio.get_event_loop()
@@ -204,7 +173,7 @@ async def _validate_opengrep_rule(yaml_content: str) -> tuple[bool, Optional[str
                     timeout=10,
                 ),
             )
-            
+
             if validate_result.returncode == 0:
                 return True, None
             else:
@@ -224,12 +193,12 @@ async def _validate_opengrep_rule(yaml_content: str) -> tuple[bool, Optional[str
         return True, None
     except Exception as e:
         return False, f"规则验证异常: {str(e)}"
-@router.get("/rules", response_model=List[Dict[str, Any]])
+@router.get("/rules", response_model=list[dict[str, Any]])
 async def list_opengrep_rules(
-    language: Optional[str] = Query(None, description="按编程语言过滤"),
-    source: Optional[str] = Query(None, description="按来源过滤: internal, patch"),
-    confidence: Optional[str] = Query(None, description="按置信度过滤: HIGH, MEDIUM, LOW"),
-    is_active: Optional[bool] = Query(None, description="只获取活跃规则"),
+    language: str | None = Query(None, description="按编程语言过滤"),
+    source: str | None = Query(None, description="按来源过滤: internal, patch"),
+    confidence: str | None = Query(None, description="按置信度过滤: HIGH, MEDIUM, LOW"),
+    is_active: bool | None = Query(None, description="只获取活跃规则"),
     db: AsyncSession = Depends(get_db),
 ):
     """获取 Opengrep 规则列表"""
@@ -296,11 +265,11 @@ async def get_generating_rules(db: AsyncSession = Depends(get_db)):
     # 查询所有 source='patch' 且 correct=false 的规则（正在生成中）
     result = await db.execute(
         select(OpengrepRule).where(
-            (OpengrepRule.source == "patch") & (OpengrepRule.correct == False)
+            (OpengrepRule.source == "patch") & (not OpengrepRule.correct)
         )
     )
     rules = result.scalars().all()
-    
+
     return [
         {
             "id": rule.id,
@@ -320,10 +289,10 @@ async def get_generating_rules(db: AsyncSession = Depends(get_db)):
 def _validate_patch_filename(filename: str) -> bool:
     """
     验证 patch 文件名是否符合格式: 仓库owner_仓库名_哈希.patch
-    
+
     Args:
         filename: 文件名
-        
+
     Returns:
         是否符合格式
     """
@@ -334,49 +303,16 @@ def _validate_patch_filename(filename: str) -> bool:
     return bool(re.match(pattern, filename, re.IGNORECASE))
 
 
-async def _get_user_config(db: AsyncSession, user_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """获取用户配置（与 agent_tasks 一致）"""
-    if not user_id:
-        return None
-
-    try:
-        from app.api.v1.endpoints.config import _load_effective_user_config
-
-        return await _load_effective_user_config(
-            db=db,
-            user_id=user_id,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to get user config: {e}")
-
-    return None
-
-
-def _normalize_llm_config_error_message(exc: Exception) -> str:
-    return f"LLM配置错误: {exc}"
-
-
-def _is_llm_config_error(exc: Exception) -> bool:
-    if isinstance(exc, LLMConfigError):
-        return True
-    msg = str(exc)
-    return "LLM配置错误" in msg or "llmModel" in msg or "llmBaseUrl" in msg or "llmApiKey" in msg
-
-
-def _validate_user_llm_config(user_config: Optional[Dict[str, Any]]) -> None:
-    llm_service = LLMService(user_config=user_config or {})
-    _ = llm_service.config
-
 
 async def _process_patch_files_background(
-    patch_files: List[tuple],
+    patch_files: list[tuple],
     user_id: str,
     task_type: str = "archive",
-    temp_dir: Optional[str] = None
+    temp_dir: str | None = None
 ) -> None:
     """
     后台异步处理 patch 文件生成规则
-    
+
     Args:
         patch_files: 要处理的 patch 文件列表，每个元素为 (filename, file_path, rule_id) 或 (filename, file_content, rule_id)
         user_id: 用户ID
@@ -398,20 +334,20 @@ async def _process_patch_files_background(
             for _, _, rule_id in patch_files:
                 await _update_rule_status(db, rule_id, False, error_message)
             return
-        
+
         try:
             logger.info(f"开始后台处理 {len(patch_files)} 个 patch 文件 (task_type={task_type})...")
-            
+
             success_count = 0
             failed_count = 0
-            
+
             for item in patch_files:
                 filename, content_or_path, rule_id = item
-                
+
                 if task_type == "archive":
                     # 从文件读取内容
                     try:
-                        with open(content_or_path, 'r', encoding='utf-8') as f:
+                        with open(content_or_path, encoding='utf-8') as f:
                             patch_content = f.read()
                     except UnicodeDecodeError:
                         logger.error(f"文件编码错误: {filename}")
@@ -421,7 +357,7 @@ async def _process_patch_files_background(
                         continue
                 else:  # directory
                     patch_content = content_or_path
-                
+
                 try:
                     result = await _process_single_patch_file(patch_content, filename, rule_id, db, user_config=user_config)
                     if result["status"] == "success":
@@ -433,11 +369,11 @@ async def _process_patch_files_background(
                     logger.error(f"处理文件失败 {filename}: {e}")
                     await _update_rule_status(db, rule_id, False, str(e))
                     failed_count += 1
-            
+
             logger.info(
                 f"后台处理完成: 成功 {success_count} 个，失败 {failed_count} 个"
             )
-            
+
         except Exception as e:
             logger.error(f"后台处理异常: {e}")
         finally:
@@ -454,11 +390,11 @@ async def _update_rule_status(
     db: AsyncSession,
     rule_id: str,
     is_correct: bool,
-    error_message: Optional[str] = None
+    error_message: str | None = None
 ) -> None:
     """
     更新规则状态为失败
-    
+
     Args:
         db: 数据库会话
         rule_id: 规则ID
@@ -481,7 +417,7 @@ async def _update_rule_status(
         logger.error(f"Failed to update rule status for {rule_id}: {e}")
         try:
             await db.rollback()
-        except:
+        except Exception:
             pass
 
 
@@ -491,18 +427,18 @@ async def _create_placeholder_rule(
 ) -> str:
     """
     为 patch 文件创建占位符规则
-    
+
     Args:
         filename: patch 文件名
         db: 数据库会话
-        
+
     Returns:
         创建的规则ID
     """
     try:
         # 从文件名提取基本信息
         rule_name = f"patch-{filename.replace('.patch', '')}"
-        
+
         # 创建占位符规则
         new_rule = OpengrepRule(
             name=rule_name,
@@ -517,21 +453,21 @@ async def _create_placeholder_rule(
             correct=False,  # 未生成，标记为不正确
             is_active=False,  # 未生成，标记为不激活
         )
-        
+
         db.add(new_rule)
         await db.commit()
         await db.refresh(new_rule)
 
         await _cleanup_incorrect_rules(db)
-        
+
         logger.info(f"创建占位符规则: {new_rule.id} for {filename}")
         return new_rule.id
-        
+
     except Exception as e:
         logger.error(f"创建占位符规则失败: {filename}, 错误: {e}")
         try:
             await db.rollback()
-        except:
+        except Exception:
             pass
         raise
 
@@ -541,19 +477,19 @@ async def _process_single_patch_file(
     filename: str,
     rule_id: str,
     db: AsyncSession,
-    user_config: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    user_config: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """
     处理单个 patch 文件生成规则
     更新数据库中已创建的规则记录
-    
+
     Args:
         patch_content: patch 文件内容
         filename: 文件名
         rule_id: 规则ID
         db: 数据库会话
         user_config: 用户配置，用于LLM模型选择
-        
+
     Returns:
         处理结果字典
     """
@@ -561,7 +497,7 @@ async def _process_single_patch_file(
         # 从文件名中提取信息 (格式: owner_repo_hash.patch)
         name_without_ext = filename.rsplit('.', 1)[0]
         parts = name_without_ext.rsplit('_', 2)  # 从右向左分割，最多分成3部分
-        
+
         if len(parts) >= 3:
             repo_owner = parts[0]
             repo_name = parts[1]
@@ -574,7 +510,7 @@ async def _process_single_patch_file(
             repo_owner = "unknown"
             repo_name = name_without_ext
             commit_hash = ""
-        
+
         # 构建请求
         request = OpengrepRuleCreateRequest(
             repo_owner=repo_owner,
@@ -582,20 +518,20 @@ async def _process_single_patch_file(
             commit_hash=commit_hash,
             commit_content=patch_content
         )
-        
+
         # 调用规则生成服务，传入用户配置
         result = await get_rule_by_patch(request, user_config=user_config)
-        
+
         attempts = result.get("attempts", [])
         meta = result.get("meta", {})
         validation = result.get("validation", {})
         is_valid = bool(validation.get("is_valid"))
         rule = result.get("rule")
-        
+
         # 获取现有规则记录进行更新
         db_result = await db.execute(select(OpengrepRule).where(OpengrepRule.id == rule_id))
         opengrep_rule = db_result.scalar_one_or_none()
-        
+
         if not opengrep_rule:
             logger.error(f"Rule {rule_id} not found in database")
             return {
@@ -605,7 +541,7 @@ async def _process_single_patch_file(
                 "attempts": len(attempts),
                 "message": "规则记录不存在"
             }
-        
+
         # 更新规则记录
         if rule:
             name = rule.get("id") or f"patch-{name_without_ext}"
@@ -626,7 +562,7 @@ async def _process_single_patch_file(
                 {"rules": [], "error": validation.get("message") or "LLM rule generation failed"},
                 sort_keys=False,
             )
-        
+
         # 更新规则信息
         opengrep_rule.name = name
         opengrep_rule.pattern_yaml = pattern_yaml
@@ -636,9 +572,9 @@ async def _process_single_patch_file(
         opengrep_rule.patch = patch_content
         opengrep_rule.correct = is_valid
         opengrep_rule.is_active = is_valid
-        
+
         await db.commit()
-        
+
         return {
             "filename": filename,
             "rule_id": rule_id,
@@ -646,7 +582,7 @@ async def _process_single_patch_file(
             "attempts": len(attempts),
             "message": "规则生成成功" if is_valid else "规则生成失败"
         }
-        
+
     except Exception as e:
         try:
             await db.rollback()
@@ -775,7 +711,7 @@ async def create_opengrep_generic_rule(
     except SQLAlchemyError as e:
         await db.rollback()
         logger.error(f"Failed to persist generic rule: {e}")
-        raise HTTPException(status_code=500, detail="规则保存失败")
+        raise HTTPException(status_code=500, detail="规则保存失败") from e
 
     return {
         "rule": rule,
@@ -1038,7 +974,7 @@ async def upload_opengrep_rule_json(
             raise HTTPException(
                 status_code=400,
                 detail=f"YAML 格式错误: {str(e)}",
-            )
+            ) from e
 
         # 检查规则必需字段
         if "rules" not in yaml_data:
@@ -1078,7 +1014,7 @@ async def upload_opengrep_rule_json(
             )
 
         # MD5 去重检查
-        md5_hash = hashlib.md5(request.pattern_yaml.encode("utf-8")).hexdigest()
+        hashlib.md5(request.pattern_yaml.encode("utf-8")).hexdigest()
         result = await db.execute(
             select(OpengrepRule).where(
                 OpengrepRule.pattern_yaml == request.pattern_yaml
@@ -1133,23 +1069,23 @@ async def upload_opengrep_rule_json(
         raise
     except Exception as e:
         logger.error(f"Error uploading opengrep rule: {e}")
-        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}") from e
 
 
 
 
 async def _create_rules_and_generate_background(
-    patch_files: List[tuple],
+    patch_files: list[tuple],
     user_id: str,
     task_type: str = "archive",
-    temp_dir: Optional[str] = None
+    temp_dir: str | None = None
 ) -> None:
     """
     后台异步创建占位符规则并生成规则
-    
+
     维护项目和git克隆的对应关系，在整个任务完成后统一清理临时文件，
     并清理本次任务使用的git缓存。
-    
+
     Args:
         patch_files: 要处理的 patch 文件列表，每个元素为 (filename, file_path) 或 (filename, file_content)
         user_id: 用户ID
@@ -1158,8 +1094,8 @@ async def _create_rules_and_generate_background(
     """
     async with async_session_factory() as db:
         # 任务级缓存：维护本次处理中使用过的项目，防止重复克隆
-        task_repo_cache: Dict[str, Path] = {}
-        
+        task_repo_cache: dict[str, Path] = {}
+
         user_config = await _get_user_config(db, user_id)
         if user_config:
             llm_config = user_config.get("llmConfig", {})
@@ -1170,21 +1106,21 @@ async def _create_rules_and_generate_background(
         else:
             logger.info(f"未找到用户 {user_id} 的 LLM 配置，将使用默认配置")
 
-        llm_config_error_message: Optional[str] = None
+        llm_config_error_message: str | None = None
         try:
             _validate_user_llm_config(user_config)
         except Exception as exc:
             llm_config_error_message = _normalize_llm_config_error_message(exc)
             logger.error(llm_config_error_message)
-        
+
         try:
             logger.info(f"开始后台创建占位符规则和处理 {len(patch_files)} 个 patch 文件 (task_type={task_type})...")
-            
+
             # 第一步：创建占位符规则
             rule_ids = []
             file_rule_map = {}  # 保存文件名和rule_id的映射
-            
-            for filename, content_or_path in patch_files:
+
+            for filename, _content_or_path in patch_files:
                 try:
                     rule_id = await _create_placeholder_rule(filename=filename, db=db)
                     rule_ids.append(rule_id)
@@ -1193,11 +1129,11 @@ async def _create_rules_and_generate_background(
                 except Exception as e:
                     logger.error(f"创建占位符规则失败: {filename}, 错误: {e}")
                     # 继续处理其他文件
-            
+
             if not rule_ids:
                 logger.error("未能为任何 patch 文件创建规则")
                 return
-            
+
             logger.info(f"创建 {len(rule_ids)} 个占位符规则，开始处理生成...")
 
             if llm_config_error_message:
@@ -1205,22 +1141,22 @@ async def _create_rules_and_generate_background(
                     await _update_rule_status(db, rule_id, False, llm_config_error_message)
                 logger.error("后台规则生成已终止：%s", llm_config_error_message)
                 return
-            
+
             # 第二步：处理 patch 文件生成规则
             success_count = 0
             failed_count = 0
             processed_repos = set()  # 追踪已处理过的项目（格式: "owner/name"）
-            
+
             for filename, content_or_path in patch_files:
                 if filename not in file_rule_map:
                     continue
-                
+
                 rule_id = file_rule_map[filename]
-                
+
                 if task_type == "archive":
                     # 从文件读取内容
                     try:
-                        with open(content_or_path, 'r', encoding='utf-8') as f:
+                        with open(content_or_path, encoding='utf-8') as f:
                             patch_content = f.read()
                     except UnicodeDecodeError:
                         logger.error(f"文件编码错误: {filename}")
@@ -1229,10 +1165,10 @@ async def _create_rules_and_generate_background(
                         continue
                 else:  # directory
                     patch_content = content_or_path
-                
+
                 try:
                     result = await _process_single_patch_file(patch_content, filename, rule_id, db, user_config=user_config)
-                    
+
                     # 从patch处理结果中提取repo信息用于缓存追踪
                     try:
                         # 从文件名提取项目信息
@@ -1243,7 +1179,7 @@ async def _create_rules_and_generate_background(
                             repo_name = parts[1]
                             repo_key = f"{repo_owner}/{repo_name}"
                             processed_repos.add(repo_key)
-                            
+
                             # 验证项目是否在全局缓存中
                             cached = GlobalRepoCacheManager.get_repo_cache(repo_owner, repo_name)
                             if cached:
@@ -1251,7 +1187,7 @@ async def _create_rules_and_generate_background(
                                 logger.info(f"任务缓存已记录项目: {repo_key}")
                     except Exception as e:
                         logger.debug(f"无法从patch提取项目信息: {e}")
-                    
+
                     if result["status"] == "success":
                         success_count += 1
                     else:
@@ -1264,20 +1200,20 @@ async def _create_rules_and_generate_background(
                     else:
                         await _update_rule_status(db, rule_id, False, str(e))
                     failed_count += 1
-            
+
             logger.info(
                 f"后台处理完成: 成功 {success_count} 个，失败 {failed_count} 个，"
                 f"缓存项目 {len(processed_repos)} 个"
             )
-            
+
             # 记录缓存统计
             if task_repo_cache:
                 total_size = 0
                 for repo_key, cache_path in task_repo_cache.items():
                     if cache_path.exists():
                         repo_size = sum(
-                            f.stat().st_size 
-                            for f in cache_path.rglob('*') 
+                            f.stat().st_size
+                            for f in cache_path.rglob('*')
                             if f.is_file()
                         )
                         total_size += repo_size
@@ -1290,7 +1226,7 @@ async def _create_rules_and_generate_background(
                     f"任务缓存总大小: {round(total_size / 1024 / 1024, 2)} MB "
                     f"(任务结束后将清理)"
                 )
-            
+
         except Exception as e:
             logger.error(f"后台创建和处理异常: {e}")
         finally:
@@ -1299,25 +1235,25 @@ async def _create_rules_and_generate_background(
                 try:
                     # 只清理临时目录中的patch和生成的规则，不清理git缓存
                     temp_path = Path(temp_dir)
-                    
+
                     # 清理patches目录
                     patches_dir = temp_path / "patches"
                     if patches_dir.exists():
                         shutil.rmtree(patches_dir, ignore_errors=True)
                         logger.info(f"已清理临时patches目录: {patches_dir}")
-                    
+
                     # 清理generated_rules目录
                     generated_dir = temp_path / "generated_rules"
                     if generated_dir.exists():
                         shutil.rmtree(generated_dir, ignore_errors=True)
                         logger.info(f"已清理临时generated_rules目录: {generated_dir}")
-                    
+
                     # 清理rules目录
                     rules_dir = temp_path / "rules"
                     if rules_dir.exists():
                         shutil.rmtree(rules_dir, ignore_errors=True)
                         logger.info(f"已清理临时rules目录: {rules_dir}")
-                    
+
                     # 最后清理整个临时目录（应该已基本为空）
                     if temp_path.exists():
                         shutil.rmtree(temp_path, ignore_errors=True)
@@ -1349,62 +1285,62 @@ async def upload_patch_archive(
 ) -> dict:
     """
     上传包含多个 Patch 文件的压缩包生成规则
-    
+
     支持的压缩格式: .zip
     压缩包内的 .patch 文件名必须符合格式: 仓库owner_仓库名_哈希.patch
-    
+
     工作流程:
     1. 快速验证和解压 patch 文件
     2. 返回确认消息
     3. 后台异步创建占位符规则和生成规则
-    
+
     前端应该轮询 GET /rules/generating/status 查询所有正在生成的规则
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
-    
+
     # 验证文件扩展名
     if not file.filename.endswith('.zip'):
         raise HTTPException(
             status_code=400,
             detail=f"仅支持 .zip 压缩格式，当前文件: {file.filename}"
         )
-    
+
     temp_dir = None
     try:
         # 创建临时目录
         temp_dir = tempfile.mkdtemp(prefix="patch_upload_")
         zip_path = os.path.join(temp_dir, file.filename)
-        
+
         # 保存上传的文件
         content = await file.read()
         with open(zip_path, 'wb') as f:
             f.write(content)
-        
+
         # 解压文件
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
-        except zipfile.BadZipFile:
-            raise HTTPException(status_code=400, detail="压缩包格式错误或已损坏")
-        
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(status_code=400, detail="压缩包格式错误或已损坏") from exc
+
         # 查找所有 .patch 文件
         patch_files = []
-        for root, dirs, files in os.walk(temp_dir):
+        for root, _dirs, files in os.walk(temp_dir):
             for filename in files:
                 if filename.endswith('.patch'):
                     file_path = os.path.join(root, filename)
                     patch_files.append((filename, file_path))
-        
+
         if not patch_files:
             raise HTTPException(
                 status_code=400,
                 detail="压缩包中没有找到 .patch 文件"
             )
-        
+
         total_files = len(patch_files)
         logger.info(f"压缩包上传验证成功，找到 {total_files} 个 patch 文件，启动后台处理...")
-        
+
         # 快速返回，所有处理在后台进行
         asyncio.create_task(
             _create_rules_and_generate_background(
@@ -1416,13 +1352,13 @@ async def upload_patch_archive(
         )
 
         await _cleanup_incorrect_rules(db)
-        
+
         return {
             "message": f"已接收 {total_files} 个 patch 文件，正在后台处理...",
             "total_files": total_files,
             "status": "processing"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1431,45 +1367,45 @@ async def upload_patch_archive(
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            except:
+            except Exception:
                 pass
-        raise HTTPException(status_code=500, detail=f"处理压缩包失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"处理压缩包失败: {str(e)}") from e
 
 
 @router.post("/rules/upload/patch-directory", response_model=dict)
 async def upload_patch_directory(
-    files: List[UploadFile] = File(..., description="目录中的多个 .patch 文件"),
+    files: list[UploadFile] = File(..., description="目录中的多个 .patch 文件"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> dict:
     """
     上传目录中的多个 Patch 文件生成规则
-    
+
     支持前端目录上传功能（浏览器会将目录中的所有文件作为多个文件上传）
     文件名必须符合格式: 仓库owner_仓库名_哈希.patch
-    
+
     工作流程:
     1. 快速验证 patch 文件
     2. 返回确认消息
     3. 后台异步创建占位符规则和生成规则
-    
+
     前端应该轮询 GET /rules/generating/status 查询所有正在生成的规则
     """
     if not files:
         raise HTTPException(status_code=400, detail="没有上传任何文件")
-    
+
     # 过滤出 .patch 文件
     patch_files = []
     for file in files:
         if file.filename and file.filename.endswith('.patch'):
             patch_files.append(file)
-    
+
     if not patch_files:
         raise HTTPException(
             status_code=400,
             detail=f"上传的 {len(files)} 个文件中没有找到 .patch 文件"
         )
-    
+
     # 将文件内容读入内存后再启动异步任务
     patch_files_data = []
     try:
@@ -1478,11 +1414,11 @@ async def upload_patch_directory(
             patch_content = content.decode('utf-8')
             patch_files_data.append((file.filename, patch_content))
     except UnicodeDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"文件编码错误: {str(e)}")
-    
+        raise HTTPException(status_code=400, detail=f"文件编码错误: {str(e)}") from e
+
     total_files = len(patch_files_data)
     logger.info(f"目录上传验证成功，找到 {total_files} 个 patch 文件，启动后台处理...")
-    
+
     # 快速返回，所有处理在后台进行
     asyncio.create_task(
         _create_rules_and_generate_background(
@@ -1493,7 +1429,7 @@ async def upload_patch_directory(
     )
 
     await _cleanup_incorrect_rules(db)
-    
+
     return {
         "message": f"已接收 {total_files} 个 patch 文件，正在后台处理...",
         "total_files": total_files,
@@ -1574,7 +1510,7 @@ async def upload_opengrep_rules(
 
             # 递归查找所有 YAML 文件
             yaml_files = []
-            for root, dirs, files in os.walk(temp_extract_dir):
+            for root, _dirs, files in os.walk(temp_extract_dir):
                 for f in files:
                     if f.endswith((".yml", ".yaml")):
                         yaml_files.append(os.path.join(root, f))
@@ -1598,7 +1534,7 @@ async def upload_opengrep_rules(
 
             for yaml_file in yaml_files:
                 try:
-                    with open(yaml_file, "r", encoding="utf-8") as f:
+                    with open(yaml_file, encoding="utf-8") as f:
                         content = f.read()
 
                     # 计算 MD5
@@ -1647,7 +1583,7 @@ async def upload_opengrep_rules(
                     cwe = metadata.get("cwe", [])
                     if isinstance(cwe, str):
                         cwe = [cwe]
-                    source = metadata.get("source", "upload")
+                    metadata.get("source", "upload")
 
                     # 验证严重程度
                     if severity not in ["ERROR", "WARNING", "INFO"]:
@@ -1701,12 +1637,12 @@ async def upload_opengrep_rules(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}") from e
 
 
 @router.post("/rules/upload/directory")
 async def upload_opengrep_rules_directory(
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -1793,7 +1729,7 @@ async def upload_opengrep_rules_directory(
 
             for yaml_file in yaml_files_paths:
                 try:
-                    with open(yaml_file, "r", encoding="utf-8") as f:
+                    with open(yaml_file, encoding="utf-8") as f:
                         content = f.read()
 
                     # 计算 MD5
@@ -1888,4 +1824,4 @@ async def upload_opengrep_rules_directory(
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}") from e

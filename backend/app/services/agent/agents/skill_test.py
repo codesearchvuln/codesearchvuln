@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from .base import AgentConfig, AgentPattern, AgentResult, AgentType, BaseAgent
 from .react_parser import parse_react_response
@@ -12,7 +12,7 @@ class SkillTestAgent(BaseAgent):
         self,
         *,
         llm_service,
-        tools: Dict[str, Any],
+        tools: dict[str, Any],
         selected_skill_id: str,
         max_iterations: int = 4,
         event_emitter=None,
@@ -49,10 +49,10 @@ class SkillTestAgent(BaseAgent):
             system_prompt=system_prompt,
         )
         super().__init__(config, llm_service, tools, event_emitter)
-        self._conversation_history: List[Dict[str, str]] = []
+        self._conversation_history: list[dict[str, str]] = []
         self._selected_skill_calls = 0
 
-    async def run(self, input_data: Dict[str, Any]) -> AgentResult:
+    async def run(self, input_data: dict[str, Any]) -> AgentResult:
         started_at = time.time()
         project_info = input_data.get("project_info", {}) if isinstance(input_data, dict) else {}
         prompt = str((input_data or {}).get("task") or "").strip()
@@ -177,7 +177,7 @@ class SkillTestAgent(BaseAgent):
         if not isinstance(properties, dict) or not properties:
             return "- 当前 skill 未声明参数字段。"
 
-        field_lines: List[str] = []
+        field_lines: list[str] = []
         for field_name, field_schema in properties.items():
             field_type = str((field_schema or {}).get("type") or "any")
             required_text = "required" if field_name in required else "optional"

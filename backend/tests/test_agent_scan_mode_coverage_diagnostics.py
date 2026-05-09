@@ -1,8 +1,8 @@
 from collections import Counter
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
-
-NON_TRANSIENT_RUNTIME_ERROR_CLASSES: Set[str] = {
+NON_TRANSIENT_RUNTIME_ERROR_CLASSES: set[str] = {
     "invalid_recon_queue_service_binding",
     "invalid_callable_binding",
     "tool_route_missing",
@@ -15,7 +15,7 @@ NON_TRANSIENT_RUNTIME_ERROR_CLASSES: Set[str] = {
 LIBPLIST_PROJECT_ID = "c157af04-bb37-472f-99f7-914a2a0fc558"
 
 
-def build_libplist_scan_request(mode: str) -> Dict[str, Any]:
+def build_libplist_scan_request(mode: str) -> dict[str, Any]:
     normalized_mode = str(mode or "").strip().lower()
     if normalized_mode not in {"intelligent", "hybrid"}:
         raise ValueError("mode must be intelligent or hybrid")
@@ -60,9 +60,9 @@ def _tool_output_text(event: Any) -> str:
 def build_scan_mode_coverage_matrix(
     events: Sequence[Any],
     *,
-    available_tools: Optional[Iterable[str]] = None,
-) -> Dict[str, Any]:
-    available_set: Set[str] = {
+    available_tools: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    available_set: set[str] = {
         str(name).strip()
         for name in (available_tools or [])
         if str(name).strip()
@@ -70,10 +70,10 @@ def build_scan_mode_coverage_matrix(
     called_counter: Counter[str] = Counter()
     failed_counter: Counter[str] = Counter()
     retry_suppressed_counter: Counter[str] = Counter()
-    deterministic_unsuppressed_counter: Counter[Tuple[str, str, str]] = Counter()
-    skill_not_ready_tools: Set[str] = set()
-    runtime_adapter_unavailable_tools: Set[str] = set()
-    bootstrap_sources: List[str] = []
+    deterministic_unsuppressed_counter: Counter[tuple[str, str, str]] = Counter()
+    skill_not_ready_tools: set[str] = set()
+    runtime_adapter_unavailable_tools: set[str] = set()
+    bootstrap_sources: list[str] = []
 
     for event in events:
         metadata = _event_get(event, "metadata", {}) or {}
@@ -117,7 +117,7 @@ def build_scan_mode_coverage_matrix(
             ] += 1
 
     all_tools = sorted(available_set | set(called_counter.keys()) | set(failed_counter.keys()))
-    matrix: Dict[str, Dict[str, Any]] = {}
+    matrix: dict[str, dict[str, Any]] = {}
     for tool_name in all_tools:
         matrix[tool_name] = {
             "available": tool_name in available_set if available_set else None,
@@ -151,7 +151,7 @@ def build_scan_mode_coverage_matrix(
 def assert_scan_mode_coverage(
     *,
     mode: str,
-    coverage: Dict[str, Any],
+    coverage: dict[str, Any],
     embedded_bootstrap_expected: bool,
 ) -> None:
     normalized_mode = str(mode or "").strip().lower()
