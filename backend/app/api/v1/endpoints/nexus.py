@@ -17,7 +17,7 @@ from app.models.user import User
 router = APIRouter()
 
 MAX_CACHE_KEY_LENGTH = 255
-MAX_PAYLOAD_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+MAX_PAYLOAD_SIZE_BYTES = 100 * 1024 * 1024  # 100MB
 DEFAULT_NEXUS_CACHE_STORAGE_PATH = "./nexus_cache"
 
 
