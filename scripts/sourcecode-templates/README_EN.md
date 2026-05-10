@@ -1,6 +1,7 @@
 # Deployment Guide
 
 > This source snapshot is provided under the repository license; separate commercial delivery/support terms may apply outside the license.
+
 ## Deployment Preparation
 
 1. Copy the backend environment file:
@@ -21,20 +22,27 @@ bash scripts/setup-env.sh
 ## Supported Environments
 
 - `docker compose`
-- Every direct compose command must keep `-f docker-compose.yml -f docker-compose.full.yml`
+- The sourcecode branch exposes only the full Docker Compose deployment route: root `docker-compose.yml`
 
 ## Deployment Command
 
-Preferred full local build entrypoint:
+Prefer the source branch script; it prepares `.env`, then runs the full local build and startup:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+./start-local-services.sh
+```
+
+You can also use the single Compose file directly:
+
+```bash
+docker compose up --build
 ```
 
 ## Common Maintenance Commands
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.full.yml ps
-docker compose -f docker-compose.yml -f docker-compose.full.yml logs -f
-docker compose -f docker-compose.yml -f docker-compose.full.yml down
+./stop-local-services.sh
+docker compose ps
+docker compose logs -f
+docker compose down
 ```

@@ -45,12 +45,18 @@ clean_generated_tree() {
 }
 
 export_tracked_tree() {
+  local tracked_tar_args=(tar --null -T - -cf -)
   if [[ -n "$SOURCE_REF" ]]; then
     git -C "$SOURCE_DIR" archive --format=tar "$SOURCE_REF" | tar -xf - -C "$OUTPUT_DIR"
   else
     (
       cd "$SOURCE_DIR"
-      git ls-files -z | tar --null -T - -cf -
+      {
+        while IFS= read -r -d '' rel_path; do
+          [[ -e "$rel_path" || -L "$rel_path" ]] || continue
+          printf '%s\0' "$rel_path"
+        done < <(git ls-files -z)
+      } | "${tracked_tar_args[@]}"
     ) | tar -xf - -C "$OUTPUT_DIR"
   fi
 
@@ -77,11 +83,20 @@ prune_public_tree() {
     "$OUTPUT_DIR/backend/tests" \
     "$OUTPUT_DIR/frontend/tests" \
     "$OUTPUT_DIR/CLAUDE.md" \
-    "$OUTPUT_DIR/docker-compose.hybrid.yml"
+    "$OUTPUT_DIR/AGENTS.md" \
+    "$OUTPUT_DIR/Makefile" \
+    "$OUTPUT_DIR/docker-compose.hybrid.yml" \
+    "$OUTPUT_DIR/docker-compose.full.yml"
 
   if [[ -d "$OUTPUT_DIR/scripts" ]]; then
     find "$OUTPUT_DIR/scripts" -mindepth 1 ! -name 'setup-env.sh' -exec rm -rf {} +
   fi
+  if [[ -d "$OUTPUT_DIR/docker" ]]; then
+    find "$OUTPUT_DIR/docker" -maxdepth 1 -type f \
+      \( -name 'docker-compose*.yml' -o -name '*Dockerfile*' \) \
+      -delete
+  fi
+  rm -f "$OUTPUT_DIR/Dockerfile" "$OUTPUT_DIR/nexus-web/Dockerfile"
 
   [[ -f "$OUTPUT_DIR/scripts/setup-env.sh" ]] || die "missing required public script: scripts/setup-env.sh"
   mkdir -p "$OUTPUT_DIR/data"
@@ -93,11 +108,15 @@ overlay_templates() {
 
   cp "$TEMPLATE_DIR/README.md" "$OUTPUT_DIR/README.md"
   cp "$TEMPLATE_DIR/README_EN.md" "$OUTPUT_DIR/README_EN.md"
-  cp "$TEMPLATE_DIR/Makefile" "$OUTPUT_DIR/Makefile"
   cp "$TEMPLATE_DIR/setup-env.sh" "$OUTPUT_DIR/scripts/setup-env.sh"
+  cp "$TEMPLATE_DIR/start-local-services.sh" "$OUTPUT_DIR/start-local-services.sh"
+  cp "$TEMPLATE_DIR/stop-local-services.sh" "$OUTPUT_DIR/stop-local-services.sh"
   cp "$TEMPLATE_DIR/docker-compose.yml" "$OUTPUT_DIR/docker-compose.yml"
-  cp "$TEMPLATE_DIR/docker-compose.full.yml" "$OUTPUT_DIR/docker-compose.full.yml"
-  chmod +x "$OUTPUT_DIR/scripts/setup-env.sh"
+  cp "$TEMPLATE_DIR/Dockerfile" "$OUTPUT_DIR/Dockerfile"
+  chmod +x \
+    "$OUTPUT_DIR/scripts/setup-env.sh" \
+    "$OUTPUT_DIR/start-local-services.sh" \
+    "$OUTPUT_DIR/stop-local-services.sh"
 }
 
 sanitize_public_tree() {
@@ -590,7 +609,6 @@ def strip_comments() -> None:
         elif suffix in {".sh", ".yml", ".yaml"} or path.name in {
             "Dockerfile",
             "docker-compose.yml",
-            "docker-compose.full.yml",
         }:
             strip_line_comments(path)
 
@@ -1096,11 +1114,12 @@ validate_sourcecode_tree() {
     "nexus-web/src"
     "nexus-itemDetail"
     "docker-compose.yml"
-    "docker-compose.full.yml"
+    "Dockerfile"
     "README.md"
     "README_EN.md"
-    "Makefile"
     "scripts/setup-env.sh"
+    "start-local-services.sh"
+    "stop-local-services.sh"
     "docker/env/backend/env.example"
     "LICENSE"
   )
@@ -1112,7 +1131,15 @@ validate_sourcecode_tree() {
     "backend/tests"
     "frontend/tests"
     "CLAUDE.md"
+    "AGENTS.md"
+    "Makefile"
     "docker-compose.hybrid.yml"
+    "docker-compose.full.yml"
+    "nexus-web/Dockerfile"
+    "docker/backend.Dockerfile"
+    "docker/backend.Dockerfile.dockerignore"
+    "docker/frontend.Dockerfile"
+    "docker/nexus-web.Dockerfile"
     "scripts/build-frontend.sh"
     "scripts/compose-up-local-build.sh"
     "scripts/compose-up-with-fallback.bat"
@@ -1159,28 +1186,43 @@ validate_sourcecode_tree() {
     die "scripts directory contains unexpected files"
   [[ -f "$OUTPUT_DIR/scripts/setup-env.sh" ]] || die "scripts/setup-env.sh is required"
 
-  for rel_path in README.md README_EN.md Makefile scripts/setup-env.sh docker-compose.yml docker-compose.full.yml; do
+  for rel_path in README.md README_EN.md scripts/setup-env.sh start-local-services.sh stop-local-services.sh docker-compose.yml Dockerfile; do
     if grep -Fq "docker-compose.hybrid.yml" "$OUTPUT_DIR/$rel_path"; then
       die "public sourcecode tree still references hybrid compose entrypoint: $rel_path"
+    fi
+    if grep -Fq "docker-compose.full.yml" "$OUTPUT_DIR/$rel_path"; then
+      die "public sourcecode tree still references full compose overlay: $rel_path"
     fi
     if grep -Fq "compose-up-with-fallback" "$OUTPUT_DIR/$rel_path"; then
       die "public sourcecode tree still references compose fallback wrapper: $rel_path"
     fi
-    if grep -Fq "docker compose up" "$OUTPUT_DIR/$rel_path"; then
-      die "public sourcecode tree still references bare docker compose up: $rel_path"
+  done
+
+  for rel_path in README.md README_EN.md scripts/setup-env.sh; do
+    if ! grep -Fq "docker compose up --build" "$OUTPUT_DIR/$rel_path"; then
+      die "public sourcecode docs/scripts are missing the single-compose build entrypoint: $rel_path"
     fi
   done
 
-  for rel_path in README.md README_EN.md; do
-    if ! grep -Fq "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" "$OUTPUT_DIR/$rel_path"; then
-      die "public sourcecode readme is missing the full local-build entrypoint: $rel_path"
-    fi
-  done
+  if ! grep -Fq "docker-compose.yml" "$OUTPUT_DIR/start-local-services.sh"; then
+    die "public sourcecode start script is missing the single compose file contract"
+  fi
+  if ! grep -Fq "docker-compose.yml" "$OUTPUT_DIR/stop-local-services.sh"; then
+    die "public sourcecode stop script is missing the single compose file contract"
+  fi
+
+  local dockerfile_count
+  dockerfile_count="$(find "$OUTPUT_DIR" -type f \( -name 'Dockerfile' -o -name '*Dockerfile*' \) | wc -l)"
+  [[ "$dockerfile_count" -eq 1 ]] || die "public sourcecode tree must contain exactly one Dockerfile, found: $dockerfile_count"
+
+  if ! grep -Fq "dockerfile: Dockerfile" "$OUTPUT_DIR/docker-compose.yml"; then
+    die "public sourcecode compose must build through the root Dockerfile"
+  fi
 
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     (
       cd "$OUTPUT_DIR"
-      docker compose -f docker-compose.yml -f docker-compose.full.yml config >/dev/null
+      docker compose -f docker-compose.yml config >/dev/null
     )
   fi
 }

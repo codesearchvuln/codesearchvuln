@@ -1,6 +1,7 @@
 # 部署指南
 
 > 本源码快照依据仓库许可证提供；单独的商业交付、商业支持或商业服务条款可能在许可证之外另行适用。
+
 ## 部署准备
 
 1. 复制后端环境文件：
@@ -17,23 +18,31 @@ cp docker/env/backend/env.example docker/env/backend/.env
 ```bash
 bash scripts/setup-env.sh
 ```
+
 ## 支持环境
 
 - `docker compose`
-- 所有直接 compose 命令都必须同时带上 `-f docker-compose.yml -f docker-compose.full.yml`
+- sourcecode 分支只保留全量 Docker Compose 部署路线：根目录 `docker-compose.yml`
 
 ## 部署命令
 
-推荐直接使用全量本地构建入口：
+推荐使用源码分支脚本，它会先准备 `.env`，再执行全量本地构建与启动：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+./start-local-services.sh
+```
+
+也可以直接使用单 Compose 文件：
+
+```bash
+docker compose up --build
 ```
 
 ## 常用维护指令
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.full.yml ps
-docker compose -f docker-compose.yml -f docker-compose.full.yml logs -f
-docker compose -f docker-compose.yml -f docker-compose.full.yml down
+./stop-local-services.sh
+docker compose ps
+docker compose logs -f
+docker compose down
 ```

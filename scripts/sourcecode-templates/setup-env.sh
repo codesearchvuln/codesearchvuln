@@ -140,10 +140,10 @@ cat <<'SUMMARY'
 Public source tree is ready.
 Run the full local source build with:
 
-  docker compose -f docker-compose.yml -f docker-compose.full.yml up --build
+  docker compose up --build
 
 Stop it with:
 
-  docker compose -f docker-compose.yml -f docker-compose.full.yml down
+  docker compose down
 ─────────────────────────────────────────────────────────────
 SUMMARY

@@ -92,11 +92,15 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert (output_dir / "nexus-web").is_dir()
     assert (output_dir / "nexus-itemDetail").is_dir()
     assert (output_dir / "docker-compose.yml").is_file()
-    assert (output_dir / "docker-compose.full.yml").is_file()
+    assert (output_dir / "Dockerfile").is_file()
+    assert not (output_dir / "docker-compose.full.yml").exists()
+    assert not (output_dir / "Makefile").exists()
+    assert not (output_dir / "AGENTS.md").exists()
     assert (output_dir / "README.md").is_file()
     assert (output_dir / "README_EN.md").is_file()
-    assert (output_dir / "Makefile").is_file()
     assert (output_dir / "scripts" / "setup-env.sh").is_file()
+    assert (output_dir / "start-local-services.sh").is_file()
+    assert (output_dir / "stop-local-services.sh").is_file()
     assert (output_dir / "docker" / "env" / "backend" / "env.example").is_file()
     assert (output_dir / "backend" / "app").is_dir()
     assert (output_dir / "frontend" / "src").is_dir()
@@ -141,6 +145,18 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
     assert not (output_dir / "deploy").exists()
     assert not (output_dir / "agent_checkpoints").exists()
     assert not (output_dir / "docker-compose.hybrid.yml").exists()
+    assert not (output_dir / "docker" / "docker-compose.yml").exists()
+    assert not (output_dir / "docker" / "docker-compose.full.yml").exists()
+    assert not (output_dir / "docker" / "docker-compose.hybrid.yml").exists()
+    assert not (output_dir / "docker" / "backend.Dockerfile").exists()
+    assert not (output_dir / "docker" / "frontend.Dockerfile").exists()
+    assert not (output_dir / "docker" / "nexus-web.Dockerfile").exists()
+    assert not (output_dir / "nexus-web" / "Dockerfile").exists()
+    assert [
+        path.relative_to(output_dir).as_posix()
+        for path in output_dir.rglob("*Dockerfile*")
+        if path.is_file()
+    ] == ["Dockerfile"]
     assert not (output_dir / "CLAUDE.md").exists()
     assert not (output_dir / "backend" / "tests").exists()
     assert not (output_dir / "frontend" / "tests").exists()
@@ -152,34 +168,51 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
 
     readme_text = (output_dir / "README.md").read_text(encoding="utf-8")
     readme_en_text = (output_dir / "README_EN.md").read_text(encoding="utf-8")
-    makefile_text = (output_dir / "Makefile").read_text(encoding="utf-8")
     setup_env_text = (output_dir / "scripts" / "setup-env.sh").read_text(encoding="utf-8")
+    start_script_text = (output_dir / "start-local-services.sh").read_text(encoding="utf-8")
+    stop_script_text = (output_dir / "stop-local-services.sh").read_text(encoding="utf-8")
     compose_text = (output_dir / "docker-compose.yml").read_text(encoding="utf-8")
-    full_compose_text = (output_dir / "docker-compose.full.yml").read_text(encoding="utf-8")
 
-    for text in (
+    for text_to_check in (
         readme_text,
         readme_en_text,
-        makefile_text,
         setup_env_text,
+        start_script_text,
+        stop_script_text,
         compose_text,
-        full_compose_text,
     ):
-        assert "docker-compose.hybrid.yml" not in text
-        assert "compose-up-with-fallback" not in text
-        assert "docker compose up" not in text
+        assert "docker-compose.hybrid.yml" not in text_to_check
+        assert "docker-compose.full.yml" not in text_to_check
+        assert "compose-up-with-fallback" not in text_to_check
 
-    assert (
-        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build" in readme_text
-    )
-    assert (
-        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
-        in readme_en_text
-    )
+    assert "docker compose up --build" in readme_text
+    assert "docker compose up --build" in readme_en_text
     assert "商业交付、商业支持" in readme_text
     assert (
         "separate commercial delivery/support terms may apply outside the license" in readme_en_text
     )
+    assert "docker compose --project-directory" in start_script_text
+    assert "docker-compose.yml" in start_script_text
+    assert "docker-compose.yml" in stop_script_text
+    assert "docker-compose.full.yml" not in start_script_text
+    assert "docker-compose.full.yml" not in stop_script_text
+    assert "vulhunter/backend-local:latest" in compose_text
+    assert "vulhunter/frontend-local:latest" in compose_text
+    assert "vulhunter/nexus-web-local:latest" in compose_text
+    assert "${GHCR_REGISTRY:-ghcr.io}" not in compose_text
+    assert "build:" in compose_text
+    assert compose_text.count("dockerfile: Dockerfile") == 3
+    assert "target: runtime-plain" in compose_text
+    assert "target: frontend-runtime" in compose_text
+    assert "target: nexus-web-runtime" in compose_text
+    assert "docker/backend.Dockerfile" not in compose_text
+    assert "../docker/frontend.Dockerfile" not in compose_text
+    assert "docker/nexus-web.Dockerfile" not in compose_text
+    dockerfile_text = (output_dir / "Dockerfile").read_text(encoding="utf-8")
+    assert "VulHunter public sourcecode unified Dockerfile" in dockerfile_text
+    assert "FROM runtime-base AS runtime-plain" in dockerfile_text
+    assert "AS frontend-runtime" in dockerfile_text
+    assert "AS nexus-web-runtime" in dockerfile_text
 
     if (
         shutil.which("docker")
@@ -196,8 +229,6 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
                 "compose",
                 "-f",
                 "docker-compose.yml",
-                "-f",
-                "docker-compose.full.yml",
                 "config",
             ],
             cwd=output_dir,
@@ -207,46 +238,48 @@ def test_sourcecode_generator_builds_public_source_tree_with_full_only_contract(
         assert config_result.returncode == 0, config_result.stderr
 
 
-def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> None:
+def test_sourcecode_templates_and_setup_env_expose_single_compose_full_entrypoint() -> None:
     template_readme = (REPO_ROOT / "scripts" / "sourcecode-templates" / "README.md").read_text(
         encoding="utf-8"
     )
     template_readme_en = (
         REPO_ROOT / "scripts" / "sourcecode-templates" / "README_EN.md"
     ).read_text(encoding="utf-8")
-    template_makefile = (REPO_ROOT / "scripts" / "sourcecode-templates" / "Makefile").read_text(
-        encoding="utf-8"
-    )
     template_setup_env = (
         REPO_ROOT / "scripts" / "sourcecode-templates" / "setup-env.sh"
+    ).read_text(encoding="utf-8")
+    template_start = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "start-local-services.sh"
+    ).read_text(encoding="utf-8")
+    template_stop = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "stop-local-services.sh"
     ).read_text(encoding="utf-8")
     template_compose = (
         REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.yml"
     ).read_text(encoding="utf-8")
-    template_full_compose = (
-        REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.full.yml"
+    template_dockerfile = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "Dockerfile"
     ).read_text(encoding="utf-8")
 
-    for text in (
+    assert not (REPO_ROOT / "scripts" / "sourcecode-templates" / "Makefile").exists()
+    assert not (REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.full.yml").exists()
+
+    for text_to_check in (
         template_readme,
         template_readme_en,
-        template_makefile,
         template_setup_env,
+        template_start,
+        template_stop,
         template_compose,
-        template_full_compose,
+        template_dockerfile,
     ):
-        assert "docker-compose.hybrid.yml" not in text
-        assert "compose-up-with-fallback" not in text
-        assert "docker compose up" not in text
+        assert "docker-compose.hybrid.yml" not in text_to_check
+        assert "docker-compose.full.yml" not in text_to_check
+        assert "compose-up-with-fallback" not in text_to_check
 
-    assert (
-        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
-        in template_readme
-    )
-    assert (
-        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
-        in template_readme_en
-    )
+    assert "docker compose up --build" in template_readme
+    assert "docker compose up --build" in template_readme_en
+    assert "docker compose up --build" in template_setup_env
     assert "商业交付、商业支持" in template_readme
     assert (
         "separate commercial delivery/support terms may apply outside the license"
@@ -256,19 +289,24 @@ def test_sourcecode_templates_and_setup_env_expose_full_only_entrypoint() -> Non
     assert "# Deployment Guide" in template_readme_en
     assert "podman compose" not in template_readme
     assert "podman compose" not in template_readme_en
-    assert "make up-full" in template_makefile
-    assert "\nup:\n" not in template_makefile
-    assert "\nup-build:\n" not in template_makefile
-    assert "\nup-attached:\n" not in template_makefile
-    assert "\nbuild-backend:\n" not in template_makefile
-    assert "\nbuild-frontend:\n" not in template_makefile
-    assert (
-        "docker compose -f docker-compose.yml -f docker-compose.full.yml up --build"
-        in template_setup_env
-    )
+    assert "docker compose --project-directory" in template_start
+    assert "docker-compose.yml" in template_start
+    assert "docker-compose.yml" in template_stop
+    assert "supports only the full single docker compose route" in template_start
+    assert "supports only the full single docker compose route" in template_stop
     assert "唯一推荐入口" in template_compose
-    assert "唯一推荐入口" in template_full_compose
-
+    assert "vulhunter/backend-local:latest" in template_compose
+    assert "vulhunter/frontend-local:latest" in template_compose
+    assert "vulhunter/nexus-web-local:latest" in template_compose
+    assert "${GHCR_REGISTRY:-ghcr.io}" not in template_compose
+    assert template_compose.count("dockerfile: Dockerfile") == 3
+    assert "target: runtime-plain" in template_compose
+    assert "target: frontend-runtime" in template_compose
+    assert "target: nexus-web-runtime" in template_compose
+    assert "VulHunter public sourcecode unified Dockerfile" in template_dockerfile
+    assert "FROM runtime-base AS runtime-plain" in template_dockerfile
+    assert "AS frontend-runtime" in template_dockerfile
+    assert "AS nexus-web-runtime" in template_dockerfile
 
 def _write_tracked_file(
     repo_dir: Path, rel_path: str, content: str, *, executable: bool = False
@@ -540,9 +578,10 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
         "Publish sourcecode branch" in gated_steps
     ), f"Publish step missing detect_changes gate; gated steps: {gated_steps}"
 
-    # Smoke test step exists and uses full build compose command
+    # Smoke test step exists and uses the single sourcecode compose file.
     assert "Smoke test sourcecode build" in workflow_text
-    assert "docker-compose.full.yml" in workflow_text
+    assert "-f docker-compose.yml" in workflow_text
+    assert "docker-compose.full.yml" not in workflow_text
     assert "RUNNER_PREFLIGHT_ENABLED=false" in workflow_text
     assert '"${compose_cmd[@]}" build' in workflow_text
     assert '"${compose_cmd[@]}" up -d' in workflow_text

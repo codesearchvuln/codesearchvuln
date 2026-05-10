@@ -118,7 +118,7 @@ jobs:
 
           compose_cmd=(
             docker compose
-            -f docker-compose.yml -f docker-compose.full.yml
+            -f docker-compose.yml
             -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}"
           )
 
