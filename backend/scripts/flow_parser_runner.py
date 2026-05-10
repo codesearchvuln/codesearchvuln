@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 
 def _load_tree_sitter_parser():
@@ -31,25 +31,25 @@ DOT_EDGE_RE = re.compile(r'"([^"]+)"\s*->\s*"([^"]+)"')
 FUNCTION_LIKE_TYPES = {"function", "method"}
 
 
-def _load_request(path: str) -> Dict[str, Any]:
+def _load_request(path: str) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _write_response(path: str, payload: Dict[str, Any]) -> None:
+def _write_response(path: str, payload: dict[str, Any]) -> None:
     Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _extract_definitions_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_definitions_batch(payload: dict[str, Any]) -> dict[str, Any]:
     parser = TreeSitterParser()
     items = payload.get("items") if isinstance(payload, dict) else []
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     for item in items if isinstance(items, list) else []:
         file_path = str(item.get("file_path") or "").strip()
         language = str(item.get("language") or "").strip() or "text"
         content = str(item.get("content") or "")
-        diagnostics: List[str] = []
-        definitions: List[Dict[str, Any]] = []
+        diagnostics: list[str] = []
+        definitions: list[dict[str, Any]] = []
         error = None
         ok = True
 
@@ -78,13 +78,13 @@ def _extract_definitions_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"items": results}
 
 
-def _locate_enclosing_function(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _locate_enclosing_function(payload: dict[str, Any]) -> dict[str, Any]:
     parser = TreeSitterParser()
     file_path = str(payload.get("file_path") or "").strip()
     language = str(payload.get("language") or "").strip() or "text"
     content = str(payload.get("content") or "")
     line_start = int(payload.get("line_start") or 1)
-    diagnostics: List[str] = []
+    diagnostics: list[str] = []
 
     try:
         tree = parser.parse(content, language)
@@ -172,8 +172,8 @@ def _normalize_symbol_name(raw_node: str) -> str:
     return token.strip()
 
 
-def _parse_dot_edges(dot_text: str) -> Dict[str, List[str]]:
-    edges: Dict[str, List[str]] = {}
+def _parse_dot_edges(dot_text: str) -> dict[str, list[str]]:
+    edges: dict[str, list[str]] = {}
     for src_raw, dst_raw in DOT_EDGE_RE.findall(dot_text):
         src = _normalize_symbol_name(src_raw)
         dst = _normalize_symbol_name(dst_raw)
@@ -188,12 +188,12 @@ def _parse_dot_edges(dot_text: str) -> Dict[str, List[str]]:
 def _build_code2flow_diagnostics(
     *,
     binary_path: str | None,
-    probe_command: List[str] | None = None,
+    probe_command: list[str] | None = None,
     stderr_text: str = "",
     error: str = "",
     used_engine: str = "fallback",
-) -> Dict[str, str]:
-    diagnostics: Dict[str, str] = {
+) -> dict[str, str]:
+    diagnostics: dict[str, str] = {
         "binary_path": str(binary_path or ""),
         "probe_command": " ".join(shlex.quote(part) for part in (probe_command or ["code2flow", "--help"])),
         "stderr_excerpt": str(stderr_text or "").strip()[:400],
@@ -204,7 +204,7 @@ def _build_code2flow_diagnostics(
     return diagnostics
 
 
-def _code2flow_callgraph(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _code2flow_callgraph(payload: dict[str, Any]) -> dict[str, Any]:
     files = payload.get("files") if isinstance(payload, dict) else []
     if not isinstance(files, list) or not files:
         return {
@@ -232,7 +232,7 @@ def _code2flow_callgraph(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     with tempfile.TemporaryDirectory(prefix="flow-parser-code2flow-") as temp_dir:
         workspace = Path(temp_dir)
-        input_paths: List[str] = []
+        input_paths: list[str] = []
         for item in files:
             rel_path = str(item.get("file_path") or "").strip()
             content = str(item.get("content") or "")
@@ -260,7 +260,7 @@ def _code2flow_callgraph(payload: Dict[str, Any]) -> Dict[str, Any]:
         ]
 
         last_error = ""
-        last_probe_command: List[str] = [code2flow_bin, "--help"]
+        last_probe_command: list[str] = [code2flow_bin, "--help"]
         last_stderr = ""
         for cmd in commands:
             last_probe_command = list(cmd)

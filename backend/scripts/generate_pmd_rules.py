@@ -7,13 +7,12 @@ import posixpath
 import re
 import sys
 import time
+from collections.abc import Iterable
 from html import unescape
 from pathlib import Path
-from typing import Iterable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
-
 
 DEFAULT_PMD_VERSION = "7.22.0"
 DEFAULT_DOCS_BASE_URL = f"https://docs.pmd-code.org/pmd-doc-{DEFAULT_PMD_VERSION}/"

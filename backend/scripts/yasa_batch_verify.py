@@ -18,8 +18,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 SUPPORTED_ORDER = ["java", "golang", "python", "typescript", "javascript"]
 ALIAS = {
@@ -39,7 +39,7 @@ ALIAS = {
 }
 
 
-def _req(base_url: str, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Any:
+def _req(base_url: str, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
     url = f"{base_url.rstrip('/')}{path}"
     data = None
     headers = {}
@@ -49,7 +49,7 @@ def _req(base_url: str, method: str, path: str, payload: Optional[Dict[str, Any]
 
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
 
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for attempt in range(1, 6):
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
@@ -71,11 +71,11 @@ def _get(base_url: str, path: str) -> Any:
     return _req(base_url, "GET", path)
 
 
-def _post(base_url: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Any:
+def _post(base_url: str, path: str, payload: dict[str, Any] | None = None) -> Any:
     return _req(base_url, "POST", path, payload)
 
 
-def _parse_languages(raw: Any) -> List[str]:
+def _parse_languages(raw: Any) -> list[str]:
     if isinstance(raw, list):
         values = [str(item).strip().lower() for item in raw if str(item).strip()]
         return values
@@ -93,9 +93,9 @@ def _parse_languages(raw: Any) -> List[str]:
     return []
 
 
-def _resolve_supported_languages(raw: Any) -> List[str]:
+def _resolve_supported_languages(raw: Any) -> list[str]:
     langs = _parse_languages(raw)
-    mapped: List[str] = []
+    mapped: list[str] = []
     for lang in langs:
         mapped_lang = ALIAS.get(lang)
         if mapped_lang and mapped_lang in SUPPORTED_ORDER and mapped_lang not in mapped:
@@ -103,7 +103,7 @@ def _resolve_supported_languages(raw: Any) -> List[str]:
     return [lang for lang in SUPPORTED_ORDER if lang in mapped]
 
 
-def _to_epoch(value: Optional[str]) -> float:
+def _to_epoch(value: str | None) -> float:
     if not value:
         return 0.0
     try:
@@ -112,7 +112,7 @@ def _to_epoch(value: Optional[str]) -> float:
         return 0.0
 
 
-def _short_error(text: Optional[str], limit: int = 280) -> Optional[str]:
+def _short_error(text: str | None, limit: int = 280) -> str | None:
     raw = str(text or "").strip()
     if not raw:
         return None
@@ -120,8 +120,8 @@ def _short_error(text: Optional[str], limit: int = 280) -> Optional[str]:
     return one_line[:limit]
 
 
-def _poll_task_terminal(base_url: str, task_id: str, wait_seconds: int) -> Dict[str, Any]:
-    last: Dict[str, Any] = {}
+def _poll_task_terminal(base_url: str, task_id: str, wait_seconds: int) -> dict[str, Any]:
+    last: dict[str, Any] = {}
     for _ in range(max(1, wait_seconds)):
         last = _get(base_url, f"/api/v1/static-tasks/yasa/tasks/{task_id}")
         status = str(last.get("status") or "").lower()
@@ -133,7 +133,7 @@ def _poll_task_terminal(base_url: str, task_id: str, wait_seconds: int) -> Dict[
     return last
 
 
-def _cleanup_fastjson_concurrency(base_url: str) -> Dict[str, Any]:
+def _cleanup_fastjson_concurrency(base_url: str) -> dict[str, Any]:
     projects = _get(base_url, "/api/v1/projects/")
     fastjson = next((p for p in projects if str(p.get("name", "")).lower() == "fastjson"), None)
     if not fastjson:
@@ -150,7 +150,7 @@ def _cleanup_fastjson_concurrency(base_url: str) -> Dict[str, Any]:
     running.sort(key=lambda t: _to_epoch(t.get("created_at")), reverse=True)
 
     kept = running[0] if running else None
-    interrupted: List[str] = []
+    interrupted: list[str] = []
 
     for task in running[1:]:
         task_id = str(task.get("id"))
@@ -168,7 +168,7 @@ def _cleanup_fastjson_concurrency(base_url: str) -> Dict[str, Any]:
     }
 
 
-def _scan_language(base_url: str, project: Dict[str, Any], language: str, wait_seconds: int) -> Dict[str, Any]:
+def _scan_language(base_url: str, project: dict[str, Any], language: str, wait_seconds: int) -> dict[str, Any]:
     project_id = str(project["id"])
     project_name = str(project.get("name") or project_id)
     task_name = f"batch-yasa-{project_name}-{language}"
@@ -214,7 +214,7 @@ def _run(base_url: str, wait_seconds: int, out_json: str, out_tsv: str) -> int:
     cleanup = _cleanup_fastjson_concurrency(base_url)
 
     projects = _get(base_url, "/api/v1/projects/")
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
 
     for project in projects:
         supported = _resolve_supported_languages(project.get("programming_languages"))
@@ -264,7 +264,7 @@ def _run(base_url: str, wait_seconds: int, out_json: str, out_tsv: str) -> int:
             rows.append(row)
 
     payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "cleanup": cleanup,
         "rows": rows,
     }

@@ -4,8 +4,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
-
+from typing import Any
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -15,13 +14,12 @@ from scripts.generate_runtime_tool_docs import (  # noqa: E402
     DOCS_ROOT,
     FILE_TOOL_SKILL_SPECS,
     PLAYBOOK_PATH,
+    SHARED_CATALOG_PATH,
     SKILLS_DOC_DIR,
     SKILLS_INDEX_PATH,
-    SHARED_CATALOG_PATH,
     TOOLS_DOC_DIR,
     collect_runtime_tools,
 )
-
 
 REQUIRED_DOC_HEADING_ALIASES = {
     "## Goal": [
@@ -51,12 +49,12 @@ REQUIRED_DOC_HEADING_ALIASES = {
 }
 
 
-def validate_runtime_tool_docs() -> Dict[str, Any]:
+def validate_runtime_tool_docs() -> dict[str, Any]:
     registry = collect_runtime_tools()
     expected_tools = sorted(registry.keys())
 
-    missing_docs: List[str] = []
-    missing_headings: Dict[str, List[str]] = {}
+    missing_docs: list[str] = []
+    missing_headings: dict[str, list[str]] = {}
 
     for runtime_key in expected_tools:
         doc_path = TOOLS_DOC_DIR / f"{runtime_key}.md"
@@ -72,7 +70,7 @@ def validate_runtime_tool_docs() -> Dict[str, Any]:
         if missing:
             missing_headings[runtime_key] = missing
 
-    missing_catalog_entries: List[str] = []
+    missing_catalog_entries: list[str] = []
     catalog_text = ""
     if SHARED_CATALOG_PATH.exists():
         catalog_text = SHARED_CATALOG_PATH.read_text(encoding="utf-8", errors="replace")
@@ -80,7 +78,7 @@ def validate_runtime_tool_docs() -> Dict[str, Any]:
         if f"`{runtime_key}`" not in catalog_text:
             missing_catalog_entries.append(runtime_key)
 
-    missing_skill_docs: List[str] = []
+    missing_skill_docs: list[str] = []
     for tool_name in sorted(FILE_TOOL_SKILL_SPECS.keys()):
         skill_path = SKILLS_DOC_DIR / f"{tool_name}.skill.md"
         if not skill_path.exists():

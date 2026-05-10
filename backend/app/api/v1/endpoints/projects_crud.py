@@ -1,5 +1,5 @@
 import json
-from datetime import timezone
+from datetime import UTC
 
 from fastapi import Query
 
@@ -163,7 +163,7 @@ async def get_project_info(
         project_info_record = ProjectInfo(
             project_id=id,
             status="pending",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             language_info=default_language_info_json,
             description="",
         )
@@ -235,7 +235,7 @@ async def update_project(
     for field, value in update_data.items():
         setattr(project, field, value)
 
-    project.updated_at = datetime.now(timezone.utc)
+    project.updated_at = datetime.now(UTC)
     await db.commit()
     project_metrics_refresher.enqueue(project.id)
     return await load_project_for_response(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -22,7 +22,6 @@ from app.models.gitleaks import GitleaksScanTask
 from app.models.opengrep import OpengrepScanTask
 from app.models.phpstan import PhpstanScanTask
 from app.models.yasa import YasaScanTask
-
 
 INTERRUPTED_ERROR_MESSAGE = "任务长时间未更新，已自动标记为中止"
 RECOVERABLE_STATUSES = {"pending", "running"}
@@ -39,7 +38,7 @@ def _mark_interrupted(task: Any) -> bool:
         changed = True
 
     if hasattr(task, "completed_at") and getattr(task, "completed_at", None) is None:
-        task.completed_at = datetime.now(timezone.utc)
+        task.completed_at = datetime.now(UTC)
         changed = True
 
     if hasattr(task, "error_message") and not getattr(task, "error_message", None):
@@ -50,7 +49,7 @@ def _mark_interrupted(task: Any) -> bool:
 
 
 async def cleanup_stale_tasks(minutes: int, dry_run: bool) -> dict[str, int]:
-    threshold = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    threshold = datetime.now(UTC) - timedelta(minutes=minutes)
 
     # Best effort cleanup: we only touch tasks older than threshold.
     # Active in-memory subprocess tracking is process-local and not available here.

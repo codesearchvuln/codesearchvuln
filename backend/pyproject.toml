@@ -144,6 +144,8 @@ ignore = [
 
 
 [tool.ruff.lint.per-file-ignores]
+# Vendored pip bootstrap performs a Python-version guard before heavier imports.
+"get-pip.py" = ["E402", "I001"]
 # Split endpoint modules intentionally re-export shared helpers and route contracts.
 "app/api/v1/endpoints/agent_tasks_execution.py" = ["F403", "F405"]
 "app/api/v1/endpoints/agent_tasks_reporting.py" = ["F403", "F405"]

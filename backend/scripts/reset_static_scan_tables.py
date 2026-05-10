@@ -21,12 +21,12 @@ if str(BASE_DIR) not in sys.path:
 
 # 确保 ORM 关系引用字符串在 mapper 初始化前完成注册
 import app.models  # noqa: F401,E402
-from app.models.project_info import ProjectInfo  # noqa: F401,E402
 from app.db.init_db import (  # noqa: E402
     create_internal_opengrep_rules,
     create_patch_opengrep_rules,
 )
 from app.db.session import AsyncSessionLocal  # noqa: E402
+from app.models.project_info import ProjectInfo  # noqa: F401,E402
 
 logger = logging.getLogger("reset_static_scan_tables")
 logging.basicConfig(level=logging.INFO)

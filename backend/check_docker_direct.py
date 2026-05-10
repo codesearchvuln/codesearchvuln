@@ -1,5 +1,4 @@
 
-import sys
 try:
     import docker
     print(f"Docker module: {docker.__file__}")

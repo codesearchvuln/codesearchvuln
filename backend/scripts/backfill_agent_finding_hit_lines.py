@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections import Counter
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from sqlalchemy import select
 
@@ -24,7 +24,7 @@ from app.db.session import AsyncSessionLocal
 from app.models.agent_task import AgentFinding
 
 
-def _extract_function_range(verification_result: Any) -> Tuple[Any, Any]:
+def _extract_function_range(verification_result: Any) -> tuple[Any, Any]:
     if not isinstance(verification_result, dict):
         return None, None
     reachability_target = verification_result.get("reachability_target")
@@ -37,8 +37,8 @@ async def backfill_agent_finding_hit_lines(
     *,
     apply_changes: bool,
     task_id: str | None = None,
-) -> Dict[str, Any]:
-    stats: Dict[str, Any] = {
+) -> dict[str, Any]:
+    stats: dict[str, Any] = {
         "scanned": 0,
         "correctable": 0,
         "updated": 0,

@@ -1,4 +1,5 @@
-from datetime import timezone
+from datetime import UTC
+
 from app.api.v1.endpoints.projects_shared import *
 from app.api.v1.endpoints.projects_shared import (
     _build_zip_project,
@@ -127,7 +128,7 @@ async def generate_project_description_for_project(
             )
 
             project.description = description
-            project.updated_at = datetime.now(timezone.utc)
+            project.updated_at = datetime.now(UTC)
             project_info_record.language_info = language_info_json
             project_info_record.description = description
             project_info_record.status = "completed"

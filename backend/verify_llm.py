@@ -1,12 +1,13 @@
 import asyncio
 import logging
-import sys
 import os
+import sys
+
 sys.path.append(os.getcwd())
 
 # Configure logging to stdout
 logging.basicConfig(
-    stream=sys.stdout, 
+    stream=sys.stdout,
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
@@ -25,10 +26,10 @@ async def test_llm():
         print("Initializing LLMService...", flush=True)
         service = LLMService()
         print(f"Config: Provider={service.config.provider}, Model={service.config.model}", flush=True)
-        
+
         messages = [{"role": "user", "content": "Hello, are you working?"}]
         print("Sending request...", flush=True)
-        
+
         accumulated = ""
         async for chunk in service.chat_completion_stream(messages):
             if chunk["type"] == "token":

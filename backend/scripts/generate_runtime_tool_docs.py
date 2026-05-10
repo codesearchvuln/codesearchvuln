@@ -4,18 +4,17 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List, Tuple
-
+from typing import Any
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.api.v1.endpoints.agent_tasks import _initialize_tools  # noqa: E402
-
 
 DOCS_ROOT = BACKEND_DIR / "docs" / "agent-tools"
 TOOLS_DOC_DIR = DOCS_ROOT / "tools"
@@ -25,9 +24,9 @@ INDEX_PATH = DOCS_ROOT / "INDEX.md"
 SKILLS_INDEX_PATH = DOCS_ROOT / "SKILLS_INDEX.md"
 PLAYBOOK_PATH = DOCS_ROOT / "TOOL_PLAYBOOK.md"
 
-OPTIONAL_RUNTIME_TOOLS: Dict[str, Tuple[str, Any]] = {}
+OPTIONAL_RUNTIME_TOOLS: dict[str, tuple[str, Any]] = {}
 
-FILE_TOOL_SKILL_SPECS: Dict[str, Dict[str, Any]] = {
+FILE_TOOL_SKILL_SPECS: dict[str, dict[str, Any]] = {
     "read_file": {
         "goal": "在已定位代码行附近读取最小必要上下文，形成可复核证据。",
         "contracts": [
@@ -119,7 +118,7 @@ def _ensure_demo_project(project_root: Path) -> None:
     )
 
 
-async def _collect_runtime_tools_async() -> Dict[str, Dict[str, Any]]:
+async def _collect_runtime_tools_async() -> dict[str, dict[str, Any]]:
     with TemporaryDirectory(prefix="tool_docs_") as tmp:
         project_root = Path(tmp) / "demo_project"
         _ensure_demo_project(project_root)
@@ -137,7 +136,7 @@ async def _collect_runtime_tools_async() -> Dict[str, Dict[str, Any]]:
             task_id=None,
         )
 
-    registry: Dict[str, Dict[str, Any]] = {}
+    registry: dict[str, dict[str, Any]] = {}
     for phase_name, phase_tools in tools.items():
         if not isinstance(phase_tools, dict):
             continue
@@ -167,11 +166,11 @@ async def _collect_runtime_tools_async() -> Dict[str, Dict[str, Any]]:
     return registry
 
 
-def collect_runtime_tools() -> Dict[str, Dict[str, Any]]:
+def collect_runtime_tools() -> dict[str, dict[str, Any]]:
     return asyncio.run(_collect_runtime_tools_async())
 
 
-def _schema_dict(args_schema: Any) -> Dict[str, Any]:
+def _schema_dict(args_schema: Any) -> dict[str, Any]:
     if args_schema is None:
         return {}
     if hasattr(args_schema, "model_json_schema"):
@@ -181,7 +180,7 @@ def _schema_dict(args_schema: Any) -> Dict[str, Any]:
     return {}
 
 
-def _example_value(field_schema: Dict[str, Any]) -> Any:
+def _example_value(field_schema: dict[str, Any]) -> Any:
     field_type = field_schema.get("type")
     if field_type == "string":
         return field_schema.get("default", "<text>")
@@ -200,7 +199,7 @@ def _example_value(field_schema: Dict[str, Any]) -> Any:
     return field_schema.get("default", "<value>")
 
 
-def _infer_goal_and_tasks(runtime_key: str, description: str, phases: Iterable[str]) -> Tuple[str, List[str], str]:
+def _infer_goal_and_tasks(runtime_key: str, description: str, phases: Iterable[str]) -> tuple[str, list[str], str]:
     key = runtime_key.lower()
     phase_text = "/".join(sorted({str(p) for p in phases}))
     if key in {"read_file", "list_files", "search_code", "get_symbol_body", "function_context"}:
@@ -254,15 +253,15 @@ def _infer_goal_and_tasks(runtime_key: str, description: str, phases: Iterable[s
     )
 
 
-def _build_tool_doc(runtime_key: str, tool: Any, phases: Iterable[str], optional: bool) -> Tuple[str, str]:
+def _build_tool_doc(runtime_key: str, tool: Any, phases: Iterable[str], optional: bool) -> tuple[str, str]:
     description = str(getattr(tool, "description", "") or "").strip()
     goal, tasks, category = _infer_goal_and_tasks(runtime_key, description, phases)
     schema = _schema_dict(getattr(tool, "args_schema", None))
     properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
     required = set(schema.get("required", [])) if isinstance(schema, dict) else set()
 
-    example_payload: Dict[str, Any] = {}
-    input_lines: List[str] = []
+    example_payload: dict[str, Any] = {}
+    input_lines: list[str] = []
     for field_name, field_schema in properties.items():
         field_desc = str(field_schema.get("description", "")).strip()
         field_type = str(field_schema.get("type", "any"))
@@ -319,8 +318,8 @@ def _build_tool_doc(runtime_key: str, tool: Any, phases: Iterable[str], optional
     return doc, category
 
 
-def _build_shared_catalog(registry: Dict[str, Dict[str, Any]], tool_categories: Dict[str, str]) -> str:
-    sections: Dict[str, List[str]] = {name: [] for name in CATEGORY_ORDER}
+def _build_shared_catalog(registry: dict[str, dict[str, Any]], tool_categories: dict[str, str]) -> str:
+    sections: dict[str, list[str]] = {name: [] for name in CATEGORY_ORDER}
 
     for runtime_key in sorted(registry):
         tool_info = registry[runtime_key]
@@ -340,7 +339,7 @@ def _build_shared_catalog(registry: Dict[str, Dict[str, Any]], tool_categories: 
             )
         )
 
-    lines: List[str] = [
+    lines: list[str] = [
         "# TOOL_SHARED_CATALOG",
         "",
         "该目录按“目标 -> 推荐工具 -> 可完成任务 -> 反例/误用”汇总运行时工具能力。",
@@ -361,7 +360,7 @@ def _build_shared_catalog(registry: Dict[str, Dict[str, Any]], tool_categories: 
     return "\n".join(lines)
 
 
-def _build_index(registry: Dict[str, Dict[str, Any]]) -> str:
+def _build_index(registry: dict[str, dict[str, Any]]) -> str:
     lines = [
         "# Agent Tool Docs Index",
         "",
@@ -377,7 +376,7 @@ def _build_index(registry: Dict[str, Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _build_skill_doc(tool_name: str, spec: Dict[str, Any]) -> str:
+def _build_skill_doc(tool_name: str, spec: dict[str, Any]) -> str:
     goal = str(spec.get("goal") or "").strip() or "N/A"
     contracts = spec.get("contracts") if isinstance(spec.get("contracts"), list) else []
     workflow = spec.get("workflow") if isinstance(spec.get("workflow"), list) else []
@@ -500,7 +499,7 @@ def _build_mcp_tool_playbook() -> str:
 """
 
 
-def generate_runtime_tool_docs() -> Dict[str, Any]:
+def generate_runtime_tool_docs() -> dict[str, Any]:
     registry = collect_runtime_tools()
     DOCS_ROOT.mkdir(parents=True, exist_ok=True)
     TOOLS_DOC_DIR.mkdir(parents=True, exist_ok=True)
@@ -513,7 +512,7 @@ def generate_runtime_tool_docs() -> Dict[str, Any]:
     if stale_skill_doc.exists():
         stale_skill_doc.unlink()
 
-    tool_categories: Dict[str, str] = {}
+    tool_categories: dict[str, str] = {}
     for runtime_key in sorted(registry):
         info = registry[runtime_key]
         tool_doc, category = _build_tool_doc(
