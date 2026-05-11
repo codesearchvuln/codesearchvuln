@@ -1,0 +1,1302 @@
+name: Release Branch
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: false
+        type: string
+        default: main
+      source_sha:
+        required: false
+        type: string
+        default: ''
+      release_manifest:
+        required: false
+        type: string
+        default: ''
+      reuse_existing_images:
+        required: false
+        type: boolean
+        default: true
+      refresh_all_runtime_images:
+        required: false
+        type: boolean
+        default: false
+      runtime_image_targets:
+        required: false
+        type: string
+        default: ''
+      build_backend:
+        required: false
+        type: boolean
+        default: false
+      build_nexus_web:
+        required: false
+        type: boolean
+        default: false
+      build_yasa_runner:
+        required: false
+        type: boolean
+        default: false
+      build_opengrep_runner:
+        required: false
+        type: boolean
+        default: false
+      build_bandit_runner:
+        required: false
+        type: boolean
+        default: false
+      build_gitleaks_runner:
+        required: false
+        type: boolean
+        default: false
+      build_phpstan_runner:
+        required: false
+        type: boolean
+        default: false
+      build_flow_parser_runner:
+        required: false
+        type: boolean
+        default: false
+      build_pmd_runner:
+        required: false
+        type: boolean
+        default: false
+      build_sandbox_runner:
+        required: false
+        type: boolean
+        default: false
+      build_offline_images:
+        required: false
+        type: boolean
+        default: false
+      publish_release_assets:
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/tests/**'
+      - '**/docs/**'
+      - 'tests/**'
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+      - 'NOTICE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: '要发布的分支或 commit SHA（默认使用 main，适配默认分支已切到 release 时手动构建 main）'
+        required: false
+        type: string
+        default: main
+      reuse_existing_images:
+        description: 'Skip runtime image builds and reuse the current `latest` digests on GHCR for the release manifest (fails fast if any required image is missing)'
+        required: false
+        type: boolean
+        default: true
+      refresh_all_runtime_images:
+        description: 'Rebuild all runtime runner images before generating release (ignored when reuse_existing_images is true)'
+        required: false
+        type: boolean
+        default: false
+      runtime_image_targets:
+        description: '当 reuse_existing_images=false 时构建的镜像: all 或逗号分隔 backend,nexus_web,yasa_runner,opengrep_runner,bandit_runner,gitleaks_runner,phpstan_runner,flow_parser_runner,pmd_runner,sandbox_runner'
+        required: false
+        type: string
+        default: ''
+      build_offline_images:
+        description: '构建 package-offline-images 离线镜像包（手动发布时按需启用，默认不构建）'
+        required: false
+        type: boolean
+        default: false
+      publish_release_assets:
+        description: '手动执行完整 finalize-publish 资产发布流程并上传 GitHub Release assets（相当于 ci 前缀 push）'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  commit-gate:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check commit message prefix
+        id: check
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          first_line="$(printf '%s' "${COMMIT_MSG}" | head -n1)"
+          if printf '%s' "${first_line}" | grep -iqE '^ci(\(|:|\s)'; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Commit message does not start with 'ci' prefix, skipping release."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  detect-changes:
+    if: ${{ github.event_name == 'push' && needs.commit-gate.outputs.should_run == 'true' }}
+    needs: commit-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend || 'false' }}
+      nexus_web: ${{ steps.filter.outputs.nexus_web || 'false' }}
+      yasa_runner: ${{ steps.filter.outputs.yasa_runner || 'false' }}
+      opengrep_runner: ${{ steps.filter.outputs.opengrep_runner || 'false' }}
+      bandit_runner: ${{ steps.filter.outputs.bandit_runner || 'false' }}
+      gitleaks_runner: ${{ steps.filter.outputs.gitleaks_runner || 'false' }}
+      phpstan_runner: ${{ steps.filter.outputs.phpstan_runner || 'false' }}
+      flow_parser_runner: ${{ steps.filter.outputs.flow_parser_runner || 'false' }}
+      pmd_runner: ${{ steps.filter.outputs.pmd_runner || 'false' }}
+      sandbox_runner: ${{ steps.filter.outputs.sandbox_runner || 'false' }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: 识别运行时镜像相关变更
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - '.github/workflows/publish-runtime-images.yml'
+              - '.dockerignore'
+              - 'docker/backend.Dockerfile'
+              - 'docker/backend.Dockerfile.dockerignore'
+              - 'backend/**'
+            nexus_web:
+              - 'docker/nexus-web.Dockerfile'
+              - 'docker/nexus-web.Dockerfile.dockerignore'
+              - '.gitmodules'
+            yasa_runner:
+              - 'docker/yasa-runner.Dockerfile'
+              - 'docker/yasa-runner.Dockerfile.dockerignore'
+              - 'backend/scripts/package_source_selector.py'
+              - 'backend/app/runtime/launchers/yasa_engine_launcher.py'
+              - 'backend/app/runtime/launchers/yasa_launcher.py'
+              - 'backend/app/runtime/launchers/yasa_uast4py_launcher.py'
+              - 'frontend/yasa-engine-overrides/**'
+            opengrep_runner:
+              - 'docker/opengrep-runner.Dockerfile'
+              - 'docker/opengrep-runner.Dockerfile.dockerignore'
+              - 'backend/app/runtime/launchers/opengrep_launcher.py'
+            bandit_runner:
+              - 'docker/bandit-runner.Dockerfile'
+              - 'docker/bandit-runner.Dockerfile.dockerignore'
+            gitleaks_runner:
+              - 'docker/gitleaks-runner.Dockerfile'
+              - 'docker/gitleaks-runner.Dockerfile.dockerignore'
+            phpstan_runner:
+              - 'docker/phpstan-runner.Dockerfile'
+              - 'docker/phpstan-runner.Dockerfile.dockerignore'
+              - 'backend/app/runtime/launchers/phpstan_launcher.py'
+            flow_parser_runner:
+              - 'docker/flow-parser-runner.Dockerfile'
+              - 'docker/flow-parser-runner.Dockerfile.dockerignore'
+              - 'docker/flow-parser-runner.requirements.txt'
+              - 'backend/scripts/package_source_selector.py'
+              - 'backend/app/services/parser.py'
+              - 'backend/scripts/flow_parser_runner.py'
+            pmd_runner:
+              - 'docker/pmd-runner.Dockerfile'
+              - 'docker/pmd-runner.Dockerfile.dockerignore'
+            sandbox_runner:
+              - 'docker/sandbox-runner.Dockerfile'
+              - 'docker/sandbox-runner.Dockerfile.dockerignore'
+              - 'docker/sandbox-runner.requirements.txt'
+
+  await-turn:
+    if: ${{ always() && (github.event_name != 'push' || needs.commit-gate.outputs.should_run == 'true') }}
+    needs: commit-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: read
+
+    steps:
+      - name: Wait for earlier release runs to finish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          POLL_SECONDS: "30"
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import subprocess
+          import time
+          from pathlib import Path
+
+
+          current_run_id = int(os.environ["CURRENT_RUN_ID"])
+          poll_seconds = int(os.environ.get("POLL_SECONDS", "30"))
+          repo = os.environ["GITHUB_REPOSITORY"]
+          summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          active_statuses = {
+              "queued",
+              "in_progress",
+              "requested",
+              "waiting",
+              "pending",
+              "action_required",
+          }
+          waited = False
+
+          def list_blockers() -> list[dict[str, str]]:
+              result = subprocess.run(
+                  [
+                      "gh",
+                      "api",
+                      f"repos/{repo}/actions/workflows/release.yml/runs?per_page=100",
+                  ],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              )
+              payload = json.loads(result.stdout)
+              runs = payload.get("workflow_runs")
+              if not isinstance(runs, list):
+                  raise SystemExit("workflow runs payload must include a workflow_runs list")
+
+              blockers: list[dict[str, str]] = []
+              for run in runs:
+                  if not isinstance(run, dict):
+                      continue
+                  run_id = run.get("id")
+                  status = str(run.get("status") or "").strip()
+                  if not isinstance(run_id, int):
+                      continue
+                  if run_id >= current_run_id or status not in active_statuses:
+                      continue
+                  blockers.append(
+                      {
+                          "id": str(run_id),
+                          "status": status,
+                          "event": str(run.get("event") or "").strip(),
+                          "head_sha": str(run.get("head_sha") or "").strip(),
+                          "url": str(run.get("html_url") or "").strip(),
+                      }
+                  )
+              blockers.sort(key=lambda item: int(item["id"]))
+              return blockers
+
+          while True:
+              blockers = list_blockers()
+              if not blockers:
+                  with summary_path.open("a", encoding="utf-8") as handle:
+                      handle.write("## Release Queue\n")
+                      handle.write(f"- current_run_id: `{current_run_id}`\n")
+                      handle.write("- queue_status: `ready`\n")
+                      handle.write(f"- waited_for_prior_runs: `{'yes' if waited else 'no'}`\n")
+                  print("No earlier active release runs detected; continuing.")
+                  break
+
+              waited = True
+              oldest = blockers[0]
+              print(
+                  "Waiting for earlier release run "
+                  f"{oldest['id']} ({oldest['status']}, event={oldest['event']}, "
+                  f"head_sha={oldest['head_sha'] or 'unknown'}) to finish before continuing."
+              )
+              time.sleep(poll_seconds)
+          PY
+
+  resolve-entry:
+    needs: await-turn
+    if: ${{ always() && !cancelled() && needs.await-turn.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      effective_source_ref: ${{ steps.from_call.outputs.source_ref || steps.from_branch_context.outputs.source_ref }}
+      effective_source_sha: ${{ steps.from_call.outputs.source_sha || steps.from_branch_context.outputs.source_sha }}
+      effective_release_manifest: ${{ steps.from_call.outputs.release_manifest }}
+
+    steps:
+      - name: Load release source from workflow_call inputs
+        id: from_call
+        if: ${{ github.event_name == 'workflow_call' && inputs.source_sha != '' && inputs.release_manifest != '' }}
+        env:
+          SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
+          RELEASE_MANIFEST_INPUT: ${{ inputs.release_manifest }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SOURCE_SHA_INPUT}" ]] || { echo "::error::workflow_call source_sha is empty"; exit 1; }
+          [[ -n "${RELEASE_MANIFEST_INPUT}" ]] || { echo "::error::workflow_call release manifest is empty"; exit 1; }
+
+          echo "source_ref=${SOURCE_SHA_INPUT}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${SOURCE_SHA_INPUT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_manifest<<EOF"
+            printf '%s\n' "${RELEASE_MANIFEST_INPUT}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Load release source from push/workflow_dispatch/workflow_call context
+        id: from_branch_context
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.release_manifest == '') }}
+        env:
+          SOURCE_REF_INPUT: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.source_ref || github.sha }}
+        run: |
+          set -euo pipefail
+
+          source_ref="${SOURCE_REF_INPUT:-main}"
+
+          if [[ "${source_ref}" == "${GITHUB_SHA}" ]]; then
+            source_sha="${GITHUB_SHA}"
+          else
+            git init -q "${RUNNER_TEMP}/source-ref-resolve"
+            git -C "${RUNNER_TEMP}/source-ref-resolve" remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+            git -C "${RUNNER_TEMP}/source-ref-resolve" fetch --depth=1 origin "${source_ref}"
+            source_sha="$(git -C "${RUNNER_TEMP}/source-ref-resolve" rev-parse FETCH_HEAD)"
+          fi
+
+          echo "source_ref=${source_ref}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+
+  prepare-release:
+    needs: resolve-entry
+    if: ${{ always() && !cancelled() && needs.resolve-entry.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_ref: ${{ steps.vars.outputs.source_ref }}
+      source_sha: ${{ steps.vars.outputs.source_sha }}
+      runtime_tag: ${{ steps.vars.outputs.runtime_tag }}
+      snapshot_tag: ${{ steps.vars.outputs.snapshot_tag }}
+      snapshot_title: ${{ steps.vars.outputs.snapshot_title }}
+      build_backend: ${{ steps.runtime_image_plan.outputs.build_backend }}
+      build_nexus_web: ${{ steps.runtime_image_plan.outputs.build_nexus_web }}
+      build_yasa_runner: ${{ steps.runtime_image_plan.outputs.build_yasa_runner }}
+      build_opengrep_runner: ${{ steps.runtime_image_plan.outputs.build_opengrep_runner }}
+      build_bandit_runner: ${{ steps.runtime_image_plan.outputs.build_bandit_runner }}
+      build_gitleaks_runner: ${{ steps.runtime_image_plan.outputs.build_gitleaks_runner }}
+      build_phpstan_runner: ${{ steps.runtime_image_plan.outputs.build_phpstan_runner }}
+      build_flow_parser_runner: ${{ steps.runtime_image_plan.outputs.build_flow_parser_runner }}
+      build_pmd_runner: ${{ steps.runtime_image_plan.outputs.build_pmd_runner }}
+      build_sandbox_runner: ${{ steps.runtime_image_plan.outputs.build_sandbox_runner }}
+
+    steps:
+      - name: 计算 release 源信息
+        id: vars
+        env:
+          SOURCE_REF_INPUT: ${{ needs.resolve-entry.outputs.effective_source_ref }}
+          SOURCE_SHA_INPUT: ${{ needs.resolve-entry.outputs.effective_source_sha }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SOURCE_REF_INPUT}" ]] || { echo "::error::effective source_ref is empty"; exit 1; }
+          [[ -n "${SOURCE_SHA_INPUT}" ]] || { echo "::error::effective source_sha is empty"; exit 1; }
+          source_ref="${SOURCE_REF_INPUT}"
+          source_sha="${SOURCE_SHA_INPUT}"
+          snapshot_tag="release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          echo "source_ref=${source_ref}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "runtime_tag=latest" >> "$GITHUB_OUTPUT"
+          echo "snapshot_tag=${snapshot_tag}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_title=codesearchvuln Offline Snapshot ${source_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: 输出手动运行时镜像构建计划
+        id: runtime_image_plan
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+        env:
+          REUSE_EXISTING_IMAGES: ${{ inputs.reuse_existing_images }}
+          REFRESH_ALL_RUNTIME_IMAGES: ${{ inputs.refresh_all_runtime_images }}
+          RUNTIME_IMAGE_TARGETS: ${{ inputs.runtime_image_targets }}
+          BUILD_BACKEND: ${{ inputs.build_backend }}
+          BUILD_NEXUS_WEB: ${{ inputs.build_nexus_web }}
+          BUILD_YASA_RUNNER: ${{ inputs.build_yasa_runner }}
+          BUILD_OPENGREP_RUNNER: ${{ inputs.build_opengrep_runner }}
+          BUILD_BANDIT_RUNNER: ${{ inputs.build_bandit_runner }}
+          BUILD_GITLEAKS_RUNNER: ${{ inputs.build_gitleaks_runner }}
+          BUILD_PHPSTAN_RUNNER: ${{ inputs.build_phpstan_runner }}
+          BUILD_FLOW_PARSER_RUNNER: ${{ inputs.build_flow_parser_runner }}
+          BUILD_PMD_RUNNER: ${{ inputs.build_pmd_runner }}
+          BUILD_SANDBOX_RUNNER: ${{ inputs.build_sandbox_runner }}
+          PUBLISH_RELEASE_ASSETS: ${{ inputs.publish_release_assets }}
+        run: |
+          set -euo pipefail
+
+          declare -A selected=(
+            [backend]=false
+            [nexus_web]=false
+            [yasa_runner]=false
+            [opengrep_runner]=false
+            [bandit_runner]=false
+            [gitleaks_runner]=false
+            [phpstan_runner]=false
+            [flow_parser_runner]=false
+            [pmd_runner]=false
+            [sandbox_runner]=false
+          )
+          image_names=(
+            backend
+            nexus_web
+            yasa_runner
+            opengrep_runner
+            bandit_runner
+            gitleaks_runner
+            phpstan_runner
+            flow_parser_runner
+            pmd_runner
+            sandbox_runner
+          )
+
+          select_all() {
+            local image
+            for image in "${image_names[@]}"; do
+              selected["${image}"]=true
+            done
+          }
+
+          select_csv_targets() {
+            local raw_targets normalized token
+            raw_targets="$1"
+            normalized="$(printf '%s' "${raw_targets}" | tr '[:upper:]' '[:lower:]' | tr ';' ',')"
+            normalized="${normalized//[[:space:]]/}"
+            [[ -n "${normalized}" ]] || return 0
+
+            IFS=',' read -ra tokens <<< "${normalized}"
+            for token in "${tokens[@]}"; do
+              [[ -n "${token}" ]] || continue
+              if [[ "${token}" == "all" ]]; then
+                select_all
+                continue
+              fi
+              if [[ -v "selected[${token}]" ]]; then
+                selected["${token}"]=true
+              else
+                echo "::error::Unknown runtime_image_targets entry: ${token}"
+                exit 1
+              fi
+            done
+          }
+
+          if [[ "${REUSE_EXISTING_IMAGES}" == "true" ]]; then
+            mode="reuse-existing-latest"
+          elif [[ "${REFRESH_ALL_RUNTIME_IMAGES}" == "true" ]]; then
+            mode="refresh-all-runtime-images"
+            select_all
+          else
+            mode="selected-runtime-images"
+            [[ "${BUILD_BACKEND}" == "true" ]] && selected[backend]=true
+            [[ "${BUILD_NEXUS_WEB}" == "true" ]] && selected[nexus_web]=true
+            [[ "${BUILD_YASA_RUNNER}" == "true" ]] && selected[yasa_runner]=true
+            [[ "${BUILD_OPENGREP_RUNNER}" == "true" ]] && selected[opengrep_runner]=true
+            [[ "${BUILD_BANDIT_RUNNER}" == "true" ]] && selected[bandit_runner]=true
+            [[ "${BUILD_GITLEAKS_RUNNER}" == "true" ]] && selected[gitleaks_runner]=true
+            [[ "${BUILD_PHPSTAN_RUNNER}" == "true" ]] && selected[phpstan_runner]=true
+            [[ "${BUILD_FLOW_PARSER_RUNNER}" == "true" ]] && selected[flow_parser_runner]=true
+            [[ "${BUILD_PMD_RUNNER}" == "true" ]] && selected[pmd_runner]=true
+            [[ "${BUILD_SANDBOX_RUNNER}" == "true" ]] && selected[sandbox_runner]=true
+            select_csv_targets "${RUNTIME_IMAGE_TARGETS}"
+          fi
+
+          selected_builds=()
+          for image in "${image_names[@]}"; do
+            echo "build_${image}=${selected[${image}]}" >> "$GITHUB_OUTPUT"
+            [[ "${selected[${image}]}" == "true" ]] && selected_builds+=("${image}")
+          done
+
+          if ((${#selected_builds[@]} == 0)); then
+            selection="none"
+          else
+            selection="$(IFS=', '; echo "${selected_builds[*]}")"
+          fi
+
+          {
+            echo "## Manual Runtime Image Build Plan"
+            echo ""
+            echo "- mode: \`${mode}\`"
+            echo "- reuse_existing_images: \`${REUSE_EXISTING_IMAGES}\`"
+            echo "- refresh_all_runtime_images: \`${REFRESH_ALL_RUNTIME_IMAGES}\`"
+            echo "- runtime_image_targets: \`${RUNTIME_IMAGE_TARGETS:-none}\`"
+            echo "- selected_builds: \`${selection}\`"
+            echo "- frontend_release_image: \`skipped (release flow uses STATIC_FRONTEND_IMAGE)\`"
+            echo "- publish_release_assets: \`${PUBLISH_RELEASE_ASSETS}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
+  create-draft-release:
+    needs:
+      - prepare-release
+      - resolve-release-manifest
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.resolve-release-manifest.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    outputs:
+      snapshot_tag: ${{ needs.prepare-release.outputs.snapshot_tag }}
+      snapshot_url: ${{ steps.capture.outputs.snapshot_url }}
+      snapshot_release_id: ${{ steps.capture.outputs.snapshot_release_id }}
+
+    steps:
+      - name: 创建 snapshot draft release 并记录元数据
+        id: capture
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.prepare-release.outputs.snapshot_tag }}
+          SNAPSHOT_TITLE: ${{ needs.prepare-release.outputs.snapshot_title }}
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          gh release create "${SNAPSHOT_TAG}" \
+            --target "${SOURCE_SHA}" \
+            --draft \
+            --latest=false \
+            --title "${SNAPSHOT_TITLE}" \
+            --notes "Offline runtime image snapshot for ${SOURCE_SHA}."
+
+          release_json="$(gh release view "${SNAPSHOT_TAG}" --json databaseId,url,isDraft,tagName)"
+
+          release_id="$(printf '%s' "${release_json}" | jq -r '.databaseId')"
+          html_url="$(printf '%s' "${release_json}" | jq -r '.url')"
+          is_draft="$(printf '%s' "${release_json}" | jq -r '.isDraft')"
+          actual_tag="$(printf '%s' "${release_json}" | jq -r '.tagName')"
+
+          if [[ "${actual_tag}" != "${SNAPSHOT_TAG}" ]]; then
+            echo "::error::snapshot release tag mismatch: expected ${SNAPSHOT_TAG}, got ${actual_tag}"
+            exit 1
+          fi
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "::error::snapshot release must be draft, got isDraft=${is_draft}"
+            exit 1
+          fi
+          if [[ -z "${release_id}" || "${release_id}" == "null" ]]; then
+            echo "::error::snapshot release id is empty"
+            exit 1
+          fi
+          if [[ -z "${html_url}" || "${html_url}" == "null" ]]; then
+            echo "::error::snapshot release html_url is empty"
+            exit 1
+          fi
+
+          echo "snapshot_release_id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
+
+  publish-runtime-images:
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.release_manifest == '')) && (github.event_name != 'push' || needs.detect-changes.result == 'success') }}
+    needs:
+      - detect-changes
+      - prepare-release
+    uses: ./.github/workflows/publish-runtime-images.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      tag: ${{ needs.prepare-release.outputs.runtime_tag }}
+      build_frontend: false
+      build_nexus_web: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.nexus_web == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_nexus_web == 'true') || false }}
+      build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_backend == 'true') || false }}
+      build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_yasa_runner == 'true') || false }}
+      build_opengrep_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.opengrep_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_opengrep_runner == 'true') || false }}
+      build_bandit_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.bandit_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_bandit_runner == 'true') || false }}
+      build_gitleaks_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.gitleaks_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_gitleaks_runner == 'true') || false }}
+      build_phpstan_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.phpstan_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_phpstan_runner == 'true') || false }}
+      build_flow_parser_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.flow_parser_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_flow_parser_runner == 'true') || false }}
+      build_pmd_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.pmd_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_pmd_runner == 'true') || false }}
+      build_sandbox_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.sandbox_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_sandbox_runner == 'true') || false }}
+      multi_arch: true
+      emit_release_manifest: true
+      require_complete_manifest: true
+      revision: ${{ needs.prepare-release.outputs.source_sha }}
+      checkout_ref: ${{ needs.prepare-release.outputs.source_sha }}
+
+  resolve-release-manifest:
+    needs:
+      - resolve-entry
+      - prepare-release
+      - publish-runtime-images
+    if: ${{ always() && needs.resolve-entry.result == 'success' && needs.prepare-release.result == 'success' && ((github.event_name == 'workflow_call' && ((inputs.release_manifest != '' && needs.publish-runtime-images.result == 'skipped') || needs.publish-runtime-images.result == 'success')) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.publish-runtime-images.result == 'success')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      release_manifest: ${{ steps.from_call.outputs.release_manifest || steps.from_build.outputs.release_manifest }}
+
+    steps:
+      - name: Load release manifest from resolved entry context
+        id: from_call
+        if: ${{ github.event_name == 'workflow_call' && inputs.release_manifest != '' }}
+        env:
+          RELEASE_MANIFEST: ${{ needs.resolve-entry.outputs.effective_release_manifest }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::resolved release manifest is empty"; exit 1; }
+
+          {
+            echo "release_manifest<<EOF"
+            printf '%s\n' "${RELEASE_MANIFEST}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Load release manifest from release build outputs
+        id: from_build
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.release_manifest == '') }}
+        env:
+          RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${RELEASE_MANIFEST}" ]] || { echo "::error::release manifest from publish-runtime-images is empty"; exit 1; }
+
+          {
+            echo "release_manifest<<EOF"
+            printf '%s\n' "${RELEASE_MANIFEST}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  package-offline-images:
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.create-draft-release.result == 'success' && needs.resolve-release-manifest.result == 'success' && ((github.event_name != 'workflow_dispatch' && github.event_name != 'workflow_call') || inputs.build_offline_images || inputs.publish_release_assets) }}
+    needs:
+      - prepare-release
+      - create-draft-release
+      - resolve-release-manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: read
+    env:
+      GH_REPO: ${{ github.repository }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bundle:
+          - services
+          - scanner
+        arch:
+          - amd64
+          - arm64
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+
+      - name: 登录到 GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write release-manifest.json
+        env:
+          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
+        run: |
+          printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
+
+      - name: Package offline image bundle
+        env:
+          BUNDLE: ${{ matrix.bundle }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          ./scripts/package-release-images.sh \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --output-dir "${RUNNER_TEMP}/release-assets" \
+            --bundle "${BUNDLE}" \
+            --arch "${ARCH}"
+
+      - name: Upload offline image bundle to snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          BUNDLE: ${{ matrix.bundle }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          gh release upload "${SNAPSHOT_TAG}" \
+            "${RUNNER_TEMP}/release-assets/vulhunter-${BUNDLE}-images-${ARCH}.tar.zst" \
+            "${RUNNER_TEMP}/release-assets/images-manifest-${BUNDLE}-${ARCH}.json" \
+            --clobber
+
+  finalize-publish:
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.create-draft-release.result == 'success' && needs.resolve-release-manifest.result == 'success' && (needs.package-offline-images.result == 'success' || needs.package-offline-images.result == 'skipped') }}
+    needs:
+      - prepare-release
+      - create-draft-release
+      - resolve-release-manifest
+      - package-offline-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: read
+    env:
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-release.outputs.source_ref }}
+          fetch-depth: 0
+          filter: 'blob:none'
+          submodules: recursive
+
+      - name: Finalize preflight
+        env:
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SNAPSHOT_TAG}" ]] || { echo "::error::snapshot_tag is required."; exit 1; }
+          [[ -n "${SNAPSHOT_RELEASE_ID}" ]] || { echo "::error::snapshot_release_id is required."; exit 1; }
+          [[ "${SNAPSHOT_RELEASE_ID}" =~ ^[0-9]+$ ]] || {
+            echo "::error::snapshot_release_id must be numeric, got ${SNAPSHOT_RELEASE_ID}."
+            exit 1
+          }
+
+      - name: Inspect snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}
+        run: |
+          set -euo pipefail
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${SNAPSHOT_RELEASE_ID}")"
+          RELEASE_JSON="${release_json}" \
+          SNAPSHOT_TAG="${SNAPSHOT_TAG}" \
+          SNAPSHOT_RELEASE_ID="${SNAPSHOT_RELEASE_ID}" \
+          GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY}" \
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import os
+          import sys
+
+
+          release = json.loads(os.environ["RELEASE_JSON"])
+          expected_tag = os.environ["SNAPSHOT_TAG"]
+          release_id = os.environ["SNAPSHOT_RELEASE_ID"]
+          actual_tag = str(release.get("tag_name") or "").strip()
+          draft = release.get("draft")
+          assets = release.get("assets")
+          asset_names = []
+          if isinstance(assets, list):
+              asset_names = [str(item.get("name") or "").strip() for item in assets if isinstance(item, dict)]
+
+          if actual_tag != expected_tag:
+              raise SystemExit(
+                  f"snapshot release tag mismatch: expected {expected_tag}, got {actual_tag or '(empty)'}"
+              )
+          if draft is not True:
+              raise SystemExit(f"snapshot release must remain draft before finalize-download; got draft={draft!r}")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write("## Finalize Snapshot Preflight\n")
+              handle.write(f"- release_id: `{release_id}`\n")
+              handle.write(f"- snapshot_tag: `{expected_tag}`\n")
+              handle.write(f"- draft: `{draft}`\n")
+              handle.write(f"- asset_count: `{len(asset_names)}`\n")
+              if asset_names:
+                  handle.write(f"- available_assets: `{', '.join(asset_names)}`\n")
+          PY
+
+      - name: Setup pnpm for frontend release bundle
+        uses: pnpm/action-setup@v5
+        with:
+          package_json_file: frontend/package.json
+          run_install: false
+
+      - name: Setup Node.js for frontend release bundle
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build frontend static bundle
+        run: |
+          set -euo pipefail
+
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+          FRONTEND_BUNDLE_DIR="${RUNNER_TEMP}/frontend-release-bundle"
+          rm -rf "${FRONTEND_BUNDLE_DIR}"
+          mkdir -p "${FRONTEND_BUNDLE_DIR}/site" "${FRONTEND_BUNDLE_DIR}/nginx"
+          cp -R frontend/dist/. "${FRONTEND_BUNDLE_DIR}/site/"
+          cp frontend/nginx.conf "${FRONTEND_BUNDLE_DIR}/nginx/default.conf"
+
+      - name: Write release-manifest.json
+        env:
+          RELEASE_MANIFEST: ${{ needs.resolve-release-manifest.outputs.release_manifest }}
+        run: |
+          printf '%s\n' "${RELEASE_MANIFEST}" > "${RUNNER_TEMP}/release-manifest.json"
+
+      - name: Generate runtime release tree
+        run: |
+          ./scripts/generate-release-branch.sh \
+            --output "${RUNNER_TEMP}/release-tree" \
+            --image-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --frontend-bundle "${RUNNER_TEMP}/frontend-release-bundle" \
+            --validate
+
+      - name: Validate compose entrypoint
+        working-directory: ${{ runner.temp }}/release-tree
+        run: |
+          set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
+          docker compose config >/dev/null
+
+      - name: Download snapshot draft release assets
+        if: ${{ needs.package-offline-images.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_RELEASE_ID: ${{ needs.create-draft-release.outputs.snapshot_release_id }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+        run: |
+          set -euo pipefail
+
+          rm -rf "${SNAPSHOT_ASSET_DIR}"
+          python3 ./scripts/download-release-assets.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --release-id "${SNAPSHOT_RELEASE_ID}" \
+            --tag "${SNAPSHOT_TAG}" \
+            --output-dir "${SNAPSHOT_ASSET_DIR}" \
+            --max-workers 4
+
+      - name: Validate snapshot assets and write release-snapshot-lock.json
+        if: ${{ needs.package-offline-images.result == 'success' }}
+        env:
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+        run: |
+          set -euo pipefail
+
+          python3 ./scripts/write-release-snapshot-lock.py \
+            --release-tree "${RUNNER_TEMP}/release-tree" \
+            --release-manifest "${RUNNER_TEMP}/release-manifest.json" \
+            --snapshot-tag "${SNAPSHOT_TAG}" \
+            --asset-dir "${SNAPSHOT_ASSET_DIR}"
+
+      - name: Smoke test offline release runtime
+        if: ${{ needs.package-offline-images.result == 'success' }}
+        working-directory: ${{ runner.temp }}/release-tree
+        env:
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+          VULHUNTER_RELEASE_PROJECT_NAME: vulhunter-release-smoke
+        run: |
+          set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
+
+          dump_debug() {
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" ps || true
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" logs --tail=200 db redis scan-workspace-init db-bootstrap backend frontend || true
+          }
+
+          cleanup() {
+            docker compose -p "${VULHUNTER_RELEASE_PROJECT_NAME}" down -v || true
+          }
+          trap cleanup EXIT
+
+          bash "${GITHUB_WORKSPACE}/scripts/prepare-smoke-test.sh" \
+            --release-tree "${RUNNER_TEMP}/release-tree" \
+            --snapshot-assets "${SNAPSHOT_ASSET_DIR}"
+
+          [[ -d "${RUNNER_TEMP}/release-tree/images" ]] || {
+            echo "::error::prepare-smoke-test.sh did not create images/ directory in release tree."
+            exit 1
+          }
+
+          if ! bash ./Vulhunter-offline-bootstrap.sh --deploy; then
+            dump_debug
+            echo "::error::Release Vulhunter-offline-bootstrap.sh --deploy failed for generated release tree."
+            exit 1
+          fi
+
+      - name: Publish release branch
+        id: publish_release_branch
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release-tree
+        run: |
+          set -euo pipefail
+
+          PUBLISH_DIR="${RUNNER_TEMP}/release-publish"
+          COMPARE_DIR="${RUNNER_TEMP}/release-compare"
+          PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
+          git worktree add --detach --force "${PUBLISH_DIR}" HEAD
+
+          cleanup() {
+            git worktree remove --force "${PUBLISH_DIR}" || true
+          }
+          trap cleanup EXIT
+
+          git_tree_hash_for_dir() {
+            local source_dir="$1"
+            local repo_dir="$2"
+
+            rm -rf "${repo_dir}"
+            mkdir -p "${repo_dir}"
+            git init -q "${repo_dir}"
+
+            if [[ -d "${source_dir}" ]]; then
+              cp -a "${source_dir}/." "${repo_dir}/"
+            fi
+
+            git -C "${repo_dir}" add -A
+            git -C "${repo_dir}" write-tree
+          }
+          rm -rf "${PUBLISH_READY_DIR}"
+          mkdir -p "${PUBLISH_READY_DIR}"
+          cp -a "${RELEASE_DIR}/." "${PUBLISH_READY_DIR}/"
+          rm -rf "${PUBLISH_READY_DIR}/images"
+          candidate_tree="$(git_tree_hash_for_dir "${PUBLISH_READY_DIR}" "${COMPARE_DIR}")"
+
+          if git ls-remote --exit-code --heads origin release >/dev/null 2>&1; then
+            git fetch --force origin release:refs/remotes/origin/release
+            remote_tree="$(git rev-parse refs/remotes/origin/release^{tree})"
+
+            if [[ "${candidate_tree}" == "${remote_tree}" ]]; then
+              echo "release_commit_sha=$(git rev-parse refs/remotes/origin/release)" >> "$GITHUB_OUTPUT"
+              echo "Release branch is already up to date; skipping push."
+              exit 0
+            fi
+          fi
+
+          cd "${PUBLISH_DIR}"
+          git checkout --orphan "release-publish-${GITHUB_RUN_ID}"
+
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "${PUBLISH_READY_DIR}/." .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+
+          git commit -m "chore: refresh release branch snapshot"
+          echo "release_commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git push --force origin HEAD:release
+
+      - name: Generate validated sourcecode tree for semantic release archives
+        env:
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
+          rm -rf "${SOURCECODE_DIR}"
+          bash ./scripts/generate-sourcecode-branch.sh \
+            --output "${SOURCECODE_DIR}" \
+            --ref "${SOURCE_SHA}" \
+            --validate
+
+      - name: Package supplementary semantic release archives
+        run: |
+          set -euo pipefail
+
+          PUBLISH_READY_DIR="${RUNNER_TEMP}/release-tree-publish-ready"
+          SOURCECODE_DIR="${RUNNER_TEMP}/sourcecode-tree"
+          SEMANTIC_ARCHIVE_DIR="${RUNNER_TEMP}/semantic-release-archives"
+
+          rm -rf "${SEMANTIC_ARCHIVE_DIR}"
+          mkdir -p "${SEMANTIC_ARCHIVE_DIR}"
+
+          python3 - <<'PY'
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+
+          archives = [
+              (
+                  runner_temp / "release-tree-publish-ready",
+                  runner_temp / "semantic-release-archives" / "release_code.zip",
+                  runner_temp / "semantic-release-archives" / "release_code.tar.gz",
+              ),
+              (
+                  runner_temp / "sourcecode-tree",
+                  runner_temp / "semantic-release-archives" / "source_code.zip",
+                  runner_temp / "semantic-release-archives" / "source_code.tar.gz",
+              ),
+          ]
+
+          for source_dir, zip_path, tar_path in archives:
+              if not source_dir.is_dir():
+                  raise SystemExit(f"missing archive source directory: {source_dir}")
+
+              files = sorted(path for path in source_dir.rglob("*") if path.is_file())
+
+              with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                  for path in files:
+                      archive.write(path, path.relative_to(source_dir))
+
+              with tarfile.open(tar_path, "w:gz") as archive:
+                  for path in files:
+                      archive.add(path, arcname=path.relative_to(source_dir))
+          PY
+
+      - name: Resolve semantic release version
+        id: resolve_semantic_version
+        env:
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+          FORCE_RELEASE_ASSETS: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && (inputs.build_offline_images || inputs.publish_release_assets) || false }}
+        run: |
+          set -euo pipefail
+
+          git fetch --force --tags origin
+          release_version_args=(
+            ./scripts/release_version.py
+            --repo "$PWD"
+            --source-sha "${SOURCE_SHA}"
+            --github-output "$GITHUB_OUTPUT"
+          )
+          if [[ "${FORCE_RELEASE_ASSETS}" == "true" ]]; then
+            release_version_args+=(--force-patch)
+          fi
+          python3 "${release_version_args[@]}"
+
+      - name: Create semantic release tag
+        if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' && steps.resolve_semantic_version.outputs.existing_tag != 'true' }}
+        env:
+          SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
+          BUMP_TYPE: ${{ steps.resolve_semantic_version.outputs.bump_type }}
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+          RELEASE_COMMIT_SHA: ${{ steps.publish_release_branch.outputs.release_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${SEMANTIC_TAG}" "${RELEASE_COMMIT_SHA}" \
+            -m "${SEMANTIC_TAG}" \
+            -m "source_sha=${SOURCE_SHA}" \
+            -m "bump_type=${BUMP_TYPE}" \
+            -m "generated_by=release.yml"
+          git push origin "refs/tags/${SEMANTIC_TAG}"
+
+      - name: Create or update semantic GitHub release metadata
+        if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
+          BUMP_TYPE: ${{ steps.resolve_semantic_version.outputs.bump_type }}
+          EXISTING_TAG: ${{ steps.resolve_semantic_version.outputs.existing_tag }}
+          SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
+          RELEASE_COMMIT_SHA: ${{ steps.publish_release_branch.outputs.release_commit_sha }}
+        run: |
+          set -euo pipefail
+
+          notes_file="${RUNNER_TEMP}/semantic-release-notes.md"
+          printf '%s\n\n%s\n%s\n%s\n' \
+            "Generated release snapshot for source commit \`${SOURCE_SHA}\`." \
+            "- bump_type: \`${BUMP_TYPE}\`" \
+            "- release_commit: \`${RELEASE_COMMIT_SHA}\`" \
+            "- generated_by: \`release.yml\`" \
+            > "${notes_file}"
+
+          target_args=()
+          if [[ "${EXISTING_TAG}" != "true" ]]; then
+            target_args+=(--target "${RELEASE_COMMIT_SHA}")
+          fi
+
+          if gh release view "${SEMANTIC_TAG}" >/dev/null 2>&1; then
+            gh release edit "${SEMANTIC_TAG}" \
+              "${target_args[@]}" \
+              --latest=false \
+              --title "codesearchvuln ${SEMANTIC_TAG}" \
+              --notes-file "${notes_file}"
+          else
+            gh release create "${SEMANTIC_TAG}" \
+              "${target_args[@]}" \
+              --latest=false \
+              --title "codesearchvuln ${SEMANTIC_TAG}" \
+              --notes-file "${notes_file}"
+          fi
+
+      - name: Upload semantic GitHub release assets in parallel
+        if: ${{ steps.resolve_semantic_version.outputs.should_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEMANTIC_TAG: ${{ steps.resolve_semantic_version.outputs.version }}
+          SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
+          RELEASE_TREE: ${{ runner.temp }}/release-tree
+          SEMANTIC_ARCHIVE_DIR: ${{ runner.temp }}/semantic-release-archives
+          UPLOAD_PARALLELISM: "4"
+          HAS_OFFLINE_IMAGES: ${{ needs.package-offline-images.result == 'success' }}
+        run: |
+          set -uo pipefail
+
+          cp "./scripts/release-assets/offline-bootstrap.sh" "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
+
+          assets=()
+
+          if [[ "${HAS_OFFLINE_IMAGES}" == "true" ]]; then
+            assets+=(
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-amd64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-services-images-arm64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-amd64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/vulhunter-scanner-images-arm64.tar.zst"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-services-amd64.json"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-services-arm64.json"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-amd64.json"
+              "${SNAPSHOT_ASSET_DIR}/images-manifest-scanner-arm64.json"
+              "${RELEASE_TREE}/release-snapshot-lock.json"
+              "${RUNNER_TEMP}/Vulhunter-offline-bootstrap.sh"
+            )
+          fi
+
+          assets+=(
+            "${SEMANTIC_ARCHIVE_DIR}/release_code.zip"
+            "${SEMANTIC_ARCHIVE_DIR}/release_code.tar.gz"
+            "${SEMANTIC_ARCHIVE_DIR}/source_code.zip"
+            "${SEMANTIC_ARCHIVE_DIR}/source_code.tar.gz"
+          )
+
+          max_parallel="${UPLOAD_PARALLELISM}"
+          [[ "${max_parallel}" =~ ^[0-9]+$ ]] || max_parallel=4
+          (( max_parallel >= 1 )) || max_parallel=1
+
+          pids=()
+          fails=0
+          log_dir="${RUNNER_TEMP}/semantic-release-upload-logs"
+          rm -rf "${log_dir}"
+          mkdir -p "${log_dir}"
+
+          wait_for_slot() {
+            while (( ${#pids[@]} >= max_parallel )); do
+              new_pids=()
+              progressed=0
+              for pid in "${pids[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                  new_pids+=("$pid")
+                else
+                  if ! wait "$pid"; then
+                    fails=$((fails + 1))
+                  fi
+                  progressed=1
+                fi
+              done
+              pids=("${new_pids[@]}")
+              (( progressed )) || sleep 1
+            done
+          }
+
+          for asset in "${assets[@]}"; do
+            wait_for_slot
+            log_file="${log_dir}/$(printf '%s' "${asset##*/}" | tr -c 'A-Za-z0-9._-' '_').log"
+            (
+              gh release upload "${SEMANTIC_TAG}" "${asset}" --clobber >"${log_file}" 2>&1
+            ) &
+            pids+=("$!")
+          done
+
+          for pid in "${pids[@]}"; do
+            if ! wait "$pid"; then
+              fails=$((fails + 1))
+            fi
+          done
+
+          if (( fails > 0 )); then
+            echo "::error::${fails} semantic release asset upload(s) failed; see logs below:"
+            for log_file in "${log_dir}"/*.log; do
+              [[ -f "${log_file}" ]] || continue
+              echo "::group::${log_file##*/}"
+              cat "${log_file}"
+              echo "::endgroup::"
+            done
+            exit 1
+          fi
+
+      - name: Delete snapshot draft release after promotion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.create-draft-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+
+          gh release delete "${SNAPSHOT_TAG}" --yes
+
+  cleanup-draft-release:
+    if: ${{ failure() || cancelled() }}
+    needs:
+      - prepare-release
+      - create-draft-release
+      - publish-runtime-images
+      - package-offline-images
+      - finalize-publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Delete failed snapshot draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAPSHOT_TAG: ${{ needs.prepare-release.outputs.snapshot_tag }}
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SNAPSHOT_TAG}" ]] || exit 0
+
+          is_draft="$(gh release view "${SNAPSHOT_TAG}" --json isDraft --jq '.isDraft' 2>/dev/null || echo "not_found")"
+
+          if [[ "${is_draft}" == "not_found" ]]; then
+            echo "Snapshot draft release not found; skipping cleanup."
+            exit 0
+          fi
+
+          if [[ "${is_draft}" != "true" ]]; then
+            echo "Snapshot release is already published; skipping cleanup."
+            exit 0
+          fi
+
+          gh release delete "${SNAPSHOT_TAG}" --yes

@@ -1,0 +1,45 @@
+name: Offload Image Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: '要打包的分支或 commit SHA（默认 main，适配默认分支为 release 时手动构建 main）'
+        required: false
+        type: string
+        default: main
+      publish_release_assets:
+        description: '同时执行完整 finalize-publish 并上传 GitHub Release assets'
+        required: false
+        type: boolean
+        default: true
+      rebuild_runtime_images:
+        description: '先重建全部 runtime runner 镜像，再生成 offload/offline image 包'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  offload-image:
+    name: Run release offload image packaging
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      reuse_existing_images: ${{ !inputs.rebuild_runtime_images }}
+      refresh_all_runtime_images: ${{ inputs.rebuild_runtime_images }}
+      build_offline_images: true
+      publish_release_assets: ${{ inputs.publish_release_assets }}
