@@ -11,6 +11,7 @@ from app.api.v1.endpoints.projects_shared import (
 )
 from app.services.project_metrics import ProjectMetricsService, project_metrics_refresher
 from app.services.upload.project_info_refresher import project_info_refresher
+from app.services.zip_storage import get_project_zip_meta, has_project_zip
 
 router = APIRouter()
 

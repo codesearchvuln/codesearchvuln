@@ -8,6 +8,7 @@ from app.api.v1.endpoints.projects_shared import (
     _raise_if_project_hidden,
     _validate_zip_file_path,
 )
+from app.services.scanner import is_text_file, should_exclude
 
 router = APIRouter()
 
