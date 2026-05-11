@@ -232,6 +232,28 @@ startup_banner_release_probe_results_green() {
   return 0
 }
 
+startup_banner_release_probe_results_have_terminal_failure() {
+  local probe_results="$1"
+  local label url allowed_statuses status detail
+
+  while IFS=$'\t' read -r label url allowed_statuses status detail; do
+    [[ -n "$label" ]] || continue
+    if startup_banner_status_matches_allowed "$status" "$allowed_statuses"; then
+      continue
+    fi
+
+    case "$status" in
+      000|408|425|429|502|503|504)
+        ;;
+      *)
+        return 0
+        ;;
+    esac
+  done <<<"$probe_results"
+
+  return 1
+}
+
 startup_banner_emit_release_probe_results() {
   local probe_results="$1"
   local label url allowed_statuses status detail
@@ -280,6 +302,9 @@ wait_for_local_frontend_release_ready() {
     if startup_banner_release_probe_results_green "$probe_results"; then
       STARTUP_BANNER_LAST_RELEASE_PROBE_RESULTS="$probe_results"
       return 0
+    fi
+    if startup_banner_release_probe_results_have_terminal_failure "$probe_results"; then
+      break
     fi
     sleep "$retry_delay"
   done

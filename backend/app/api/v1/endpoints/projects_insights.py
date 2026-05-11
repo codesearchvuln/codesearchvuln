@@ -1,3 +1,5 @@
+from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 from app.api.v1.endpoints.projects_shared import *
@@ -36,7 +38,13 @@ from app.api.v1.endpoints.static_tasks_bandit import _extract_bandit_snapshot_ru
 from app.api.v1.endpoints.static_tasks_phpstan import _extract_phpstan_snapshot_rules
 from app.models.project_management_metrics import ProjectManagementMetrics
 from app.models.yasa import YasaRuleConfig
-from app.services.opengrep_confidence import count_high_confidence_findings_by_task_ids
+from app.services.agent.utils.vulnerability_naming import resolve_vulnerability_profile
+from app.services.opengrep_confidence import (
+    build_rule_confidence_map,
+    count_high_confidence_findings_by_task_ids,
+    extract_finding_payload_confidence,
+    extract_rule_lookup_keys,
+)
 from app.services.upload.project_info_refresher import project_info_refresher
 from app.services.yasa_rules_snapshot import extract_yasa_snapshot_rules
 
@@ -495,7 +503,7 @@ async def get_dashboard_snapshot(
 ) -> Any:
     """Get aggregated dashboard data with project-card aligned vulnerability metric."""
     range_days = _normalize_dashboard_range_days(range_days)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_start = now - timedelta(days=int(range_days))
 
     projects_result = await db.execute(

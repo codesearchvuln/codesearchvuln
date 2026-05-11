@@ -437,6 +437,11 @@ release_probe_results_green() {
   startup_banner_release_probe_results_green "$probe_results"
 }
 
+release_probe_results_have_terminal_failure() {
+  local probe_results="$1"
+  startup_banner_release_probe_results_have_terminal_failure "$probe_results"
+}
+
 emit_probe_results() {
   local probe_results="$1"
   startup_banner_emit_release_probe_results "$probe_results"
@@ -522,6 +527,9 @@ wait_for_frontend_readiness() {
       if release_probe_results_green "$last_probe_results"; then
         LAST_RELEASE_PROBE_RESULTS="$last_probe_results"
         return 0
+      fi
+      if release_probe_results_have_terminal_failure "$last_probe_results"; then
+        break
       fi
     fi
 

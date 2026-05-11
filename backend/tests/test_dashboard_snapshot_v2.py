@@ -56,7 +56,7 @@ def _assert_task_status_by_scan_type_totals(snapshot) -> None:
 
 
 def _build_empty_project_info_side_effect():
-    project_rows = [("p1", "Alpha", "zip")]
+    project_rows = [("p1", "Alpha", "zip", "hash-p1")]
     management_metrics_rows = [("p1", "ready", 0, 0, 0, 0)]
     project_info_rows = []
     empty_rows = _RowsResult([])
@@ -86,8 +86,8 @@ def _build_empty_project_info_side_effect():
 
 def _build_execute_side_effect(now: datetime):
     project_rows = [
-        ("p1", "Alpha", "zip"),
-        ("p2", "Beta", "zip"),
+        ("p1", "Alpha", "zip", "hash-p1"),
+        ("p2", "Beta", "zip", "hash-p2"),
     ]
     management_metrics_rows = [
         ("p1", "ready", 1, 1, 2, 0),
@@ -320,7 +320,7 @@ def _build_static_engine_rule_total_mismatch_side_effect(now: datetime):
 
 def _build_grouped_static_recent_tasks_side_effect(now: datetime):
     project_rows = [
-        ("p1", "Alpha", "zip"),
+        ("p1", "Alpha", "zip", "hash-p1"),
     ]
     management_metrics_rows = [("p1", "ready", 0, 0, 1, 1)]
 
@@ -417,10 +417,10 @@ def _build_grouped_static_recent_tasks_side_effect(now: datetime):
 
 def _build_project_risk_distribution_from_metrics_side_effect():
     project_rows = [
-        ("p1", "Alpha", "repository"),
-        ("p2", "Beta", "repository"),
-        ("p3", "Gamma", "repository"),
-        ("p4", "Delta", "repository"),
+        ("p1", "Alpha", "repository", ""),
+        ("p2", "Beta", "repository", ""),
+        ("p3", "Gamma", "repository", ""),
+        ("p4", "Delta", "repository", ""),
     ]
     management_metrics_rows = [
         ("p1", "ready", 0, 2, 1, 0),
@@ -455,7 +455,7 @@ def _build_project_risk_distribution_from_metrics_side_effect():
 
 
 def _build_agent_trend_split_side_effect(now: datetime):
-    project_rows = [("p1", "Alpha", "zip")]
+    project_rows = [("p1", "Alpha", "zip", "hash-p1")]
     management_metrics_rows = [("p1", "ready", 0, 0, 0, 0)]
     project_info_rows = [("p1", {"languages": {}}, "completed")]
     empty_rows = _RowsResult([])

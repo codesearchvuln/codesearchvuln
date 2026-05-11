@@ -130,6 +130,7 @@ def _expected_release_probe_paths() -> list[str]:
         "/api/v1/openapi.json",
         "/api/v1/projects/?skip=0&limit=1&include_metrics=true",
         "/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14",
+        "/nexus/",
         *_expected_nexus_bundle_probe_paths(),
     ]
 
@@ -789,7 +790,7 @@ def test_offline_up_bash_warns_and_continues_when_compose_image_discovery_is_ben
 
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
-    assert "warning: release-stack compose image discovery failed" in combined_output
+    assert "warning: compose image discovery failed" in combined_output
     docker_commands = _read_logged_commands(docker_log)
     config_command = _compose_command("config", project_name=RELEASE_PROJECT_NAME)
     assert docker_commands.count(config_command) == 2
@@ -853,7 +854,7 @@ def test_offline_up_bash_warns_and_continues_when_compose_image_discovery_has_st
 
     combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
     assert result.returncode == 0, combined_output
-    assert "warning: release-stack compose image discovery failed" in combined_output
+    assert "warning: compose image discovery failed" in combined_output
     assert "permission denied while reading compose config" in combined_output
     docker_commands = _read_logged_commands(docker_log)
     assert docker_commands.count(_compose_command("config", project_name=RELEASE_PROJECT_NAME)) == 2
@@ -1558,6 +1559,55 @@ def test_offline_up_bash_fails_when_release_readiness_probes_do_not_turn_green(t
         )
         in docker_commands
     )
+    assert request_log == _expected_release_probe_paths()
+
+
+def test_offline_up_bash_fails_fast_on_terminal_release_probe_status(tmp_path: Path) -> None:
+    output_dir, _manifest = _generate_release_tree(tmp_path)
+    script_path = output_dir / "scripts" / "offline-up.sh"
+
+    env_dir = output_dir / "docker" / "env" / "backend"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    (env_dir / ".env").write_text("LLM_API_KEY=test\n", encoding="utf-8")
+    (env_dir / "offline-images.env").write_text(
+        (env_dir / "offline-images.env.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    socket_path = tmp_path / "docker.sock"
+    _bind_fake_unix_socket(socket_path)
+    docker_log = tmp_path / "docker.log"
+    zstd_log = tmp_path / "zstd.log"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_runtime_tools(fake_bin)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["FAKE_DOCKER_LOG"] = str(docker_log)
+    env["FAKE_ZSTD_LOG"] = str(zstd_log)
+    env["DOCKER_SOCKET_PATH"] = str(socket_path)
+    env["DOCKER_SOCKET_GID"] = "1234"
+    env["OFFLINE_UP_MAX_ATTEMPTS"] = "60"
+    env["OFFLINE_UP_RETRY_DELAY_SECONDS"] = "0"
+
+    status_by_path = dict.fromkeys(_expected_release_probe_paths(), 200)
+    status_by_path["/api/v1/projects/dashboard-snapshot?top_n=10&range_days=14"] = 500
+    with _serve_release_probe_endpoints(status_by_path) as (frontend_port, request_log):
+        env["VULHUNTER_FRONTEND_PORT"] = str(frontend_port)
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    assert result.returncode != 0
+    assert "release readiness probe failed" in combined_output
+    assert "dashboard-snapshot" in combined_output
+    assert "500" in combined_output
     assert request_log == _expected_release_probe_paths()
 
 

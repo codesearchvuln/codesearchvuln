@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,9 +18,7 @@ def _build_test_client():
 
     db = SimpleNamespace(
         execute=AsyncMock(
-            side_effect=_build_execute_side_effect(
-                projects.datetime.now(projects.timezone.utc)
-            )
+            side_effect=_build_execute_side_effect(datetime.now(UTC))
         )
     )
 

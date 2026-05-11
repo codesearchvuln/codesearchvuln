@@ -18,7 +18,7 @@ class _AllResult:
 def _build_bandit_snapshot_side_effect(now: datetime):
     empty_rows = _AllResult([])
     return [
-        _AllResult([("project-1", "alpha", "zip")]),
+        _AllResult([("project-1", "alpha", "zip", "hash-project-1")]),
         _AllResult([("project-1", "ready", 0, 0, 0, 0)]),
         _AllResult(
             [
@@ -92,7 +92,7 @@ def _build_bandit_snapshot_side_effect(now: datetime):
 def _build_cwe_distribution_side_effect(now: datetime):
     empty_rows = _AllResult([])
     return [
-        _AllResult([("project-1", "alpha", "zip")]),
+        _AllResult([("project-1", "alpha", "zip", "hash-project-1")]),
         _AllResult([("project-1", "ready", 0, 0, 0, 0)]),
         _AllResult(
             [
