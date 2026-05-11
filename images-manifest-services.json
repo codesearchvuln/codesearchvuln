@@ -1,0 +1,42 @@
+{
+  "revision": "3e5c197db50a567a359e75e2aedba1089acc0d74",
+  "bundle_template": "images/vulhunter-services-images-{arch}.tar.zst",
+  "backend_provenance_mode": "built_this_run",
+  "images": {
+    "backend": {
+      "env_var": "BACKEND_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-backend@sha256:89beef17c48dd34cf2ea82fb0d12de750fd46d001f7c590529ff46f153d5851d",
+      "local_tag": "vulhunter-local/backend:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    },
+    "postgres": {
+      "env_var": "POSTGRES_IMAGE",
+      "source_ref": "docker.io/library/postgres:15-alpine@sha256:09e4f20b14ddb3dfe3a0c825b206032aaf8f28300ba2070c0b60fc1c10c6abc7",
+      "local_tag": "vulhunter-local/postgres:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    },
+    "redis": {
+      "env_var": "REDIS_IMAGE",
+      "source_ref": "docker.io/library/redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+      "local_tag": "vulhunter-local/redis:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    },
+    "adminer": {
+      "env_var": "ADMINER_IMAGE",
+      "source_ref": "docker.io/library/adminer:latest@sha256:cc64d253db4f016cbcff2ff2f01e60ed07e74f38b4398f84d3c4fae4b5ce0e07",
+      "local_tag": "vulhunter-local/adminer:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    },
+    "scan_workspace_init": {
+      "env_var": "SCAN_WORKSPACE_INIT_IMAGE",
+      "source_ref": "docker.io/library/alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+      "local_tag": "vulhunter-local/scan-workspace-init:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    },
+    "static_frontend": {
+      "env_var": "STATIC_FRONTEND_IMAGE",
+      "source_ref": "docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+      "local_tag": "vulhunter-local/static-frontend:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    },
+    "nexus_web": {
+      "env_var": "NEXUS_WEB_IMAGE",
+      "source_ref": "ghcr.io/codesearchvuln/vulhunter-nexus-web@sha256:a5a4e474b20b835a8e8438700dda670a7388588e4fa0dcc890a422a9933098e5",
+      "local_tag": "vulhunter-local/nexus-web:3e5c197db50a567a359e75e2aedba1089acc0d74"
+    }
+  }
+}
