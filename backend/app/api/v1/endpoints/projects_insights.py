@@ -2,6 +2,8 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
+from sqlalchemy import or_
+
 from app.api.v1.endpoints.projects_shared import *
 from app.api.v1.endpoints.projects_shared import (
     _BANDIT_TEST_ID_TO_CWE,

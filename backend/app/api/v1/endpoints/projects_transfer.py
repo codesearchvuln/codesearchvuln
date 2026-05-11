@@ -1,4 +1,9 @@
 from app.api.v1.endpoints.projects_shared import *
+from app.services.project_transfer_service import (
+    cleanup_export_bundle,
+    export_projects_bundle,
+    import_projects_bundle,
+)
 
 router = APIRouter()
 
