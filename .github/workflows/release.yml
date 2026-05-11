@@ -31,10 +31,6 @@ on:
         required: false
         type: boolean
         default: false
-      build_nexus_web:
-        required: false
-        type: boolean
-        default: false
       build_yasa_runner:
         required: false
         type: boolean
@@ -106,7 +102,7 @@ on:
         type: boolean
         default: false
       runtime_image_targets:
-        description: '当 reuse_existing_images=false 时构建的镜像: all 或逗号分隔 backend,nexus_web,yasa_runner,opengrep_runner,bandit_runner,gitleaks_runner,phpstan_runner,flow_parser_runner,pmd_runner,sandbox_runner'
+        description: '当 reuse_existing_images=false 时构建的镜像: all 或逗号分隔 backend,yasa_runner,opengrep_runner,bandit_runner,gitleaks_runner,phpstan_runner,flow_parser_runner,pmd_runner,sandbox_runner'
         required: false
         type: string
         default: ''
@@ -156,7 +152,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       backend: ${{ steps.filter.outputs.backend || 'false' }}
-      nexus_web: ${{ steps.filter.outputs.nexus_web || 'false' }}
       yasa_runner: ${{ steps.filter.outputs.yasa_runner || 'false' }}
       opengrep_runner: ${{ steps.filter.outputs.opengrep_runner || 'false' }}
       bandit_runner: ${{ steps.filter.outputs.bandit_runner || 'false' }}
@@ -183,10 +178,6 @@ jobs:
               - 'docker/backend.Dockerfile'
               - 'docker/backend.Dockerfile.dockerignore'
               - 'backend/**'
-            nexus_web:
-              - 'docker/nexus-web.Dockerfile'
-              - 'docker/nexus-web.Dockerfile.dockerignore'
-              - '.gitmodules'
             yasa_runner:
               - 'docker/yasa-runner.Dockerfile'
               - 'docker/yasa-runner.Dockerfile.dockerignore'
@@ -392,7 +383,6 @@ jobs:
       snapshot_tag: ${{ steps.vars.outputs.snapshot_tag }}
       snapshot_title: ${{ steps.vars.outputs.snapshot_title }}
       build_backend: ${{ steps.runtime_image_plan.outputs.build_backend }}
-      build_nexus_web: ${{ steps.runtime_image_plan.outputs.build_nexus_web }}
       build_yasa_runner: ${{ steps.runtime_image_plan.outputs.build_yasa_runner }}
       build_opengrep_runner: ${{ steps.runtime_image_plan.outputs.build_opengrep_runner }}
       build_bandit_runner: ${{ steps.runtime_image_plan.outputs.build_bandit_runner }}
@@ -431,7 +421,6 @@ jobs:
           REFRESH_ALL_RUNTIME_IMAGES: ${{ inputs.refresh_all_runtime_images }}
           RUNTIME_IMAGE_TARGETS: ${{ inputs.runtime_image_targets }}
           BUILD_BACKEND: ${{ inputs.build_backend }}
-          BUILD_NEXUS_WEB: ${{ inputs.build_nexus_web }}
           BUILD_YASA_RUNNER: ${{ inputs.build_yasa_runner }}
           BUILD_OPENGREP_RUNNER: ${{ inputs.build_opengrep_runner }}
           BUILD_BANDIT_RUNNER: ${{ inputs.build_bandit_runner }}
@@ -446,7 +435,6 @@ jobs:
 
           declare -A selected=(
             [backend]=false
-            [nexus_web]=false
             [yasa_runner]=false
             [opengrep_runner]=false
             [bandit_runner]=false
@@ -458,7 +446,6 @@ jobs:
           )
           image_names=(
             backend
-            nexus_web
             yasa_runner
             opengrep_runner
             bandit_runner
@@ -507,7 +494,6 @@ jobs:
           else
             mode="selected-runtime-images"
             [[ "${BUILD_BACKEND}" == "true" ]] && selected[backend]=true
-            [[ "${BUILD_NEXUS_WEB}" == "true" ]] && selected[nexus_web]=true
             [[ "${BUILD_YASA_RUNNER}" == "true" ]] && selected[yasa_runner]=true
             [[ "${BUILD_OPENGREP_RUNNER}" == "true" ]] && selected[opengrep_runner]=true
             [[ "${BUILD_BANDIT_RUNNER}" == "true" ]] && selected[bandit_runner]=true
@@ -620,7 +606,6 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
-      build_nexus_web: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.nexus_web == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_nexus_web == 'true') || false }}
       build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_backend == 'true') || false }}
       build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_yasa_runner == 'true') || false }}
       build_opengrep_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.opengrep_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_opengrep_runner == 'true') || false }}
