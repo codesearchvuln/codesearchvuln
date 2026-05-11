@@ -17,6 +17,7 @@ def test_release_workflow_push_path_replaces_workflow_run_handoff() -> None:
     workflow_text = _release_workflow_text()
 
     assert "workflow_call:" in workflow_text
+    assert "source_ref:" in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "\n  push:\n" in workflow_text
     assert "\n    branches:\n      - main\n" in workflow_text
@@ -43,7 +44,8 @@ def test_release_workflow_push_and_dispatch_paths_own_runtime_builds() -> None:
     assert (
         "if: ${{ always() && !cancelled() && needs.prepare-release.result == "
         "'success' && (github.event_name == 'push' || github.event_name == "
-        "'workflow_dispatch') && (github.event_name != 'push' || "
+        "'workflow_dispatch' || (github.event_name == 'workflow_call' && "
+        "inputs.release_manifest == '')) && (github.event_name != 'push' || "
         "needs.detect-changes.result == 'success') }}"
     ) in workflow_text
     assert "detect-changes:" in workflow_text
@@ -59,7 +61,8 @@ def test_release_workflow_manifest_resolution_supports_workflow_call_and_built_m
     assert (
         "if: ${{ always() && needs.resolve-entry.result == 'success' && "
         "needs.prepare-release.result == 'success' && ((github.event_name == "
-        "'workflow_call' && (needs.publish-runtime-images.result == 'skipped' || "
+        "'workflow_call' && ((inputs.release_manifest != '' && "
+        "needs.publish-runtime-images.result == 'skipped') || "
         "needs.publish-runtime-images.result == 'success')) || ((github.event_name == "
         "'push' || github.event_name == 'workflow_dispatch') && "
         "needs.publish-runtime-images.result == 'success')) }}"

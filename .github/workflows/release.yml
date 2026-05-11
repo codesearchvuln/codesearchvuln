@@ -3,12 +3,78 @@ name: Release Branch
 on:
   workflow_call:
     inputs:
+      source_ref:
+        required: false
+        type: string
+        default: main
       source_sha:
-        required: true
+        required: false
         type: string
+        default: ''
       release_manifest:
-        required: true
+        required: false
         type: string
+        default: ''
+      reuse_existing_images:
+        required: false
+        type: boolean
+        default: true
+      refresh_all_runtime_images:
+        required: false
+        type: boolean
+        default: false
+      runtime_image_targets:
+        required: false
+        type: string
+        default: ''
+      build_backend:
+        required: false
+        type: boolean
+        default: false
+      build_nexus_web:
+        required: false
+        type: boolean
+        default: false
+      build_yasa_runner:
+        required: false
+        type: boolean
+        default: false
+      build_opengrep_runner:
+        required: false
+        type: boolean
+        default: false
+      build_bandit_runner:
+        required: false
+        type: boolean
+        default: false
+      build_gitleaks_runner:
+        required: false
+        type: boolean
+        default: false
+      build_phpstan_runner:
+        required: false
+        type: boolean
+        default: false
+      build_flow_parser_runner:
+        required: false
+        type: boolean
+        default: false
+      build_pmd_runner:
+        required: false
+        type: boolean
+        default: false
+      build_sandbox_runner:
+        required: false
+        type: boolean
+        default: false
+      build_offline_images:
+        required: false
+        type: boolean
+        default: false
+      publish_release_assets:
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -24,66 +90,26 @@ on:
       - '.github/PULL_REQUEST_TEMPLATE.md'
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: '要发布的分支或 commit SHA（默认使用 main，适配默认分支已切到 release 时手动构建 main）'
+        required: false
+        type: string
+        default: main
       reuse_existing_images:
         description: 'Skip runtime image builds and reuse the current `latest` digests on GHCR for the release manifest (fails fast if any required image is missing)'
         required: false
         type: boolean
         default: true
       refresh_all_runtime_images:
-        description: 'Rebuild runtime runner images before generating release (ignored when reuse_existing_images is true)'
+        description: 'Rebuild all runtime runner images before generating release (ignored when reuse_existing_images is true)'
         required: false
         type: boolean
         default: false
-      build_backend:
-        description: '构建后端镜像（手动发布时按需启用）'
+      runtime_image_targets:
+        description: '当 reuse_existing_images=false 时构建的镜像: all 或逗号分隔 backend,nexus_web,yasa_runner,opengrep_runner,bandit_runner,gitleaks_runner,phpstan_runner,flow_parser_runner,pmd_runner,sandbox_runner'
         required: false
-        type: boolean
-        default: false
-      build_nexus_web:
-        description: '构建 nexus-web 独立容器镜像（手动发布时按需启用,首次发布需开启）'
-        required: false
-        type: boolean
-        default: false
-      build_yasa_runner:
-        description: '构建 YASA runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_opengrep_runner:
-        description: '构建 OpenGrep runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_bandit_runner:
-        description: '构建 Bandit runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_gitleaks_runner:
-        description: '构建 Gitleaks runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_phpstan_runner:
-        description: '构建 PHPStan runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_flow_parser_runner:
-        description: '构建 flow/parser runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_pmd_runner:
-        description: '构建 PMD runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
-      build_sandbox_runner:
-        description: '构建 sandbox-runner 镜像（手动发布时按需启用）'
-        required: false
-        type: boolean
-        default: false
+        type: string
+        default: ''
       build_offline_images:
         description: '构建 package-offline-images 离线镜像包（手动发布时按需启用，默认不构建）'
         required: false
@@ -307,13 +333,14 @@ jobs:
       actions: read
       contents: read
     outputs:
+      effective_source_ref: ${{ steps.from_call.outputs.source_ref || steps.from_branch_context.outputs.source_ref }}
       effective_source_sha: ${{ steps.from_call.outputs.source_sha || steps.from_branch_context.outputs.source_sha }}
       effective_release_manifest: ${{ steps.from_call.outputs.release_manifest }}
 
     steps:
       - name: Load release source from workflow_call inputs
         id: from_call
-        if: ${{ github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_call' && inputs.source_sha != '' && inputs.release_manifest != '' }}
         env:
           SOURCE_SHA_INPUT: ${{ inputs.source_sha }}
           RELEASE_MANIFEST_INPUT: ${{ inputs.release_manifest }}
@@ -323,6 +350,7 @@ jobs:
           [[ -n "${SOURCE_SHA_INPUT}" ]] || { echo "::error::workflow_call source_sha is empty"; exit 1; }
           [[ -n "${RELEASE_MANIFEST_INPUT}" ]] || { echo "::error::workflow_call release manifest is empty"; exit 1; }
 
+          echo "source_ref=${SOURCE_SHA_INPUT}" >> "$GITHUB_OUTPUT"
           echo "source_sha=${SOURCE_SHA_INPUT}" >> "$GITHUB_OUTPUT"
           {
             echo "release_manifest<<EOF"
@@ -330,12 +358,27 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Load release source from push/workflow_dispatch context
+      - name: Load release source from push/workflow_dispatch/workflow_call context
         id: from_branch_context
-        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.release_manifest == '') }}
+        env:
+          SOURCE_REF_INPUT: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && inputs.source_ref || github.sha }}
         run: |
           set -euo pipefail
-          echo "source_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+          source_ref="${SOURCE_REF_INPUT:-main}"
+
+          if [[ "${source_ref}" == "${GITHUB_SHA}" ]]; then
+            source_sha="${GITHUB_SHA}"
+          else
+            git init -q "${RUNNER_TEMP}/source-ref-resolve"
+            git -C "${RUNNER_TEMP}/source-ref-resolve" remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+            git -C "${RUNNER_TEMP}/source-ref-resolve" fetch --depth=1 origin "${source_ref}"
+            source_sha="$(git -C "${RUNNER_TEMP}/source-ref-resolve" rev-parse FETCH_HEAD)"
+          fi
+
+          echo "source_ref=${source_ref}" >> "$GITHUB_OUTPUT"
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
 
   prepare-release:
     needs: resolve-entry
@@ -348,18 +391,30 @@ jobs:
       runtime_tag: ${{ steps.vars.outputs.runtime_tag }}
       snapshot_tag: ${{ steps.vars.outputs.snapshot_tag }}
       snapshot_title: ${{ steps.vars.outputs.snapshot_title }}
+      build_backend: ${{ steps.runtime_image_plan.outputs.build_backend }}
+      build_nexus_web: ${{ steps.runtime_image_plan.outputs.build_nexus_web }}
+      build_yasa_runner: ${{ steps.runtime_image_plan.outputs.build_yasa_runner }}
+      build_opengrep_runner: ${{ steps.runtime_image_plan.outputs.build_opengrep_runner }}
+      build_bandit_runner: ${{ steps.runtime_image_plan.outputs.build_bandit_runner }}
+      build_gitleaks_runner: ${{ steps.runtime_image_plan.outputs.build_gitleaks_runner }}
+      build_phpstan_runner: ${{ steps.runtime_image_plan.outputs.build_phpstan_runner }}
+      build_flow_parser_runner: ${{ steps.runtime_image_plan.outputs.build_flow_parser_runner }}
+      build_pmd_runner: ${{ steps.runtime_image_plan.outputs.build_pmd_runner }}
+      build_sandbox_runner: ${{ steps.runtime_image_plan.outputs.build_sandbox_runner }}
 
     steps:
       - name: 计算 release 源信息
         id: vars
         env:
+          SOURCE_REF_INPUT: ${{ needs.resolve-entry.outputs.effective_source_ref }}
           SOURCE_SHA_INPUT: ${{ needs.resolve-entry.outputs.effective_source_sha }}
         run: |
           set -euo pipefail
 
+          [[ -n "${SOURCE_REF_INPUT}" ]] || { echo "::error::effective source_ref is empty"; exit 1; }
           [[ -n "${SOURCE_SHA_INPUT}" ]] || { echo "::error::effective source_sha is empty"; exit 1; }
-          source_ref="${SOURCE_SHA_INPUT}"
-          source_sha="${source_ref}"
+          source_ref="${SOURCE_REF_INPUT}"
+          source_sha="${SOURCE_SHA_INPUT}"
           snapshot_tag="release-assets-${source_sha}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           echo "source_ref=${source_ref}" >> "$GITHUB_OUTPUT"
@@ -369,11 +424,14 @@ jobs:
           echo "snapshot_title=codesearchvuln Offline Snapshot ${source_sha}" >> "$GITHUB_OUTPUT"
 
       - name: 输出手动运行时镜像构建计划
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        id: runtime_image_plan
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
         env:
           REUSE_EXISTING_IMAGES: ${{ inputs.reuse_existing_images }}
           REFRESH_ALL_RUNTIME_IMAGES: ${{ inputs.refresh_all_runtime_images }}
+          RUNTIME_IMAGE_TARGETS: ${{ inputs.runtime_image_targets }}
           BUILD_BACKEND: ${{ inputs.build_backend }}
+          BUILD_NEXUS_WEB: ${{ inputs.build_nexus_web }}
           BUILD_YASA_RUNNER: ${{ inputs.build_yasa_runner }}
           BUILD_OPENGREP_RUNNER: ${{ inputs.build_opengrep_runner }}
           BUILD_BANDIT_RUNNER: ${{ inputs.build_bandit_runner }}
@@ -386,35 +444,86 @@ jobs:
         run: |
           set -euo pipefail
 
-          selected_builds=()
+          declare -A selected=(
+            [backend]=false
+            [nexus_web]=false
+            [yasa_runner]=false
+            [opengrep_runner]=false
+            [bandit_runner]=false
+            [gitleaks_runner]=false
+            [phpstan_runner]=false
+            [flow_parser_runner]=false
+            [pmd_runner]=false
+            [sandbox_runner]=false
+          )
+          image_names=(
+            backend
+            nexus_web
+            yasa_runner
+            opengrep_runner
+            bandit_runner
+            gitleaks_runner
+            phpstan_runner
+            flow_parser_runner
+            pmd_runner
+            sandbox_runner
+          )
+
+          select_all() {
+            local image
+            for image in "${image_names[@]}"; do
+              selected["${image}"]=true
+            done
+          }
+
+          select_csv_targets() {
+            local raw_targets normalized token
+            raw_targets="$1"
+            normalized="$(printf '%s' "${raw_targets}" | tr '[:upper:]' '[:lower:]' | tr ';' ',')"
+            normalized="${normalized//[[:space:]]/}"
+            [[ -n "${normalized}" ]] || return 0
+
+            IFS=',' read -ra tokens <<< "${normalized}"
+            for token in "${tokens[@]}"; do
+              [[ -n "${token}" ]] || continue
+              if [[ "${token}" == "all" ]]; then
+                select_all
+                continue
+              fi
+              if [[ -v "selected[${token}]" ]]; then
+                selected["${token}"]=true
+              else
+                echo "::error::Unknown runtime_image_targets entry: ${token}"
+                exit 1
+              fi
+            done
+          }
 
           if [[ "${REUSE_EXISTING_IMAGES}" == "true" ]]; then
             mode="reuse-existing-latest"
           elif [[ "${REFRESH_ALL_RUNTIME_IMAGES}" == "true" ]]; then
             mode="refresh-all-runtime-images"
-            selected_builds=(
-              backend
-              yasa_runner
-              opengrep_runner
-              bandit_runner
-              gitleaks_runner
-              phpstan_runner
-              flow_parser_runner
-              pmd_runner
-              sandbox_runner
-            )
+            select_all
           else
             mode="selected-runtime-images"
-            [[ "${BUILD_BACKEND}" == "true" ]] && selected_builds+=("backend")
-            [[ "${BUILD_YASA_RUNNER}" == "true" ]] && selected_builds+=("yasa_runner")
-            [[ "${BUILD_OPENGREP_RUNNER}" == "true" ]] && selected_builds+=("opengrep_runner")
-            [[ "${BUILD_BANDIT_RUNNER}" == "true" ]] && selected_builds+=("bandit_runner")
-            [[ "${BUILD_GITLEAKS_RUNNER}" == "true" ]] && selected_builds+=("gitleaks_runner")
-            [[ "${BUILD_PHPSTAN_RUNNER}" == "true" ]] && selected_builds+=("phpstan_runner")
-            [[ "${BUILD_FLOW_PARSER_RUNNER}" == "true" ]] && selected_builds+=("flow_parser_runner")
-            [[ "${BUILD_PMD_RUNNER}" == "true" ]] && selected_builds+=("pmd_runner")
-            [[ "${BUILD_SANDBOX_RUNNER}" == "true" ]] && selected_builds+=("sandbox_runner")
+            [[ "${BUILD_BACKEND}" == "true" ]] && selected[backend]=true
+            [[ "${BUILD_NEXUS_WEB}" == "true" ]] && selected[nexus_web]=true
+            [[ "${BUILD_YASA_RUNNER}" == "true" ]] && selected[yasa_runner]=true
+            [[ "${BUILD_OPENGREP_RUNNER}" == "true" ]] && selected[opengrep_runner]=true
+            [[ "${BUILD_BANDIT_RUNNER}" == "true" ]] && selected[bandit_runner]=true
+            [[ "${BUILD_GITLEAKS_RUNNER}" == "true" ]] && selected[gitleaks_runner]=true
+            [[ "${BUILD_PHPSTAN_RUNNER}" == "true" ]] && selected[phpstan_runner]=true
+            [[ "${BUILD_FLOW_PARSER_RUNNER}" == "true" ]] && selected[flow_parser_runner]=true
+            [[ "${BUILD_PMD_RUNNER}" == "true" ]] && selected[pmd_runner]=true
+            [[ "${BUILD_SANDBOX_RUNNER}" == "true" ]] && selected[sandbox_runner]=true
+            select_csv_targets "${RUNTIME_IMAGE_TARGETS}"
           fi
+
+          selected_builds=()
+          for image in "${image_names[@]}"; do
+            echo "build_${image}=${selected[${image}]}" >> "$GITHUB_OUTPUT"
+            [[ "${selected[${image}]}" == "true" ]] && selected_builds+=("${image}")
+          done
 
           if ((${#selected_builds[@]} == 0)); then
             selection="none"
@@ -428,10 +537,12 @@ jobs:
             echo "- mode: \`${mode}\`"
             echo "- reuse_existing_images: \`${REUSE_EXISTING_IMAGES}\`"
             echo "- refresh_all_runtime_images: \`${REFRESH_ALL_RUNTIME_IMAGES}\`"
+            echo "- runtime_image_targets: \`${RUNTIME_IMAGE_TARGETS:-none}\`"
             echo "- selected_builds: \`${selection}\`"
             echo "- frontend_release_image: \`skipped (release flow uses STATIC_FRONTEND_IMAGE)\`"
             echo "- publish_release_assets: \`${PUBLISH_RELEASE_ASSETS}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
 
   create-draft-release:
     needs:
@@ -495,7 +606,7 @@ jobs:
           echo "snapshot_url=${html_url}" >> "$GITHUB_OUTPUT"
 
   publish-runtime-images:
-    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'push' || needs.detect-changes.result == 'success') }}
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.release_manifest == '')) && (github.event_name != 'push' || needs.detect-changes.result == 'success') }}
     needs:
       - detect-changes
       - prepare-release
@@ -509,27 +620,28 @@ jobs:
     with:
       tag: ${{ needs.prepare-release.outputs.runtime_tag }}
       build_frontend: false
-      build_nexus_web: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.nexus_web == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_nexus_web)) || false }}
-      build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_backend)) || false }}
-      build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_yasa_runner)) || false }}
-      build_opengrep_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.opengrep_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_opengrep_runner)) || false }}
-      build_bandit_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.bandit_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_bandit_runner)) || false }}
-      build_gitleaks_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.gitleaks_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_gitleaks_runner)) || false }}
-      build_phpstan_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.phpstan_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_phpstan_runner)) || false }}
-      build_flow_parser_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.flow_parser_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_flow_parser_runner)) || false }}
-      build_pmd_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.pmd_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_pmd_runner)) || false }}
-      build_sandbox_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.sandbox_runner == 'true') || (github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images && (inputs.refresh_all_runtime_images || inputs.build_sandbox_runner)) || false }}
+      build_nexus_web: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.nexus_web == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_nexus_web == 'true') || false }}
+      build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_backend == 'true') || false }}
+      build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_yasa_runner == 'true') || false }}
+      build_opengrep_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.opengrep_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_opengrep_runner == 'true') || false }}
+      build_bandit_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.bandit_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_bandit_runner == 'true') || false }}
+      build_gitleaks_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.gitleaks_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_gitleaks_runner == 'true') || false }}
+      build_phpstan_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.phpstan_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_phpstan_runner == 'true') || false }}
+      build_flow_parser_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.flow_parser_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_flow_parser_runner == 'true') || false }}
+      build_pmd_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.pmd_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_pmd_runner == 'true') || false }}
+      build_sandbox_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.sandbox_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_sandbox_runner == 'true') || false }}
       multi_arch: true
       emit_release_manifest: true
       require_complete_manifest: true
       revision: ${{ needs.prepare-release.outputs.source_sha }}
+      checkout_ref: ${{ needs.prepare-release.outputs.source_sha }}
 
   resolve-release-manifest:
     needs:
       - resolve-entry
       - prepare-release
       - publish-runtime-images
-    if: ${{ always() && needs.resolve-entry.result == 'success' && needs.prepare-release.result == 'success' && ((github.event_name == 'workflow_call' && (needs.publish-runtime-images.result == 'skipped' || needs.publish-runtime-images.result == 'success')) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.publish-runtime-images.result == 'success')) }}
+    if: ${{ always() && needs.resolve-entry.result == 'success' && needs.prepare-release.result == 'success' && ((github.event_name == 'workflow_call' && ((inputs.release_manifest != '' && needs.publish-runtime-images.result == 'skipped') || needs.publish-runtime-images.result == 'success')) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.publish-runtime-images.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -540,7 +652,7 @@ jobs:
     steps:
       - name: Load release manifest from resolved entry context
         id: from_call
-        if: ${{ github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_call' && inputs.release_manifest != '' }}
         env:
           RELEASE_MANIFEST: ${{ needs.resolve-entry.outputs.effective_release_manifest }}
         run: |
@@ -556,7 +668,7 @@ jobs:
 
       - name: Load release manifest from release build outputs
         id: from_build
-        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_call' && inputs.release_manifest == '') }}
         env:
           RELEASE_MANIFEST: ${{ needs.publish-runtime-images.outputs.release_manifest }}
         run: |
@@ -571,7 +683,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   package-offline-images:
-    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.create-draft-release.result == 'success' && needs.resolve-release-manifest.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.build_offline_images || inputs.publish_release_assets) }}
+    if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && needs.create-draft-release.result == 'success' && needs.resolve-release-manifest.result == 'success' && ((github.event_name != 'workflow_dispatch' && github.event_name != 'workflow_call') || inputs.build_offline_images || inputs.publish_release_assets) }}
     needs:
       - prepare-release
       - create-draft-release
@@ -659,6 +771,7 @@ jobs:
           ref: ${{ needs.prepare-release.outputs.source_ref }}
           fetch-depth: 0
           filter: 'blob:none'
+          submodules: recursive
 
       - name: Finalize preflight
         env:
@@ -972,7 +1085,7 @@ jobs:
         id: resolve_semantic_version
         env:
           SOURCE_SHA: ${{ needs.prepare-release.outputs.source_sha }}
-          FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && (inputs.build_offline_images || inputs.publish_release_assets) || false }}
+          FORCE_RELEASE_ASSETS: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && (inputs.build_offline_images || inputs.publish_release_assets) || false }}
         run: |
           set -euo pipefail
 

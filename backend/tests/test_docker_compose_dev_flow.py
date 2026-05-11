@@ -693,7 +693,8 @@ def test_release_workflow_builds_manifest_driven_release_tree() -> None:
     ).read_text(encoding="utf-8")
 
     assert "uses: ./.github/workflows/publish-runtime-images.yml" in workflow_text
-    assert "if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}" in workflow_text
+    assert "github.event_name == 'push' || github.event_name == 'workflow_dispatch'" in workflow_text
+    assert "github.event_name == 'workflow_call' && inputs.release_manifest == ''" in workflow_text
     assert "build_frontend: false" in workflow_text
     assert "\n  push:\n" in workflow_text
     assert "workflow_run:" not in workflow_text

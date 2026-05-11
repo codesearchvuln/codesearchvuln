@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: ""
+      checkout_ref:
+        description: Repository ref to check out for image build contexts.
+        required: false
+        type: string
+        default: ""
     outputs:
       release_manifest:
         description: Machine-readable manifest with digest-pinned runtime refs.
@@ -125,6 +130,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -178,6 +185,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -305,6 +314,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           submodules: recursive
 
       - name: 登录到 GitHub Container Registry
@@ -360,6 +370,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
           submodules: recursive
 
       - name: 登录到 GitHub Container Registry
@@ -485,6 +496,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -560,6 +573,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -708,6 +723,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -761,6 +778,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -863,6 +882,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -916,6 +937,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1018,6 +1041,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1071,6 +1096,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1173,6 +1200,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1226,6 +1255,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1328,6 +1359,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1381,6 +1414,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1483,6 +1518,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1536,6 +1573,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1638,6 +1677,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1691,6 +1732,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1793,6 +1836,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4
@@ -1846,6 +1891,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: 登录到 GitHub Container Registry
         uses: docker/login-action@v4

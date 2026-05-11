@@ -544,6 +544,8 @@ def test_publish_sourcecode_workflow_syncs_generated_tree_to_sourcecode_branch()
 
     assert 'FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"' in workflow_text
     assert "workflow_dispatch:" in workflow_text
+    assert "default: main" in workflow_text
+    assert "ref: ${{ inputs.ref || github.sha }}" in workflow_text
     assert "branches:" in workflow_text
     assert "- main" in workflow_text
     assert "git worktree add --detach --force" in workflow_text

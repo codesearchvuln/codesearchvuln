@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: '要发布的分支或 commit SHA（留空则使用当前默认分支 HEAD）'
+        description: '要发布的分支或 commit SHA（默认 main，适配默认分支为 release 时手动构建 main/sourcecode）'
         required: false
         type: string
-        default: ''
+        default: main
       skip_smoke_test:
         description: '跳过 sourcecode smoke test（加速手动发布）'
         required: false

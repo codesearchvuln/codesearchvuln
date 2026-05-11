@@ -270,6 +270,7 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert generator_path.exists()
     assert publish_workflow_path.exists()
     assert "workflow_call:" in workflow_text
+    assert "source_ref:" in workflow_text
     assert "source_sha:" in workflow_text
     assert "release_manifest:" in workflow_text
     assert "\n  push:\n" in workflow_text
@@ -280,6 +281,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "Docker Publish" not in workflow_text
     assert "workflow_dispatch:" in workflow_text
     assert "reuse_existing_images:" in workflow_text
+    assert "refresh_all_runtime_images:" in workflow_text
+    assert "runtime_image_targets:" in workflow_text
     assert "publish_release_assets:" in workflow_text
     assert (
         "Skip runtime image builds and reuse the current `latest` digests on GHCR"
@@ -297,7 +300,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert (
         "if: ${{ always() && needs.resolve-entry.result == 'success' && "
         "needs.prepare-release.result == 'success' && ((github.event_name == "
-        "'workflow_call' && (needs.publish-runtime-images.result == 'skipped' || "
+        "'workflow_call' && ((inputs.release_manifest != '' && "
+        "needs.publish-runtime-images.result == 'skipped') || "
         "needs.publish-runtime-images.result == 'success')) || ((github.event_name == "
         "'push' || github.event_name == 'workflow_dispatch') && "
         "needs.publish-runtime-images.result == 'success')) }}"
@@ -307,8 +311,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
         "if: ${{ always() && !cancelled() && needs.prepare-release.result == 'success' && "
         "needs.create-draft-release.result == 'success' && "
         "needs.resolve-release-manifest.result == 'success' && "
-        "(github.event_name != 'workflow_dispatch' || inputs.build_offline_images || "
-        "inputs.publish_release_assets) }}"
+        "((github.event_name != 'workflow_dispatch' && github.event_name != 'workflow_call') || "
+        "inputs.build_offline_images || inputs.publish_release_assets) }}"
     ) in workflow_text
     assert "finalize-publish:" in workflow_text
     assert "cleanup-draft-release:" in workflow_text
@@ -316,28 +320,23 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert (
         "if: ${{ always() && !cancelled() && needs.prepare-release.result == "
         "'success' && (github.event_name == 'push' || github.event_name == "
-        "'workflow_dispatch') && (github.event_name != 'push' || "
+        "'workflow_dispatch' || (github.event_name == 'workflow_call' && "
+        "inputs.release_manifest == '')) && (github.event_name != 'push' || "
         "needs.detect-changes.result == 'success') }}"
     ) in workflow_text
     assert "build_frontend: false" in workflow_text
     assert (
-        "build_backend: ${{ (github.event_name == 'push' && "
-        "needs.detect-changes.outputs.backend == 'true') || (github.event_name == "
-        "'workflow_dispatch' && !inputs.reuse_existing_images && "
-        "(inputs.refresh_all_runtime_images || inputs.build_backend)) || false }}"
+        "build_backend: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.backend == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_backend == 'true') || false }}"
+    ) in workflow_text
+    assert (
+        "build_nexus_web: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.nexus_web == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_nexus_web == 'true') || false }}"
     ) in workflow_text
     assert "build_backend: true" not in workflow_text
     assert (
-        "build_yasa_runner: ${{ (github.event_name == 'push' && "
-        "needs.detect-changes.outputs.yasa_runner == 'true') || (github.event_name == "
-        "'workflow_dispatch' && !inputs.reuse_existing_images && "
-        "(inputs.refresh_all_runtime_images || inputs.build_yasa_runner)) || false }}"
+        "build_yasa_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.yasa_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_yasa_runner == 'true') || false }}"
     ) in workflow_text
     assert (
-        "build_sandbox_runner: ${{ (github.event_name == 'push' && "
-        "needs.detect-changes.outputs.sandbox_runner == 'true') || (github.event_name == "
-        "'workflow_dispatch' && !inputs.reuse_existing_images && "
-        "(inputs.refresh_all_runtime_images || inputs.build_sandbox_runner)) || false }}"
+        "build_sandbox_runner: ${{ (github.event_name == 'push' && needs.detect-changes.outputs.sandbox_runner == 'true') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && needs.prepare-release.outputs.build_sandbox_runner == 'true') || false }}"
     ) in workflow_text
     assert "build_sandbox:" not in workflow_text
     assert "runtime_tag" in workflow_text
@@ -518,8 +517,9 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "git checkout -B release origin/release" not in workflow_text
     assert "git fetch --force --tags origin" in workflow_text
     force_release_assets_env = (
-        "FORCE_RELEASE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && "
-        "(inputs.build_offline_images || inputs.publish_release_assets) || false }}"
+        "FORCE_RELEASE_ASSETS: ${{ (github.event_name == 'workflow_dispatch' || "
+        "github.event_name == 'workflow_call') && (inputs.build_offline_images || "
+        "inputs.publish_release_assets) || false }}"
     )
     assert force_release_assets_env in workflow_text
     assert "--force-patch" in workflow_text
@@ -530,6 +530,8 @@ def test_release_workflow_orchestrates_manifest_driven_release_branch() -> None:
     assert "docker-publish.yml" not in workflow_text
     assert "actions: write" not in workflow_text
     assert "actions: read" in workflow_text
+    assert "permissions:\n  actions: read\n  contents: read" in workflow_text
+    assert "contents: write" in workflow_text
     assert "if: ${{ failure() || cancelled() }}" in workflow_text
     assert workflow_text.count("GH_REPO: ${{ github.repository }}") == 4
     assert "isDraft" in workflow_text
@@ -686,6 +688,10 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
         "deploy/runtime/frontend/nginx/default.conf",
         "nexus-itemDetail/dist/index.html",
         "nexus-itemDetail/nginx.conf",
+        ".github/workflows/publish-sourcecode.yml",
+        ".github/workflows/publish-runtime-images.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/offload-image.yml",
     ]
     for rel_path in required_paths:
         assert (output_dir / rel_path).exists(), rel_path
@@ -699,7 +705,6 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
     forbidden_paths = [
         "backend",
         "frontend",
-        ".github",
         "docs",
         "docker-compose.full.yml",
         "docker-compose.hybrid.yml",
@@ -721,6 +726,29 @@ def test_release_generator_emits_binary_only_runtime_tree(tmp_path: Path) -> Non
     ]
     for rel_path in forbidden_paths:
         assert not (output_dir / rel_path).exists(), rel_path
+
+    sourcecode_workflow = (
+        output_dir / ".github" / "workflows" / "publish-sourcecode.yml"
+    ).read_text(encoding="utf-8")
+    runtime_images_workflow = (
+        output_dir / ".github" / "workflows" / "publish-runtime-images.yml"
+    ).read_text(encoding="utf-8")
+    release_workflow = (output_dir / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
+    offload_workflow = (output_dir / ".github" / "workflows" / "offload-image.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "workflow_dispatch:" in sourcecode_workflow
+    assert "default: main" in sourcecode_workflow
+    assert "workflow_call:" in runtime_images_workflow
+    assert "checkout_ref:" in runtime_images_workflow
+    assert "workflow_dispatch:" in release_workflow
+    assert "workflow_call:" in release_workflow
+    assert "source_ref:" in release_workflow
+    assert "default: main" in release_workflow
+    assert "workflow_dispatch:" in offload_workflow
+    assert "build_offline_images: true" in offload_workflow
 
     _assert_nexus_runtime_bundle(output_dir, "nexus-itemDetail")
 

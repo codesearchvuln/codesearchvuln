@@ -182,6 +182,11 @@ overlay_release_templates() {
   chmod +x "$OUTPUT_DIR/Vulhunter-offline-bootstrap.sh"
   chmod +x "$OUTPUT_DIR/scripts/offline-up.sh"
   render_release_compose
+  mkdir -p "$OUTPUT_DIR/.github/workflows"
+  cp "$ROOT_DIR/.github/workflows/publish-sourcecode.yml" "$OUTPUT_DIR/.github/workflows/publish-sourcecode.yml"
+  cp "$ROOT_DIR/.github/workflows/publish-runtime-images.yml" "$OUTPUT_DIR/.github/workflows/publish-runtime-images.yml"
+  cp "$ROOT_DIR/.github/workflows/release.yml" "$OUTPUT_DIR/.github/workflows/release.yml"
+  cp "$ROOT_DIR/.github/workflows/offload-image.yml" "$OUTPUT_DIR/.github/workflows/offload-image.yml"
   python3 - \
     "$CONTRACT_PATH" \
     "$IMAGE_MANIFEST" \
@@ -339,11 +344,14 @@ validate_release_tree() {
     "deploy/runtime/frontend/nginx/default.conf"
     "nexus-itemDetail/dist/index.html"
     "nexus-itemDetail/nginx.conf"
+    ".github/workflows/publish-sourcecode.yml"
+    ".github/workflows/publish-runtime-images.yml"
+    ".github/workflows/release.yml"
+    ".github/workflows/offload-image.yml"
   )
   forbidden_paths=(
     "backend"
     "frontend"
-    ".github"
     "docs"
     "docker-compose.full.yml"
     "docker-compose.hybrid.yml"
@@ -396,7 +404,7 @@ validate_release_tree() {
   done
 
   if find "$OUTPUT_DIR" \
-    \( -path "$OUTPUT_DIR/.github" -o -path "$OUTPUT_DIR/backend" -o -path "$OUTPUT_DIR/frontend" -o -name '__pycache__' -o -name '.pytest_cache' -o -name 'node_modules' \) \
+    \( -path "$OUTPUT_DIR/backend" -o -path "$OUTPUT_DIR/frontend" -o -name '__pycache__' -o -name '.pytest_cache' -o -name 'node_modules' \) \
     -print -quit | grep -q .; then
     die "release tree still contains source or dev residue"
   fi
