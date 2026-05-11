@@ -13,7 +13,7 @@ def test_backend_dockerfile_derives_docker_cli_image_from_selected_mirror() -> N
     assert "ARG DOCKER_CLI_IMAGE=docker.m.daocloud.io/docker:cli" not in dockerfile_text
 
 
-def test_backend_dockerfile_uses_huaweicloud_first_with_bounded_uv_fallbacks() -> None:
+def test_backend_dockerfile_uses_probe_ranked_pypi_before_configured_fallbacks() -> None:
     import re
     dockerfile_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
 
@@ -28,8 +28,28 @@ def test_backend_dockerfile_uses_huaweicloud_first_with_bounded_uv_fallbacks() -
     assert 30 <= timeout_val <= 600, f"timeout {timeout_val} out of range [30, 600]"
 
     assert "ARG BACKEND_UV_ATTEMPTS_PER_INDEX=1" in dockerfile_text
-    assert 'ordered="$(printf \'%s\\n%s\\n\' "${best_index}" "${ordered}"' in dockerfile_text
+    assert 'configured_primary="${BACKEND_PYPI_INDEX_PRIMARY:-' in dockerfile_text
+    assert 'configured_fallback="${BACKEND_PYPI_INDEX_FALLBACK:-}"' in dockerfile_text
+    assert '"${ordered}" "${configured_primary}" "${configured_fallback}"' in dockerfile_text
+    assert "| awk 'NF {print; exit}')" in dockerfile_text
+    assert "Selected PyPI index: ${best_index}" in dockerfile_text
     assert 'UV_CONCURRENT_DOWNLOADS="${uv_concurrent_downloads}"' in dockerfile_text
+    assert "--extra-index-url" not in dockerfile_text
+    assert "uv sync --active --frozen --no-dev --no-install-project" in dockerfile_text
+
+
+def test_sourcecode_template_uses_probe_ranked_pypi_before_configured_fallbacks() -> None:
+    template_text = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "Dockerfile"
+    ).read_text(encoding="utf-8")
+
+    assert 'configured_primary="${BACKEND_PYPI_INDEX_PRIMARY:-' in template_text
+    assert 'configured_fallback="${BACKEND_PYPI_INDEX_FALLBACK:-}"' in template_text
+    assert '"${ordered}" "${configured_primary}" "${configured_fallback}"' in template_text
+    assert "| awk 'NF {print; exit}')" in template_text
+    assert "Selected PyPI index: ${best_index}" in template_text
+    assert "--extra-index-url" not in template_text
+    assert "uv sync --active --frozen --no-dev --no-install-project" in template_text
 
 
 def test_local_build_script_prefers_daocloud_defaults_for_local_builds() -> None:
@@ -51,6 +71,77 @@ def test_local_build_script_prefers_daocloud_defaults_for_local_builds() -> None
     assert 30 <= timeout_val <= 600, f"timeout {timeout_val} out of range [30, 600]"
 
     assert "load_container_socket_gid_env" in start_script_text
+
+
+def test_backend_compose_uses_in_container_docker_host_for_preflight() -> None:
+    compose_paths = [
+        REPO_ROOT / "docker" / "docker-compose.yml",
+        REPO_ROOT / "docker" / "docker-compose.hybrid.yml",
+        REPO_ROOT / "docker" / "docker-compose.full.yml",
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "docker-compose.yml",
+    ]
+
+    for compose_path in compose_paths:
+        compose_text = compose_path.read_text(encoding="utf-8")
+        assert "${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock" in compose_text
+        assert "DOCKER_HOST: ${BACKEND_DOCKER_HOST:-unix:///var/run/docker.sock}" in compose_text
+        assert "DOCKER_HOST: ${DOCKER_HOST:-}" not in compose_text
+
+
+def test_backend_uv_step_timeout_defaults_stay_aligned() -> None:
+    import re
+
+    start_script_text = (REPO_ROOT / "start-local-services.sh").read_text(encoding="utf-8")
+    backend_dockerfile_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
+    sourcecode_dockerfile_text = (REPO_ROOT / "scripts" / "sourcecode-templates" / "Dockerfile").read_text(encoding="utf-8")
+    hybrid_compose_text = (REPO_ROOT / "docker" / "docker-compose.hybrid.yml").read_text(encoding="utf-8")
+    full_compose_text = (REPO_ROOT / "docker" / "docker-compose.full.yml").read_text(encoding="utf-8")
+
+    patterns = {
+        "start-local-services.sh": (
+            start_script_text,
+            r'export BACKEND_UV_STEP_TIMEOUT_SECONDS="\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}"',
+        ),
+        "docker/backend.Dockerfile ARG": (
+            backend_dockerfile_text,
+            r'ARG BACKEND_UV_STEP_TIMEOUT_SECONDS=(\d+)',
+        ),
+        "docker/backend.Dockerfile layer A": (
+            backend_dockerfile_text,
+            r'step_timeout="\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}"',
+        ),
+        "docker/backend.Dockerfile layer B": (
+            backend_dockerfile_text,
+            r'uv_step_timeout="\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}"',
+        ),
+        "docker-compose.hybrid.yml": (
+            hybrid_compose_text,
+            r'BACKEND_UV_STEP_TIMEOUT_SECONDS=\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}',
+        ),
+        "docker-compose.full.yml": (
+            full_compose_text,
+            r'BACKEND_UV_STEP_TIMEOUT_SECONDS=\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}',
+        ),
+        "scripts/sourcecode-templates/Dockerfile ARG": (
+            sourcecode_dockerfile_text,
+            r'ARG BACKEND_UV_STEP_TIMEOUT_SECONDS=(\d+)',
+        ),
+        "scripts/sourcecode-templates/Dockerfile layer A": (
+            sourcecode_dockerfile_text,
+            r'step_timeout="\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}"',
+        ),
+        "scripts/sourcecode-templates/Dockerfile layer B": (
+            sourcecode_dockerfile_text,
+            r'uv_step_timeout="\$\{BACKEND_UV_STEP_TIMEOUT_SECONDS:-(\d+)\}"',
+        ),
+    }
+    defaults: dict[str, int] = {}
+    for label, (content, pattern) in patterns.items():
+        match = re.search(pattern, content)
+        assert match is not None, f"{label} timeout default not found"
+        defaults[label] = int(match.group(1))
+
+    assert set(defaults.values()) == {600}
 
 
 def test_local_build_entrypoints_reexec_under_bash_when_invoked_by_sh() -> None:
