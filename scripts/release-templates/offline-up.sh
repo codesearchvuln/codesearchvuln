@@ -308,6 +308,65 @@ validate_backend_image_provenance() {
   fi
 }
 
+# Smoke-test hook: when OFFLINE_SMOKE_REBUILD_ROOT points at a source checkout,
+# rebuild backend / static_frontend locally so the test exercises the current
+# commit instead of whatever stale image the offline bundle was built from.
+# Default behaviour: only fires when backend provenance is resolved_fallback
+# (i.e. the bundle came from a previous run's :latest). Set
+# OFFLINE_SMOKE_REBUILD_FORCE=1 to override and rebuild unconditionally.
+inject_smoke_local_rebuild() {
+  local rebuild_root="${OFFLINE_SMOKE_REBUILD_ROOT:-}"
+  [[ -n "$rebuild_root" ]] || return 0
+
+  [[ -d "$rebuild_root" ]] || die "OFFLINE_SMOKE_REBUILD_ROOT is set but not a directory: ${rebuild_root}"
+
+  local contract expected_revision provenance_mode
+  contract="$(read_backend_image_contract)"
+  IFS=$'\t' read -r expected_revision _ _ provenance_mode _ <<<"$contract"
+
+  if [[ "$provenance_mode" != "resolved_fallback" && "${OFFLINE_SMOKE_REBUILD_FORCE:-0}" != "1" ]]; then
+    log_info "smoke local rebuild skipped: backend provenance is ${provenance_mode}"
+    return 0
+  fi
+
+  log_info "smoke local rebuild enabled: provenance=${provenance_mode}, source_root=${rebuild_root}"
+
+  local backend_dockerfile="${rebuild_root}/docker/backend.Dockerfile"
+  local frontend_dockerfile="${rebuild_root}/docker/frontend.Dockerfile"
+
+  while IFS=$'\t' read -r logical_name _env_var _source_ref local_tag; do
+    [[ -n "$logical_name" ]] || continue
+    case "$logical_name" in
+      backend)
+        [[ -f "$backend_dockerfile" ]] || die "smoke rebuild: backend Dockerfile missing at ${backend_dockerfile}"
+        log_info "smoke rebuild: ${logical_name} -> ${local_tag} (target=runtime-plain, VCS_REF=${expected_revision})"
+        (
+          cd "$rebuild_root"
+          DOCKER_BUILDKIT=1 docker build \
+            --file docker/backend.Dockerfile \
+            --target runtime-plain \
+            --build-arg "VCS_REF=${expected_revision}" \
+            --tag "$local_tag" \
+            .
+        ) || die "smoke rebuild failed: ${logical_name}"
+        ;;
+      static_frontend)
+        [[ -f "$frontend_dockerfile" ]] || die "smoke rebuild: frontend Dockerfile missing at ${frontend_dockerfile}"
+        log_info "smoke rebuild: ${logical_name} -> ${local_tag}"
+        (
+          cd "$rebuild_root"
+          DOCKER_BUILDKIT=1 docker build \
+            --file docker/frontend.Dockerfile \
+            --tag "$local_tag" \
+            .
+        ) || die "smoke rebuild failed: ${logical_name}"
+        ;;
+      *)
+        ;;
+    esac
+  done < <(emit_manifest_images)
+}
+
 validate_compose_images_local_only() {
   local compose_output
   compose_output="$(compose_release config)"
@@ -661,6 +720,7 @@ main() {
   load_bundle "$services_bundle"
   load_bundle "$scanner_bundle"
   ensure_images_ready
+  inject_smoke_local_rebuild
   validate_backend_image_provenance
 
   log_info "starting docker compose up -d db redis db-bootstrap backend"

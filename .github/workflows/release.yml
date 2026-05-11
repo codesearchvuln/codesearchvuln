@@ -924,6 +924,12 @@ jobs:
         env:
           SNAPSHOT_ASSET_DIR: ${{ runner.temp }}/snapshot-assets
           VULHUNTER_RELEASE_PROJECT_NAME: vulhunter-release-smoke
+          # When backend provenance falls back to GHCR :latest, the offline
+          # bundle may carry a stale image built from an earlier commit. Point
+          # the smoke runner at the current checkout so it can rebuild backend
+          # and static_frontend from source instead of trusting the bundle.
+          # See inject_smoke_local_rebuild() in scripts/offline-up.sh.
+          OFFLINE_SMOKE_REBUILD_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
 
