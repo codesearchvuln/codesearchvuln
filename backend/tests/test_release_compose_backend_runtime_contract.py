@@ -212,7 +212,12 @@ def test_backend_release_publish_workflow_uses_runtime_plain_by_default() -> Non
     assert "publish-backend-hardened:" not in publish_workflow_text
     assert "publish_backend_hardened:" not in release_workflow_text
 
-    assert "build_backend: ${{ github.event_name == 'workflow_dispatch' && !inputs.reuse_existing_images }}" in release_workflow_text
+    assert (
+        "build_backend: ${{ (github.event_name == 'push' && "
+        "needs.detect-changes.outputs.backend == 'true') || (github.event_name == "
+        "'workflow_dispatch' && !inputs.reuse_existing_images && "
+        "(inputs.refresh_all_runtime_images || inputs.build_backend)) || false }}"
+    ) in release_workflow_text
 
 
 def test_backend_release_defaults_do_not_depend_on_release_only_cython_inputs() -> None:

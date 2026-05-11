@@ -77,7 +77,22 @@ def test_docker_publish_workflow_builds_pmd_runner() -> None:
     workflow_path = _repo_root() / ".github" / "workflows" / "publish-runtime-images.yml"
     workflow_text = workflow_path.read_text(encoding="utf-8")
 
+    pmd_amd64_section = workflow_text.split("  publish-pmd-runner-amd64:\n", maxsplit=1)[
+        1
+    ].split("\n  publish-pmd-runner-arm64:\n", maxsplit=1)[0]
+    pmd_arm64_section = workflow_text.split("  publish-pmd-runner-arm64:\n", maxsplit=1)[
+        1
+    ].split("\n  publish-pmd-runner:\n", maxsplit=1)[0]
+    pmd_manifest_section = workflow_text.split("  publish-pmd-runner:\n", maxsplit=1)[1].split(
+        "\n  publish-sandbox-runner-amd64:\n", maxsplit=1
+    )[0]
+
     assert "build_pmd_runner" in workflow_text
-    assert "./docker/pmd-runner.Dockerfile" in workflow_text
-    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}" in workflow_text
-    assert "build_nexus_web" not in workflow_text
+    assert "if: ${{ inputs.build_pmd_runner }}" in pmd_amd64_section
+    assert "if: ${{ inputs.build_pmd_runner && inputs.multi_arch }}" in pmd_arm64_section
+    assert "./docker/pmd-runner.Dockerfile" in pmd_amd64_section
+    assert "./docker/pmd-runner.Dockerfile" in pmd_arm64_section
+    assert "${{ env.GHCR_REGISTRY }}/${{ env.VULHUNTER_IMAGE_NAMESPACE }}/vulhunter-pmd-runner:${{ needs.prepare.outputs.tag }}" in pmd_manifest_section
+    assert "build_nexus_web" not in pmd_amd64_section
+    assert "build_nexus_web" not in pmd_arm64_section
+    assert "build_nexus_web" not in pmd_manifest_section

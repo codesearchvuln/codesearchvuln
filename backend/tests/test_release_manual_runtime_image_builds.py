@@ -42,6 +42,18 @@ def test_release_workflow_dispatch_exposes_manual_release_asset_publish_input() 
     )
 
 
+def test_release_workflow_dispatch_exposes_manual_offline_image_build_input() -> None:
+    workflow_text = _workflow_text()
+
+    assert re.search(
+        r"      build_offline_images:\n"
+        r"(?:        .*\n)*?"
+        r"        type: boolean\n"
+        r"        default: false\n",
+        workflow_text,
+    )
+
+
 def test_release_workflow_call_contract_stays_unchanged() -> None:
     workflow_text = _workflow_text()
     workflow_call_section = workflow_text.split("  workflow_dispatch:\n", maxsplit=1)[0]
