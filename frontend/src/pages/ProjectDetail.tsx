@@ -602,7 +602,19 @@ export default function ProjectDetail() {
 	const nexusIframeRef = useRef<HTMLIFrameElement>(null);
 	const iframeReadyRef = useRef(false);
 	const archiveSentRef = useRef(false);
-	
+	const [nexusIframeVisible, setNexusIframeVisible] = useState(false);
+
+	useEffect(() => {
+		const nexusUrl = `http://${window.location.hostname}:5175`;
+		const controller = new AbortController();
+		fetch(nexusUrl, { mode: 'no-cors', signal: controller.signal })
+			.then(() => setNexusIframeVisible(true))
+			.catch(() => {
+				/* unreachable, keep hidden */
+			});
+		return () => controller.abort();
+	}, []);
+
 	const sendArchiveToIframe = useCallback(async (projectId: string) => {
 		if (archiveSentRef.current) return;
 		archiveSentRef.current = true;
@@ -940,16 +952,18 @@ export default function ProjectDetail() {
 				</div>
 			</div>
 			{/* TODO: nexus-itemDetail 暂未就绪，后期开发完成后取消注释 */}
-			<div className="relative z-10">
-				<iframe
-					ref={nexusIframeRef}
-          src={`http://${window.location.hostname}:5175`}
-					title="Nexus-itemDetail"
-					className="w-full border-0 rounded-lg"
-					style={{ height: '600px' }}
-					onLoad={handleIframeLoad}
-				/>
-			</div>
+			{nexusIframeVisible && (
+				<div className="relative z-10">
+					<iframe
+						ref={nexusIframeRef}
+						src={`http://${window.location.hostname}:5175`}
+						title="Nexus-itemDetail"
+						className="w-full border-0 rounded-lg"
+						style={{ height: '600px' }}
+						onLoad={handleIframeLoad}
+					/>
+				</div>
+			)}
 			<div className="relative z-10 space-y-4 mt-6">
 				<ProjectDescriptionSection
 					description={project.description || ""}

@@ -2,7 +2,7 @@ import { Zap, Bot, Layers, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLogoVariant } from "@/shared/branding/useLogoVariant";
 import { useTheme } from "next-themes";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type HomeScanCard = {
   key: "static" | "agent" | "hybrid";
@@ -41,6 +41,18 @@ export function HomeScanCards() {
   const { logoSrc, cycleLogoVariant } = useLogoVariant();
   const { resolvedTheme } = useTheme();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [iframeVisible, setIframeVisible] = useState(false);
+
+  useEffect(() => {
+    const nexusUrl = `http://${window.location.hostname}:5174`;
+    const controller = new AbortController();
+    fetch(nexusUrl, { mode: 'no-cors', signal: controller.signal })
+      .then(() => setIframeVisible(true))
+      .catch(() => {
+        /* unreachable, keep hidden */
+      });
+    return () => controller.abort();
+  }, []);
 
   // 主题变化时通知 iframe
   useEffect(() => {
@@ -64,14 +76,16 @@ export function HomeScanCards() {
 
   return (
     <div className="min-h-[100dvh] relative overflow-hidden">
-      <div className="absolute inset-0 z-10">
-        <iframe
-          ref={iframeRef}
-          src={`http://${window.location.hostname}:5174`}
-          title="GitNexus"
-          className="w-full h-full border-0 pointer-events-auto"
-        />
-      </div>
+      {iframeVisible && (
+        <div className="absolute inset-0 z-10">
+          <iframe
+            ref={iframeRef}
+            src={`http://${window.location.hostname}:5174`}
+            title="GitNexus"
+            className="w-full h-full border-0 pointer-events-auto"
+          />
+        </div>
+      )}
 
       <div className="relative z-20 w-full max-w-[1200px] mx-auto px-6 text-center pointer-events-none min-h-[100dvh] flex flex-col">
         <div className="flex-1 flex flex-col items-center justify-center">
