@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import re
-import tempfile
 import threading
 import uuid
 from abc import ABC, abstractmethod
@@ -30,6 +29,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from app.services.json_safe import dump_json_safe, normalize_json_safe
+from app.services.agent.log_paths import (
+    get_agent_runs_fallback_task_log_dir,
+    get_agent_runs_task_log_dir,
+    sanitize_task_log_token,
+)
 
 from ..core.message import AgentMessage, MessageType, message_bus
 from ..core.registry import agent_registry
@@ -532,16 +536,11 @@ class BaseAgent(ABC):
 
     @staticmethod
     def _sanitize_log_token(value: str | None, default: str) -> str:
-        raw = str(value or "").strip().lower()
-        safe = re.sub(r"[^a-z0-9._-]+", "_", raw)
-        return safe or default
+        return sanitize_task_log_token(value, default)
 
     @classmethod
     def _resolve_task_log_dir(cls, task_id: str | None) -> Path:
-        safe_task_id = cls._sanitize_log_token(task_id, "no_task")
-        log_dir = Path(__file__).resolve().parents[4] / "log" / "agent_runs" / safe_task_id
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return log_dir
+        return get_agent_runs_task_log_dir(task_id, create=True)
 
     @classmethod
     def _resolve_trace_log_path(cls, identity: str, task_id: str | None) -> str:
@@ -569,8 +568,7 @@ class BaseAgent(ABC):
                 try:
                     file_handler = logging.FileHandler(target_file, encoding="utf-8")
                 except PermissionError:
-                    fallback_dir = Path(tempfile.gettempdir()) / "audittool-agent-runs" / safe_task
-                    fallback_dir.mkdir(parents=True, exist_ok=True)
+                    fallback_dir = get_agent_runs_fallback_task_log_dir(task_id, create=True)
                     target_file = str(fallback_dir / f"{safe_identity}.log")
                     file_handler = logging.FileHandler(target_file, encoding="utf-8")
                 file_handler.setLevel(logging.INFO)

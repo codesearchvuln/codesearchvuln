@@ -6,6 +6,7 @@
 import { apiClient } from "./serverClient";
 import { buildApiUrl } from "./apiBase";
 import {
+  buildLocalLogDownloadBaseName,
   buildLogDownloadBaseName,
   buildReportDownloadBaseName,
   resolveFilenameFromDisposition,
@@ -661,7 +662,7 @@ export async function downloadAgentReport(taskId: string, format: "markdown" | "
 
 export async function downloadAgentLogs(
   taskId: string,
-  format: "json" | "markdown" = "json",
+  format: "json" | "markdown" | "local_zip" = "json",
   options?: {
     taskName?: string | null;
   },
@@ -675,12 +676,16 @@ export async function downloadAgentLogs(
   const link = document.createElement("a");
   link.href = url;
 
-  const baseName = buildLogDownloadBaseName(
-    options?.taskName,
-    taskId.slice(0, 8),
-  );
+  const baseName =
+    format === "local_zip"
+      ? buildLocalLogDownloadBaseName(options?.taskName, taskId.slice(0, 8))
+      : buildLogDownloadBaseName(options?.taskName, taskId.slice(0, 8));
   const fallbackFilename =
-    format === "markdown" ? `${baseName}.md` : `${baseName}.json`;
+    format === "markdown"
+      ? `${baseName}.md`
+      : format === "local_zip"
+        ? `${baseName}.zip`
+        : `${baseName}.json`;
   const contentDisposition = response.headers["content-disposition"];
   const filename = resolveFilenameFromDisposition(
     contentDisposition,

@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import re
-import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -27,6 +26,11 @@ from app.models.analysis import (
     REAL_DATAFLOW_EVIDENCE_LIST_FIELDS,
     REAL_DATAFLOW_PLACEHOLDER_VALUES,
     REAL_DATAFLOW_SEMANTIC_LIST_FIELDS,
+)
+from app.services.agent.log_paths import (
+    get_verification_fallback_task_log_dir,
+    get_verification_task_log_dir,
+    sanitize_task_log_token,
 )
 from app.services.json_safe import dump_json_safe
 
@@ -594,24 +598,18 @@ class VerificationAgent(BaseAgent):
 
     @staticmethod
     def _sanitize_logger_identity(agent_name: str) -> str:
-        raw = str(agent_name or "verification").strip().lower()
-        safe = re.sub(r"[^a-z0-9._-]+", "_", raw)
-        return safe or "verification"
+        return sanitize_task_log_token(agent_name, "verification")
 
     @staticmethod
     def _resolve_trace_log_path(agent_name: str, task_id: str | None = None) -> str:
         safe = VerificationAgent._sanitize_logger_identity(agent_name)
-        safe_task = VerificationAgent._sanitize_logger_identity(task_id or "no_task")
-        log_dir = Path(__file__).resolve().parents[4] / "log" / "verification" / safe_task
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_dir = get_verification_task_log_dir(task_id, create=True)
         return str(log_dir / f"{safe}.log")
 
     @staticmethod
     def _resolve_fallback_trace_log_path(agent_name: str, task_id: str | None = None) -> str:
         safe = VerificationAgent._sanitize_logger_identity(agent_name)
-        safe_task = VerificationAgent._sanitize_logger_identity(task_id or "no_task")
-        log_dir = Path(tempfile.gettempdir()) / "vulhunter" / "verification" / safe_task
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_dir = get_verification_fallback_task_log_dir(task_id, create=True)
         return str(log_dir / f"{safe}.log")
 
     @classmethod

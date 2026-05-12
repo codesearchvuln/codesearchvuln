@@ -3894,7 +3894,7 @@ function AgentAuditPageContent() {
 	};
 
 	const handleExportLogs = useCallback(
-		async (format: "json" | "markdown") => {
+		async (format: "json" | "markdown" | "local_zip") => {
 			if (!task) {
 				toast.error("任务信息未加载，无法导出");
 				return;
@@ -3906,11 +3906,17 @@ function AgentAuditPageContent() {
 				toast.success(
 					format === "json"
 						? "活动日志已导出为 JSON"
-						: "活动日志已导出为 Markdown",
+						: format === "markdown"
+							? "活动日志已导出为 Markdown"
+							: "本地日志已导出为 ZIP",
 				);
 			} catch (error) {
 				console.error("Failed to export agent logs:", error);
-				toast.error("导出活动日志失败，请重试");
+				toast.error(
+					format === "local_zip"
+						? "导出本地日志失败，请重试"
+						: "导出活动日志失败，请重试",
+				);
 			}
 		},
 		[task],
@@ -4049,6 +4055,9 @@ function AgentAuditPageContent() {
 									</DropdownMenuItem>
 									<DropdownMenuItem onClick={() => handleExportLogs("markdown")}>
 										导出为 Markdown
+									</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => handleExportLogs("local_zip")}>
+										导出本地日志 ZIP
 									</DropdownMenuItem>
 									<DropdownMenuSeparator />
 									<DropdownMenuItem

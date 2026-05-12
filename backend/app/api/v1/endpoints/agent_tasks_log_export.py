@@ -7,7 +7,8 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from starlette.background import BackgroundTask
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -19,6 +20,10 @@ from app.models.user import User
 from app.services.agent_task_log_export import (
     build_agent_task_log_export_payload,
     render_agent_task_logs_markdown,
+)
+from app.services.agent_task_local_log_export import (
+    build_agent_task_local_log_archive,
+    cleanup_local_log_archive,
 )
 
 router = APIRouter()
@@ -54,10 +59,17 @@ def _build_log_download_filename(task: AgentTask, extension: str) -> str:
     return f"活动日志-{task_name}-{date_part}.{normalized_extension}"
 
 
+def _build_local_log_download_filename(task: AgentTask) -> str:
+    task_fallback = str(getattr(task, "id", "") or "task")[:8] or "task"
+    task_name = _sanitize_download_filename_segment(getattr(task, "name", None), task_fallback)
+    date_part = datetime.now().strftime("%Y-%m-%d")
+    return f"本地日志-{task_name}-{date_part}.zip"
+
+
 @router.get("/{task_id}/logs/export")
 async def export_agent_task_logs(
     task_id: str,
-    format: str = Query("json", pattern="^(json|markdown)$"),
+    format: str = Query("json", pattern="^(json|markdown|local_zip)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -70,6 +82,21 @@ async def export_agent_task_logs(
     project = await db.get(Project, task.project_id)
     if not project:
         raise HTTPException(status_code=403, detail="无权访问此任务")
+
+    if format == "local_zip":
+        try:
+            bundle = build_agent_task_local_log_archive(str(task.id))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="未找到任务本地日志") from exc
+        filename = _build_local_log_download_filename(task)
+        return FileResponse(
+            bundle.path,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": _build_download_content_disposition(filename),
+            },
+            background=BackgroundTask(cleanup_local_log_archive, bundle.path),
+        )
 
     result = await db.execute(
         select(AgentEvent)

@@ -43,6 +43,20 @@ export function buildLogDownloadBaseName(
   return `活动日志-${taskSegment}-${datePart}`;
 }
 
+export function buildLocalLogDownloadBaseName(
+  taskName: string | null | undefined,
+  fallback: string,
+  date = new Date(),
+): string {
+  const taskSegment = sanitizeFilenameSegment(taskName, fallback);
+  const datePart = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  return `本地日志-${taskSegment}-${datePart}`;
+}
+
 export function resolveFilenameFromDisposition(
   contentDisposition: string | undefined,
   fallback: string,
