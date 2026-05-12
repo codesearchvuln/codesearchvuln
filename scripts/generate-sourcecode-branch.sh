@@ -96,7 +96,7 @@ prune_public_tree() {
       \( -name 'docker-compose*.yml' -o -name '*Dockerfile*' \) \
       -delete
   fi
-  rm -f "$OUTPUT_DIR/Dockerfile"
+  rm -f "$OUTPUT_DIR/Dockerfile" "$OUTPUT_DIR/nexus-web/Dockerfile"
 
   [[ -f "$OUTPUT_DIR/scripts/setup-env.sh" ]] || die "missing required public script: scripts/setup-env.sh"
   mkdir -p "$OUTPUT_DIR/data"
@@ -1108,6 +1108,11 @@ validate_sourcecode_tree() {
     "frontend"
     "docker"
     "data"
+    "nexus-web"
+    "nexus-web/package.json"
+    "nexus-web/pnpm-lock.yaml"
+    "nexus-web/src"
+    "nexus-itemDetail"
     "docker-compose.yml"
     "Dockerfile"
     "README.md"
@@ -1130,9 +1135,11 @@ validate_sourcecode_tree() {
     "Makefile"
     "docker-compose.hybrid.yml"
     "docker-compose.full.yml"
+    "nexus-web/Dockerfile"
     "docker/backend.Dockerfile"
     "docker/backend.Dockerfile.dockerignore"
     "docker/frontend.Dockerfile"
+    "docker/nexus-web.Dockerfile"
     "scripts/build-frontend.sh"
     "scripts/compose-up-local-build.sh"
     "scripts/compose-up-with-fallback.bat"
