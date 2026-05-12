@@ -306,34 +306,6 @@ def build_agent_task_export_logs(
 
         if event_type == "heartbeat":
             continue
-        if event_type == "llm_observation" and metadata.get("deduped") is True:
-            continue
-        if event_type in {"thinking_start", "thinking_end", "thinking_token"}:
-            continue
-
-        if event_type.startswith("llm_") or event_type == "thinking":
-            thought = _sanitize_text(metadata.get("thought"))
-            content = thought or message
-            if not content:
-                continue
-            title = content if len(content) <= 100 else f"{content[:100]}..."
-            _append_log(
-                logs,
-                log_by_id,
-                {
-                    "id": f"log-{event.id}",
-                    "time": display_time,
-                    "eventTimestamp": base_detail["event_timestamp"],
-                    "type": "thinking",
-                    "phaseLabel": phase_label,
-                    "title": title,
-                    "content": content,
-                    "agentName": agent_name,
-                    "agentRawName": agent_raw_name,
-                    "detail": base_detail,
-                },
-            )
-            continue
 
         if event_type in {"tool_call", "tool_call_start"}:
             tool_name = _sanitize_text(event.tool_name or "未知") or "未知"

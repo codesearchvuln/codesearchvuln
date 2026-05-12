@@ -13,21 +13,10 @@ def test_truncate_payload_respects_2mb_limit():
     value, truncated = event_manager._truncate_payload(huge)
     assert truncated is True
     assert len(value) == event_manager.MAX_EVENT_PAYLOAD_CHARS
-
-
-def test_hidden_thinking_event_type_detection():
-    manager = event_manager.EventManager()
-    assert manager._is_hidden_thinking_event("thinking_token") is True
-    assert manager._is_hidden_thinking_event("thinking") is True
-    assert manager._is_hidden_thinking_event("llm_action") is True
-    assert manager._is_hidden_thinking_event("llm_observation") is True
-    assert manager._is_hidden_thinking_event("tool_result") is False
-
-
 @pytest.mark.asyncio
-async def test_add_event_drops_thinking_events_from_queue_and_db(monkeypatch):
+async def test_add_event_keeps_thinking_events_in_queue_and_db():
     manager = event_manager.EventManager(db_session_factory=True)
-    task_id = "task-hidden"
+    task_id = "task-thinking"
     manager.create_queue(task_id)
 
     saved_events = []
@@ -41,13 +30,14 @@ async def test_add_event_drops_thinking_events_from_queue_and_db(monkeypatch):
         task_id=task_id,
         event_type="llm_thought",
         sequence=1,
-        message="should be hidden",
+        message="should be kept",
         metadata={"agent_name": "Recon"},
     )
 
     queue = manager._event_queues[task_id]
-    assert queue.qsize() == 0
-    assert saved_events == []
+    assert queue.qsize() == 1
+    assert len(saved_events) == 1
+    assert saved_events[0]["event_type"] == "llm_thought"
 
 
 @pytest.mark.asyncio

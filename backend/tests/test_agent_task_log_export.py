@@ -94,6 +94,58 @@ def test_build_agent_task_log_export_payload_merges_tool_events():
     assert "已完成：read_file" in markdown
 
 
+def test_build_agent_task_log_export_payload_keeps_thinking_and_llm_events():
+    started_at = datetime(2026, 4, 21, 9, 0, 0, tzinfo=UTC)
+    task = AgentTask(
+        id="task-export-thinking",
+        project_id="project-1",
+        name="[agent] Demo Thinking",
+        description="日志导出恢复测试",
+        status="completed",
+        current_phase="analysis",
+        current_step="done",
+        started_at=started_at,
+    )
+    events = [
+        AgentEvent(
+            id="event-thinking-start",
+            task_id=task.id,
+            event_type="thinking_start",
+            phase="analysis",
+            message="开始思考",
+            sequence=1,
+            created_at=started_at + timedelta(seconds=1),
+        ),
+        AgentEvent(
+            id="event-llm-thought",
+            task_id=task.id,
+            event_type="llm_thought",
+            phase="analysis",
+            message="LLM 思考内容",
+            event_metadata={"thought": "完整思考内容", "agent_name": "AnalysisAgent"},
+            sequence=2,
+            created_at=started_at + timedelta(seconds=2),
+        ),
+        AgentEvent(
+            id="event-llm-observation",
+            task_id=task.id,
+            event_type="llm_observation",
+            phase="analysis",
+            message="观察结果",
+            event_metadata={"deduped": True, "agent_name": "AnalysisAgent"},
+            sequence=3,
+            created_at=started_at + timedelta(seconds=3),
+        ),
+    ]
+
+    payload = build_agent_task_log_export_payload(task, events)
+    titles = [item["title"] for item in payload["logs"]]
+
+    assert "开始思考" in titles
+    assert "LLM 思考内容" in titles
+    assert "观察结果" in titles
+
+
 @pytest.mark.asyncio
 async def test_export_agent_task_logs_uses_task_based_download_filename():
     started_at = datetime(2026, 4, 21, 9, 0, 0, tzinfo=UTC)
