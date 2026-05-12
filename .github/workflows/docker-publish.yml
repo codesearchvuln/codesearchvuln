@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: true
+      build_nexus_web:
+        description: '构建 nexus-web 独立容器镜像'
+        required: false
+        type: boolean
+        default: true
       build_backend:
         description: '构建后端镜像'
         required: false
@@ -78,6 +83,7 @@ jobs:
     with:
       tag: ${{ inputs.tag }}
       build_frontend: ${{ inputs.build_frontend }}
+      build_nexus_web: ${{ inputs.build_nexus_web }}
       build_backend: ${{ inputs.build_backend }}
       build_yasa_runner: ${{ inputs.build_yasa_runner }}
       build_opengrep_runner: ${{ inputs.build_opengrep_runner }}
