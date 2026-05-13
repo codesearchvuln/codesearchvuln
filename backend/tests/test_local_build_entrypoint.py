@@ -13,6 +13,17 @@ def test_backend_dockerfile_derives_docker_cli_image_from_selected_mirror() -> N
     assert "ARG DOCKER_CLI_IMAGE=docker.m.daocloud.io/docker:cli" not in dockerfile_text
 
 
+def test_backend_runtime_uses_unar_instead_of_unrar_free_for_rar_archives() -> None:
+    dockerfile_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")
+    template_text = (
+        REPO_ROOT / "scripts" / "sourcecode-templates" / "Dockerfile"
+    ).read_text(encoding="utf-8")
+
+    for text in (dockerfile_text, template_text):
+        assert "  unar \\" in text
+        assert "unrar-free" not in text
+
+
 def test_backend_dockerfile_uses_probe_ranked_pypi_before_configured_fallbacks() -> None:
     import re
     dockerfile_text = (REPO_ROOT / "docker" / "backend.Dockerfile").read_text(encoding="utf-8")

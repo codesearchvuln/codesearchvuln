@@ -307,7 +307,7 @@ RUN --mount=type=cache,id=vulhunter-backend-runtime-apt-lists,target=/var/lib/ap
   libgdk-pixbuf-2.0-0 \
   libglib2.0-0 \
   shared-mime-info \
-  unrar-free \
+  unar \
   ripgrep"; \
   if [ "${BACKEND_INSTALL_CJK_FONTS}" = "1" ]; then \
   RUNTIME_PACKAGES="${RUNTIME_PACKAGES} fonts-noto-cjk"; \
