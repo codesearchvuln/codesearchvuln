@@ -1,10 +1,13 @@
 import io
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from app.services.upload.compression_handlers import RarCompressionStrategy
 from app.services.upload.compression_factory import CompressionStrategyFactory
 from app.services.upload.upload_manager import UploadManager
 
@@ -81,3 +84,75 @@ def test_upload_manager_preview_reports_remaining_count(tmp_path: Path):
     assert success is True
     assert error is None
     assert file_list[-1]["path"] == "... 还有 3 个文件"
+
+
+def test_upload_manager_validate_file_uses_detailed_strategy_error(tmp_path: Path, monkeypatch):
+    archive_path = tmp_path / "sample.rar"
+    archive_path.write_bytes(b"rar")
+
+    monkeypatch.setattr(
+        CompressionStrategyFactory,
+        "get_strategy",
+        lambda _path: SimpleNamespace(
+            validate_with_error=lambda _file_path: (
+                False,
+                "RAR 验证失败：缺少系统解压工具，请在运行环境安装以下任一工具：unrar, unar, 7z, 7zz, bsdtar",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        CompressionStrategyFactory,
+        "is_supported",
+        lambda _path: True,
+    )
+
+    is_valid, error = UploadManager.validate_file(str(archive_path))
+
+    assert is_valid is False
+    assert error == (
+        "RAR 验证失败：缺少系统解压工具，请在运行环境安装以下任一工具："
+        "unrar, unar, 7z, 7zz, bsdtar"
+    )
+
+
+def test_rar_strategy_validate_reports_missing_backend_tool(tmp_path: Path, monkeypatch):
+    archive_path = tmp_path / "sample.rar"
+    archive_path.write_bytes(b"not-a-real-rar")
+
+    strategy = RarCompressionStrategy()
+
+    class DummyRarCannotExec(Exception):
+        pass
+
+    class DummyRarFile:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def testrar(self):
+            raise DummyRarCannotExec("Cannot find working tool")
+
+    fake_rarfile = SimpleNamespace(
+        RarFile=DummyRarFile,
+        RarCannotExec=DummyRarCannotExec,
+        PasswordRequired=type("PasswordRequired", (Exception,), {}),
+        RarWrongPassword=type("RarWrongPassword", (Exception,), {}),
+        NeedFirstVolume=type("NeedFirstVolume", (Exception,), {}),
+        RarCRCError=type("RarCRCError", (Exception,), {}),
+        BadRarFile=type("BadRarFile", (Exception,), {}),
+        NotRarFile=type("NotRarFile", (Exception,), {}),
+    )
+    monkeypatch.setitem(sys.modules, "rarfile", fake_rarfile)
+
+    is_valid, error = strategy.validate_with_error(str(archive_path))
+
+    assert is_valid is False
+    assert error == (
+        "RAR 验证失败：缺少系统解压工具，请在运行环境安装以下任一工具："
+        "unrar, unar, 7z, 7zz, bsdtar"
+    )

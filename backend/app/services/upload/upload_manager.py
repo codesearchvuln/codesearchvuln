@@ -49,8 +49,10 @@ class UploadManager:
 
         # 验证文件完整性
         strategy = CompressionStrategyFactory.get_strategy(file_path)
-        if strategy and not strategy.validate(file_path):
-            return False, "文件损坏或不完整"
+        if strategy:
+            is_valid, error = strategy.validate_with_error(file_path)
+            if not is_valid:
+                return False, error or "文件损坏或不完整"
 
         return True, None
 

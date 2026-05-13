@@ -275,6 +275,8 @@ class SevenZCompressionStrategy(CompressionStrategy):
 class RarCompressionStrategy(CompressionStrategy):
     """RAR 格式处理器"""
 
+    _RAR_BACKEND_TOOLS = ("unrar", "unar", "7z", "7zz", "bsdtar")
+
     @property
     def supported_extensions(self) -> list[str]:
         return [".rar"]
@@ -297,20 +299,25 @@ class RarCompressionStrategy(CompressionStrategy):
                     if not member.is_dir():
                         rar_ref.extract(member, extract_to)
                         extracted_files.append(member.filename)
-        except Exception as e:
-            raise ValueError(f"无效的 RAR 文件: {str(e)}") from e
+        except Exception as exc:
+            raise ValueError(self._build_rar_error_message(exc, action="解压")) from exc
 
         return extracted_files
 
     def validate(self, file_path: str) -> bool:
         """验证 RAR 文件"""
+        return self.validate_with_error(file_path)[0]
+
+    def validate_with_error(self, file_path: str) -> tuple[bool, str | None]:
+        """验证 RAR 文件并返回明确的失败原因。"""
         try:
             import rarfile
 
             with rarfile.RarFile(file_path, "r") as rar_ref:
-                return rar_ref.testrar() is None
-        except Exception:
-            return False
+                rar_ref.testrar()
+            return True, None
+        except Exception as exc:
+            return False, self._build_rar_error_message(exc, action="验证")
 
     def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """获取 RAR 内文件列表"""
@@ -328,3 +335,28 @@ class RarCompressionStrategy(CompressionStrategy):
         except Exception as e:
             raise ValueError(f"读取 RAR 文件失败: {str(e)}") from e
         return files
+
+    def _build_rar_error_message(self, exc: Exception, action: str) -> str:
+        import rarfile
+
+        detail = str(exc).strip()
+        tool_list = ", ".join(self._RAR_BACKEND_TOOLS)
+
+        if isinstance(exc, rarfile.RarCannotExec):
+            return (
+                f"RAR {action}失败：缺少系统解压工具，请在运行环境安装以下任一工具："
+                f"{tool_list}"
+            )
+        if isinstance(exc, rarfile.PasswordRequired):
+            return f"RAR {action}失败：压缩包已加密，需要密码"
+        if isinstance(exc, rarfile.RarWrongPassword):
+            return f"RAR {action}失败：密码错误或压缩包已加密"
+        if isinstance(exc, rarfile.NeedFirstVolume):
+            return f"RAR {action}失败：分卷压缩包不完整，缺少首卷或其它分卷"
+        if isinstance(exc, rarfile.RarCRCError):
+            return f"RAR {action}失败：CRC 校验失败，文件可能损坏"
+        if isinstance(exc, (rarfile.BadRarFile, rarfile.NotRarFile)):
+            return f"RAR {action}失败：文件不是有效的 RAR 压缩包"
+        if detail:
+            return f"RAR {action}失败：{detail}"
+        return f"RAR {action}失败：未知错误"

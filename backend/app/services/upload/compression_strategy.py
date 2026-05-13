@@ -36,6 +36,16 @@ class CompressionStrategy(ABC):
         """
         pass
 
+    def validate_with_error(self, file_path: str) -> tuple[bool, str | None]:
+        """
+        验证文件完整性并返回可用于接口响应的错误信息。
+
+        默认实现保持兼容旧策略：仅返回布尔结果。
+        需要更细错误信息的策略可覆盖此方法。
+        """
+        is_valid = self.validate(file_path)
+        return is_valid, None if is_valid else "文件损坏或不完整"
+
     @abstractmethod
     def get_file_list(self, file_path: str) -> list[dict[str, Any]]:
         """
