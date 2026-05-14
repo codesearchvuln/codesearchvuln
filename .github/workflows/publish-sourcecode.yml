@@ -1,0 +1,198 @@
+name: Publish Sourcecode Branch
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '要发布的分支或 commit SHA（默认 main，适配默认分支为 release 时手动构建 main/sourcecode）'
+        required: false
+        type: string
+        default: main
+      skip_smoke_test:
+        description: '跳过 sourcecode smoke test（加速手动发布）'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: publish-sourcecode-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish-sourcecode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Generate sourcecode tree
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/sourcecode-tree
+        run: |
+          set -euo pipefail
+
+          bash ./scripts/generate-sourcecode-branch.sh \
+            --output "${OUTPUT_DIR}" \
+            --validate
+
+      - name: Detect sourcecode changes
+        id: detect_changes
+        env:
+          SOURCECODE_DIR: ${{ runner.temp }}/sourcecode-tree
+        run: |
+          set -euo pipefail
+
+          COMPARE_DIR="${RUNNER_TEMP}/sourcecode-compare"
+
+          git_tree_hash_for_dir() {
+            local source_dir="$1"
+            local repo_dir="$2"
+
+            rm -rf "${repo_dir}"
+            mkdir -p "${repo_dir}"
+            git init -q "${repo_dir}"
+
+            if [[ -d "${source_dir}" ]]; then
+              cp -a "${source_dir}/." "${repo_dir}/"
+            fi
+
+            git -C "${repo_dir}" add -A
+            git -C "${repo_dir}" write-tree
+          }
+
+          candidate_tree="$(git_tree_hash_for_dir "${SOURCECODE_DIR}" "${COMPARE_DIR}")"
+          echo "candidate_tree=${candidate_tree}" >> "$GITHUB_OUTPUT"
+
+          has_changes=true
+          if git ls-remote --exit-code --heads origin sourcecode >/dev/null 2>&1; then
+            git fetch --force origin sourcecode:refs/remotes/origin/sourcecode
+            remote_tree="$(git rev-parse refs/remotes/origin/sourcecode^{tree})"
+            if [[ "${candidate_tree}" == "${remote_tree}" ]]; then
+              has_changes=false
+              echo "Sourcecode branch is already up to date."
+            fi
+          fi
+          echo "has_changes=${has_changes}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test sourcecode build
+        if: steps.detect_changes.outputs.has_changes == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.skip_smoke_test)
+        working-directory: ${{ runner.temp }}/sourcecode-tree
+        env:
+          VULHUNTER_SOURCECODE_PROJECT_NAME: vulhunter-sourcecode-smoke
+          # CI runs on GitHub-hosted runners — use Docker Hub directly instead
+          # of China-region mirrors that are unreachable from GitHub infra.
+          DOCKERHUB_LIBRARY_MIRROR: docker.io/library
+          FRONTEND_NPM_REGISTRY: https://registry.npmjs.org
+          FRONTEND_NPM_REGISTRY_FALLBACK: https://registry.npmjs.org
+          BACKEND_APT_MIRROR_PRIMARY: deb.debian.org
+          BACKEND_APT_SECURITY_PRIMARY: security.debian.org
+          BACKEND_APT_MIRROR_FALLBACK: deb.debian.org
+          BACKEND_APT_SECURITY_FALLBACK: security.debian.org
+          BACKEND_PYPI_INDEX_PRIMARY: https://pypi.org/simple
+          BACKEND_PYPI_INDEX_FALLBACK: https://pypi.org/simple
+          BACKEND_PYPI_INDEX_CANDIDATES: https://pypi.org/simple
+        run: |
+          set -euo pipefail
+
+          export DOCKER_SOCKET_PATH="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+          if [[ -S "${DOCKER_SOCKET_PATH}" ]]; then
+            export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+          fi
+
+          export RUNNER_PREFLIGHT_ENABLED=false
+
+          compose_cmd=(
+            docker compose
+            -f docker-compose.yml
+            -p "${VULHUNTER_SOURCECODE_PROJECT_NAME}"
+          )
+
+          dump_debug() {
+            "${compose_cmd[@]}" ps || true
+            "${compose_cmd[@]}" logs --tail=200 db redis backend nexus-web || true
+          }
+
+          cleanup() {
+            "${compose_cmd[@]}" down -v || true
+          }
+          trap cleanup EXIT
+
+          # Phase 1: verify all images build successfully.
+          if ! "${compose_cmd[@]}" build; then
+            echo "::error::Sourcecode full build failed: one or more images did not build."
+            exit 1
+          fi
+
+          # Phase 2: bring up all services, then wait for the long-running ones
+          # to become healthy.  One-shot init containers (scan-workspace-init,
+          # backend-uploads-init, db-bootstrap) exit after completing their work
+          # and cause --wait to report failure, so we start everything first and
+          # then poll only the persistent services.
+          "${compose_cmd[@]}" up -d
+
+          healthy_services=(db redis backend frontend nexus-web)
+          deadline=$((SECONDS + 300))
+          while true; do
+            all_healthy=true
+            for svc in "${healthy_services[@]}"; do
+              status="$("${compose_cmd[@]}" ps --format '{{.Health}}' "${svc}" 2>/dev/null || echo "")"
+              case "${status}" in
+                healthy|"") ;;  # healthy or no healthcheck defined
+                *) all_healthy=false; break ;;
+              esac
+            done
+            if [[ "${all_healthy}" == "true" ]]; then
+              echo "All core services are healthy."
+              break
+            fi
+            if (( SECONDS >= deadline )); then
+              dump_debug
+              echo "::error::Sourcecode smoke test failed: core services did not become healthy within 300s."
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Publish sourcecode branch
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        env:
+          SOURCECODE_DIR: ${{ runner.temp }}/sourcecode-tree
+        run: |
+          set -euo pipefail
+
+          PUBLISH_DIR="${RUNNER_TEMP}/sourcecode-publish"
+          git worktree add --detach --force "${PUBLISH_DIR}" HEAD
+
+          cleanup() {
+            git worktree remove --force "${PUBLISH_DIR}" || true
+          }
+          trap cleanup EXIT
+
+          cd "${PUBLISH_DIR}"
+          git checkout --orphan "sourcecode-publish-${GITHUB_RUN_ID}"
+
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "${SOURCECODE_DIR}/." .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+
+          git commit -m "chore: refresh sourcecode branch snapshot"
+          git push --force origin HEAD:sourcecode
