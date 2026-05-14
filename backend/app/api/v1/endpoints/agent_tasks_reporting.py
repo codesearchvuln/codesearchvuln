@@ -1188,6 +1188,45 @@ def _strip_finding_export_noise(markdown_text: str | None) -> str:
     return cleaned.strip()
 
 
+def _renumber_markdown_heading_sequence(
+    markdown_text: str | None,
+    *,
+    heading_level: int = 2,
+) -> str:
+    content = _normalize_optional_text(markdown_text)
+    if not content:
+        return ""
+
+    lines = content.split("\n")
+    in_code_block = False
+    heading_prefix = "#" * max(1, heading_level)
+    numbered_heading_re = re.compile(
+        rf"^({re.escape(heading_prefix)})\s+(\d+)(?:[\.、]\s+|\s+)(.+?)\s*$"
+    )
+
+    next_index: int | None = None
+    for index, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+
+        matched = numbered_heading_re.match(stripped)
+        if not matched:
+            continue
+
+        current_index = int(matched.group(2))
+        if next_index is None:
+            next_index = current_index
+        title = matched.group(3).strip()
+        lines[index] = f"{heading_prefix} {next_index}. {title}"
+        next_index += 1
+
+    return "\n".join(lines).strip()
+
+
 def _build_finding_markdown_report(
     *,
     task: AgentTask,
@@ -1909,6 +1948,10 @@ def _build_task_export_markdown(
                 level_offset=embedded_finding_heading_offset,
             )
             finding_report = _strip_finding_export_noise(finding_report)
+            finding_report = _renumber_markdown_heading_sequence(
+                finding_report,
+                heading_level=finding_heading_level + 1,
+            )
             finding_report = _strip_report_export_footer(finding_report)
             finding_title = (
                 report_descriptions.get(str(getattr(finding_row, "id", "") or ""), {}).get("display_title")
@@ -2603,6 +2646,10 @@ async def get_finding_report(
         )
     stored_report = _strip_hidden_verification_evidence_sections(
         _normalize_optional_text(finding_data.get("report"))
+    )
+    stored_report = _renumber_markdown_heading_sequence(
+        stored_report,
+        heading_level=2,
     )
     finding_data["report"] = stored_report or None
 

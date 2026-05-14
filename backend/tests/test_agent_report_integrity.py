@@ -454,6 +454,72 @@ def test_strip_finding_export_noise_removes_empty_sections():
     assert "## 修复建议" in cleaned
 
 
+def test_renumber_markdown_heading_sequence_closes_gaps_after_cleanup():
+    markdown = """##### 5. 代码证据
+
+代码证据正文
+
+##### 6. 调用链
+
+调用链正文
+
+##### 8. 业务影响
+
+业务影响正文
+
+##### 9. 修复建议
+
+修复建议正文
+"""
+
+    renumbered = reporting_endpoint._renumber_markdown_heading_sequence(
+        markdown,
+        heading_level=5,
+    )
+
+    assert "##### 5. 代码证据" in renumbered
+    assert "##### 6. 调用链" in renumbered
+    assert "##### 7. 业务影响" in renumbered
+    assert "##### 8. 修复建议" in renumbered
+    assert "##### 9. 修复建议" not in renumbered
+
+
+def test_build_task_export_markdown_renumbers_remaining_numbered_sections():
+    task = _make_task(task_id="task-1", report="项目报告正文")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-legacy",
+        title="Legacy Numbered Finding",
+        report=(
+            "# 漏洞报告：Legacy Numbered Finding\n\n"
+            "## 5. 代码证据\n\n"
+            "代码证据正文\n\n"
+            "## 6. 调用链\n\n"
+            "调用链正文\n\n"
+            "## 8. 业务影响\n\n"
+            "业务影响正文\n\n"
+            "## 9. 修复建议\n\n"
+            "修复建议正文\n"
+        ),
+    )
+
+    markdown = reporting_endpoint._build_task_export_markdown(
+        task=task,
+        project=project,
+        findings=[finding],
+        report_descriptions={},
+        export_statuses={"finding-legacy": reporting_endpoint.FindingStatus.VERIFIED},
+        project_report_fallback="# 项目风险评估报告：Demo\n\n项目报告正文",
+        export_options=reporting_endpoint.DEFAULT_REPORT_EXPORT_OPTIONS,
+    )
+
+    assert "\n##### 5. 代码证据\n" in markdown
+    assert "\n##### 6. 调用链\n" in markdown
+    assert "\n##### 7. 业务影响\n" in markdown
+    assert "\n##### 8. 修复建议\n" in markdown
+    assert "\n##### 9. 修复建议\n" not in markdown
+
+
 def test_markdown_to_html_unescapes_code_span_underscores():
     html = reporting_endpoint._markdown_to_html("- **漏洞类型:** `memory\\_corruption`")
 
@@ -1102,6 +1168,45 @@ async def test_get_finding_report_strips_hidden_verification_evidence_section_fr
     assert "## 验证证据" not in body
     assert "verifier=Verification" not in body
     assert "## 修复建议" in body
+
+
+@pytest.mark.asyncio
+async def test_get_finding_report_renumbers_stored_report_numbered_sections():
+    task = _make_task(task_id="task-1")
+    project = SimpleNamespace(id="project-1", name="Demo")
+    finding = _make_finding(
+        id="finding-1",
+        report=(
+            "# 漏洞报告：Legacy Numbered Finding\n\n"
+            "## 5. 代码证据\n\n"
+            "代码证据正文\n\n"
+            "## 6. 调用链\n\n"
+            "调用链正文\n\n"
+            "## 8. 业务影响\n\n"
+            "业务影响正文\n\n"
+            "## 9. 修复建议\n\n"
+            "修复建议正文"
+        ),
+    )
+
+    db = AsyncMock()
+    db.get = AsyncMock(side_effect=[task, project])
+    db.execute = AsyncMock(return_value=_ScalarListResult([finding]))
+
+    response = await reporting_endpoint.get_finding_report(
+        task_id="task-1",
+        finding_id="finding-1",
+        format="markdown",
+        db=db,
+        current_user=SimpleNamespace(id="user-1"),
+    )
+
+    body = response.body.decode("utf-8")
+    assert "## 5. 代码证据" in body
+    assert "## 6. 调用链" in body
+    assert "## 7. 业务影响" in body
+    assert "## 8. 修复建议" in body
+    assert "## 9. 修复建议" not in body
 
 
 @pytest.mark.asyncio
