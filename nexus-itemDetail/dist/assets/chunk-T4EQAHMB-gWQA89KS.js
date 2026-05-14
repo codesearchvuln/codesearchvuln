@@ -1,0 +1,15 @@
+import { m as a, U as g, p as s } from "./index-CRtis_Gf.js";
+var m = a((t, i, e, o) => {
+  t.attr("class", e);
+  let { width: h, height: r, x: w, y: x } = n(t, i);
+  g(t, r, h, o);
+  let d = $(w, x, h, r, i);
+  t.attr("viewBox", d), s.debug(`viewBox configured: ${d} with padding: ${i}`);
+}, "setupViewPortForSVG"), n = a((t, i) => {
+  var _a;
+  let e = ((_a = t.node()) == null ? void 0 : _a.getBBox()) || { width: 0, height: 0, x: 0, y: 0 };
+  return { width: e.width + i * 2, height: e.height + i * 2, x: e.x, y: e.y };
+}, "calculateDimensionsWithPadding"), $ = a((t, i, e, o, h) => `${t - h} ${i - h} ${e} ${o}`, "createViewBox");
+export {
+  m as y
+};
