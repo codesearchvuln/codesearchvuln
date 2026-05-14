@@ -639,3 +639,62 @@ async def test_save_findings_second_pass_persists_report_updates(db, test_agent_
     persisted = rows[0]
     assert persisted.report == "# final markdown report"
     assert persisted.description == "report corrected description"
+
+
+@pytest.mark.asyncio
+async def test_save_findings_marks_not_vulnerable_when_title_says_no_real_vulnerability(
+    db,
+    test_agent_task,
+    tmp_path: Path,
+):
+    project_root = tmp_path
+    source_file = project_root / "utilities" / "magick.c"
+    source_file.parent.mkdir(parents=True, exist_ok=True)
+    source_file.write_text(
+        "void demo(void) {\n"
+        "    MagickCoreGenesis();\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    finding = {
+        "finding_identity": "fid:no-real-vuln-title",
+        "title": "utilities/magick.c中MagickCoreGenesis函数调用未发现真实漏洞",
+        "file_path": "utilities/magick.c",
+        "line_start": 2,
+        "line_end": 2,
+        "function_name": "demo",
+        "vulnerability_type": "buffer_overflow",
+        "severity": "low",
+        "description": "标题已明确说明未发现真实漏洞。",
+        "verdict": "confirmed",
+        "confidence": 0.9,
+        "reachability": "reachable",
+        "verification_evidence": "upstream payload accidentally marked it as confirmed",
+        "verification_result": {
+            "authenticity": "confirmed",
+            "verdict": "confirmed",
+            "confidence": 0.9,
+            "reachability": "reachable",
+            "verification_evidence": "upstream payload accidentally marked it as confirmed",
+        },
+    }
+
+    saved_count = await _save_findings(
+        db,
+        test_agent_task.id,
+        [finding],
+        project_root=str(project_root),
+    )
+    assert saved_count == 1
+
+    result = await db.execute(
+        select(AgentFinding).where(AgentFinding.finding_identity == "fid:no-real-vuln-title")
+    )
+    persisted = result.scalar_one()
+    assert persisted.status == "false_positive"
+    assert persisted.verdict == "false_positive"
+    assert persisted.is_verified is False
+    assert persisted.verification_result["authenticity"] == "false_positive"
+    assert persisted.verification_result["verdict"] == "false_positive"
+    assert persisted.verification_result["is_vulnerable"] is False

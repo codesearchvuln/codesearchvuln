@@ -426,6 +426,13 @@ def _normalize_authenticity_verdict(
     return "likely"
 
 
+def _title_indicates_not_vulnerable(title: Any) -> bool:
+    normalized = _normalize_optional_text(title)
+    if not normalized:
+        return False
+    return "未发现真实漏洞" in normalized or "未发现" in normalized
+
+
 def _normalize_verification_status(
     status_value: Any,
     verdict: str | None,
@@ -982,6 +989,8 @@ async def _save_findings(
             if authenticity not in {"confirmed", "likely", "uncertain", "false_positive"}:
                 mark_filtered("missing_verification_result", finding)
                 continue
+            if _title_indicates_not_vulnerable(finding.get("title")):
+                authenticity = "false_positive"
 
             status_raw = (
                 finding.get("status")
@@ -1052,6 +1061,7 @@ async def _save_findings(
                 "reachability": reachability,
                 "verification_stage_completed": verification_stage_completed,
                 "verification_evidence": verification_details_text,
+                "is_vulnerable": authenticity in {"confirmed", "likely"},
             }
             verification_todo_id = _normalize_optional_text(
                 finding.get("verification_todo_id")
