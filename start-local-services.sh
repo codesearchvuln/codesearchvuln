@@ -12,7 +12,6 @@ DRY_RUN=false
 DO_PULL=true
 DO_BUILD=true
 DO_UP=true
-CHECK_NEXUS_DIST=true
 NO_PREFLIGHT=false
 EXTRA_UP_ARGS=()
 
@@ -49,7 +48,6 @@ Options:
   --no-build         Skip local build phase.
   --no-up            Prepare only; do not start services.
   --no-preflight     Set RUNNER_PREFLIGHT_ENABLED=false and RUNNER_PREFLIGHT_STRICT=false for this run.
-  --skip-nexus-check Do not require nexus-web/dist and nexus-itemDetail/dist.
   -h, --help         Show this help.
 
 Examples:
@@ -141,9 +139,6 @@ parse_args() {
       --no-preflight)
         NO_PREFLIGHT=true
         ;;
-      --skip-nexus-check)
-        CHECK_NEXUS_DIST=false
-        ;;
       -h|--help)
         usage
         exit 0
@@ -181,17 +176,6 @@ assert_no_runner_scanner_services() {
   done
 }
 
-assert_nexus_dist() {
-  local nexus_web="$REPO_ROOT/nexus-web/dist"
-  local nexus_item="$REPO_ROOT/nexus-itemDetail/dist"
-  if [[ ! -d "$nexus_web" || ! -d "$nexus_item" ]]; then
-    fail "missing Nexus static bundles; run frontend artifact build first or pass --skip-nexus-check"
-  fi
-  log_info "Verified Nexus static bundles are available:"
-  log_info "  nexus-web/dist -> /app/public/nexus"
-  log_info "  nexus-itemDetail/dist -> /app/public/nexus-item-detail"
-}
-
 run_cmd() {
   if [[ "$DRY_RUN" == "true" ]]; then
     printf '[DRY-RUN]'
@@ -221,6 +205,50 @@ compose_files_for_mode() {
 
 pull_services_for_mode() {
   PULL_SERVICES=("${SUPPORT_PULL_SERVICES[@]}")
+}
+
+build_backend_image() {
+  local -a cmd=(
+    docker build
+    -t vulhunter/backend-local:latest
+    -f "$REPO_ROOT/docker/backend.Dockerfile"
+    --target runtime-plain
+    --build-arg "DOCKERHUB_LIBRARY_MIRROR=$DOCKERHUB_LIBRARY_MIRROR"
+    --build-arg "UV_IMAGE=${UV_IMAGE:-m.daocloud.io/ghcr.io/astral-sh/uv:latest}"
+    --build-arg "DOCKER_CLI_IMAGE=${DOCKER_CLI_IMAGE:-docker:cli}"
+    --build-arg "BACKEND_APT_MIRROR_PRIMARY=${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}"
+    --build-arg "BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}"
+    --build-arg "BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}"
+    --build-arg "BACKEND_APT_SECURITY_FALLBACK=${BACKEND_APT_SECURITY_FALLBACK:-security.debian.org}"
+    --build-arg "BACKEND_PYPI_INDEX_PRIMARY=$BACKEND_PYPI_INDEX_PRIMARY"
+    --build-arg "BACKEND_PYPI_INDEX_FALLBACK=$BACKEND_PYPI_INDEX_FALLBACK"
+    --build-arg "BACKEND_PYPI_INDEX_CANDIDATES=$BACKEND_PYPI_INDEX_CANDIDATES"
+    --build-arg "BACKEND_UV_HTTP_TIMEOUT_SECONDS=$BACKEND_UV_HTTP_TIMEOUT_SECONDS"
+    --build-arg "BACKEND_UV_STEP_TIMEOUT_SECONDS=$BACKEND_UV_STEP_TIMEOUT_SECONDS"
+    --build-arg "BACKEND_UV_ATTEMPTS_PER_INDEX=$BACKEND_UV_ATTEMPTS_PER_INDEX"
+    --build-arg "BACKEND_UV_CONCURRENT_DOWNLOADS=$BACKEND_UV_CONCURRENT_DOWNLOADS"
+    --build-arg "BACKEND_UV_CONCURRENT_INSTALLS=$BACKEND_UV_CONCURRENT_INSTALLS"
+    --build-arg "BACKEND_INSTALL_CJK_FONTS=${BACKEND_INSTALL_CJK_FONTS:-1}"
+    "$REPO_ROOT"
+  )
+  run_cmd "${cmd[@]}"
+}
+
+build_frontend_image() {
+  local -a cmd=(
+    docker build
+    -t vulhunter/frontend-local:latest
+    -f "$REPO_ROOT/docker/frontend.Dockerfile"
+    --target dev
+    --build-arg "DOCKERHUB_LIBRARY_MIRROR=$DOCKERHUB_LIBRARY_MIRROR"
+    --build-arg "FRONTEND_NPM_REGISTRY=${FRONTEND_NPM_REGISTRY:-https://registry.npmmirror.com}"
+    --build-arg "FRONTEND_NPM_REGISTRY_FALLBACK=${FRONTEND_NPM_REGISTRY_FALLBACK:-https://registry.npmjs.org}"
+    --build-arg "PNPM_VERSION=${PNPM_VERSION:-9.15.4}"
+    --build-arg "BUILD_WEAK_NETWORK=${BUILD_WEAK_NETWORK:-false}"
+    --build-arg "BUILD_ARCH=${BUILD_ARCH:-}"
+    "$REPO_ROOT/frontend"
+  )
+  run_cmd "${cmd[@]}"
 }
 
 parse_args "$@"
@@ -280,10 +308,6 @@ else
   log_info "Remote runner/scanner/sandbox image preflight: enabled; backend may pull configured preflight images"
 fi
 
-if [[ "$CHECK_NEXUS_DIST" == "true" ]]; then
-  assert_nexus_dist
-fi
-
 if [[ "$DRY_RUN" != "true" ]]; then
   load_container_socket_env
   load_container_socket_gid_env
@@ -299,7 +323,8 @@ fi
 
 if [[ "$DO_BUILD" == "true" ]]; then
   log_info "Building local application images: ${LOCAL_BUILD_SERVICES[*]}"
-  run_cmd "${COMPOSE[@]}" build "${LOCAL_BUILD_SERVICES[@]}"
+  build_backend_image
+  build_frontend_image
 else
   log_info "Skipping local application image build."
 fi
