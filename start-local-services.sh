@@ -215,7 +215,7 @@ build_backend_image() {
     --target runtime-plain
     --build-arg "DOCKERHUB_LIBRARY_MIRROR=$DOCKERHUB_LIBRARY_MIRROR"
     --build-arg "UV_IMAGE=${UV_IMAGE:-m.daocloud.io/ghcr.io/astral-sh/uv:latest}"
-    --build-arg "DOCKER_CLI_IMAGE=${DOCKER_CLI_IMAGE:-docker:cli}"
+    --build-arg "DOCKER_CLI_IMAGE=${DOCKER_CLI_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR}/docker:cli}"
     --build-arg "BACKEND_APT_MIRROR_PRIMARY=${BACKEND_APT_MIRROR_PRIMARY:-mirrors.aliyun.com}"
     --build-arg "BACKEND_APT_SECURITY_PRIMARY=${BACKEND_APT_SECURITY_PRIMARY:-mirrors.aliyun.com}"
     --build-arg "BACKEND_APT_MIRROR_FALLBACK=${BACKEND_APT_MIRROR_FALLBACK:-deb.debian.org}"
@@ -256,7 +256,7 @@ apply_mode_defaults
 assert_no_runner_scanner_services "${SUPPORT_PULL_SERVICES[@]}" "${LOCAL_BUILD_SERVICES[@]}"
 
 export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}"
-export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-docker:cli}"
+export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR}/docker:cli}"
 export BACKEND_PYPI_INDEX_PRIMARY="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}"
 export BACKEND_PYPI_INDEX_FALLBACK="${BACKEND_PYPI_INDEX_FALLBACK:-https://mirrors.aliyun.com/pypi/simple/}"
 export BACKEND_PYPI_INDEX_CANDIDATES="${BACKEND_PYPI_INDEX_CANDIDATES:-https://mirrors.huaweicloud.com/repository/pypi/simple/,https://mirrors.aliyun.com/pypi/simple/,https://mirrors.cloud.tencent.com/pypi/simple/,https://pypi.tuna.tsinghua.edu.cn/simple,https://pypi.mirrors.ustc.edu.cn/simple/,https://mirrors.bfsu.edu.cn/pypi/web/simple/,https://pypi.org/simple}"
