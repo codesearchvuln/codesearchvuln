@@ -113,6 +113,7 @@ else
 fi
 
 export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-docker.m.daocloud.io/library}"
+export GHCR_REGISTRY="${GHCR_REGISTRY:-m.daocloud.io/ghcr.io}"
 export COMPOSE_BAKE="${COMPOSE_BAKE:-false}"
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
 
