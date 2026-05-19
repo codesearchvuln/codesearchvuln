@@ -256,7 +256,6 @@ apply_mode_defaults
 assert_no_runner_scanner_services "${SUPPORT_PULL_SERVICES[@]}" "${LOCAL_BUILD_SERVICES[@]}"
 
 export DOCKERHUB_LIBRARY_MIRROR="${DOCKERHUB_LIBRARY_MIRROR:-m.daocloud.io/docker.io/library}"
-export GHCR_REGISTRY="${GHCR_REGISTRY:-m.daocloud.io/ghcr.io}"
 export DOCKER_CLI_IMAGE="${DOCKER_CLI_IMAGE:-${DOCKERHUB_LIBRARY_MIRROR}/docker:cli}"
 export BACKEND_PYPI_INDEX_PRIMARY="${BACKEND_PYPI_INDEX_PRIMARY:-https://mirrors.huaweicloud.com/repository/pypi/simple/}"
 export BACKEND_PYPI_INDEX_FALLBACK="${BACKEND_PYPI_INDEX_FALLBACK:-https://mirrors.aliyun.com/pypi/simple/}"
