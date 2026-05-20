@@ -5,6 +5,11 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1.endpoints.static_tasks import list_unified_findings
+from app.api.v1.endpoints.static_tasks_unified_findings import (
+    UnifiedFindingsSummaryBatchRequest,
+    get_unified_findings_summary,
+    get_unified_findings_summary_batch,
+)
 
 
 class _ScalarResult:
@@ -24,6 +29,9 @@ class _MappingsResult:
 
     def all(self):
         return self._rows
+
+    def one(self):
+        return self._rows[0]
 
 
 @pytest.mark.asyncio
@@ -148,3 +156,86 @@ async def test_list_unified_findings_returns_page_payload():
     assert result.items[0].status == "verified"
     assert result.items[1].engine == "gitleaks"
     assert result.items[1].rule == "aws-access-key"
+
+
+@pytest.mark.asyncio
+async def test_get_unified_findings_summary_returns_backend_aggregates():
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=_MappingsResult(
+            [
+                {
+                    "total": 9,
+                    "critical": 1,
+                    "high": 2,
+                    "medium": 3,
+                    "low": 3,
+                }
+            ]
+        )
+    )
+
+    result = await get_unified_findings_summary(
+        opengrep_task_id="og-1",
+        gitleaks_task_id=None,
+        bandit_task_id="bd-1",
+        phpstan_task_id=None,
+        yasa_task_id=None,
+        pmd_task_id=None,
+        db=db,
+        current_user=SimpleNamespace(id="u-1"),
+    )
+
+    assert result.total == 9
+    assert result.severity_counts.critical == 1
+    assert result.severity_counts.high == 2
+    assert result.severity_counts.medium == 3
+    assert result.severity_counts.low == 3
+
+
+@pytest.mark.asyncio
+async def test_get_unified_findings_summary_batch_keeps_request_order():
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            _MappingsResult(
+                [
+                    {
+                        "total": 4,
+                        "critical": 0,
+                        "high": 1,
+                        "medium": 1,
+                        "low": 2,
+                    }
+                ]
+            ),
+            _MappingsResult(
+                [
+                    {
+                        "total": 2,
+                        "critical": 0,
+                        "high": 0,
+                        "medium": 0,
+                        "low": 2,
+                    }
+                ]
+            ),
+        ]
+    )
+
+    result = await get_unified_findings_summary_batch(
+        UnifiedFindingsSummaryBatchRequest(
+            items=[
+                {"key": "row-1", "opengrep_task_id": "og-1"},
+                {"key": "row-2", "phpstan_task_id": "ps-1"},
+            ]
+        ),
+        db=db,
+        current_user=SimpleNamespace(id="u-1"),
+    )
+
+    assert [item.key for item in result.items] == ["row-1", "row-2"]
+    assert result.items[0].total == 4
+    assert result.items[0].severity_counts.high == 1
+    assert result.items[1].total == 2
+    assert result.items[1].severity_counts.low == 2

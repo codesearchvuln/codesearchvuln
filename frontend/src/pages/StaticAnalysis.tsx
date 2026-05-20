@@ -173,6 +173,7 @@ export default function StaticAnalysis() {
     yasaTask,
     unifiedRows,
     unifiedTotal,
+    findingsTotal,
     loadingInitial,
     loadingTask,
     loadingFindings,
@@ -352,6 +353,7 @@ export default function StaticAnalysis() {
         yasaTask={yasaTask}
         enabledEngines={enabledEngines}
         loadingInitial={loadingInitial}
+        findingsTotal={findingsTotal}
       />
 
         <StaticAnalysisFindingsTable

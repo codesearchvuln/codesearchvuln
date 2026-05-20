@@ -43,6 +43,42 @@ class UnifiedFindingsPageResponse(BaseModel):
     page_size: int
 
 
+class UnifiedFindingsSeverityCountsResponse(BaseModel):
+    critical: int
+    high: int
+    medium: int
+    low: int
+
+
+class UnifiedFindingsSummaryResponse(BaseModel):
+    total: int
+    severity_counts: UnifiedFindingsSeverityCountsResponse
+
+
+class UnifiedFindingsSummaryBatchItemRequest(BaseModel):
+    key: str
+    opengrep_task_id: str | None = None
+    gitleaks_task_id: str | None = None
+    bandit_task_id: str | None = None
+    phpstan_task_id: str | None = None
+    yasa_task_id: str | None = None
+    pmd_task_id: str | None = None
+
+
+class UnifiedFindingsSummaryBatchRequest(BaseModel):
+    items: list[UnifiedFindingsSummaryBatchItemRequest]
+
+
+class UnifiedFindingsSummaryBatchItemResponse(BaseModel):
+    key: str
+    total: int
+    severity_counts: UnifiedFindingsSeverityCountsResponse
+
+
+class UnifiedFindingsSummaryBatchResponse(BaseModel):
+    items: list[UnifiedFindingsSummaryBatchItemResponse]
+
+
 def _normalized_status(column):
     return func.lower(func.coalesce(cast(column, String), literal("open")))
 
@@ -332,6 +368,115 @@ def _build_sort_expressions(unified_subquery, sort_by: SortByLiteral, sort_order
 
     order_by.append(unified_subquery.c.id.asc())
     return order_by
+
+
+def _build_summary_select(unified_subquery):
+    return select(
+        func.count().label("total"),
+        func.coalesce(
+            func.sum(case((unified_subquery.c.severity == "CRITICAL", 1), else_=0)),
+            0,
+        ).label("critical"),
+        func.coalesce(
+            func.sum(case((unified_subquery.c.severity == "HIGH", 1), else_=0)),
+            0,
+        ).label("high"),
+        func.coalesce(
+            func.sum(case((unified_subquery.c.severity == "MEDIUM", 1), else_=0)),
+            0,
+        ).label("medium"),
+        func.coalesce(
+            func.sum(case((unified_subquery.c.severity == "LOW", 1), else_=0)),
+            0,
+        ).label("low"),
+    ).select_from(unified_subquery)
+
+
+async def _load_unified_findings_summary(
+    *,
+    db: AsyncSession,
+    opengrep_task_id: str | None,
+    gitleaks_task_id: str | None,
+    bandit_task_id: str | None,
+    phpstan_task_id: str | None,
+    yasa_task_id: str | None,
+    pmd_task_id: str | None,
+) -> UnifiedFindingsSummaryResponse:
+    unified_subquery = _build_unified_union_subquery(
+        opengrep_task_id=opengrep_task_id,
+        gitleaks_task_id=gitleaks_task_id,
+        bandit_task_id=bandit_task_id,
+        phpstan_task_id=phpstan_task_id,
+        yasa_task_id=yasa_task_id,
+        pmd_task_id=pmd_task_id,
+    )
+    if unified_subquery is None:
+        raise HTTPException(status_code=400, detail="至少提供一个引擎 task_id")
+
+    result = await db.execute(_build_summary_select(unified_subquery))
+    row = result.mappings().one()
+    return UnifiedFindingsSummaryResponse(
+        total=int(row["total"] or 0),
+        severity_counts=UnifiedFindingsSeverityCountsResponse(
+            critical=int(row["critical"] or 0),
+            high=int(row["high"] or 0),
+            medium=int(row["medium"] or 0),
+            low=int(row["low"] or 0),
+        ),
+    )
+
+
+@router.get("/findings/unified/summary", response_model=UnifiedFindingsSummaryResponse)
+async def get_unified_findings_summary(
+    opengrep_task_id: str | None = Query(None),
+    gitleaks_task_id: str | None = Query(None),
+    bandit_task_id: str | None = Query(None),
+    phpstan_task_id: str | None = Query(None),
+    yasa_task_id: str | None = Query(None),
+    pmd_task_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    del current_user
+    return await _load_unified_findings_summary(
+        db=db,
+        opengrep_task_id=opengrep_task_id,
+        gitleaks_task_id=gitleaks_task_id,
+        bandit_task_id=bandit_task_id,
+        phpstan_task_id=phpstan_task_id,
+        yasa_task_id=yasa_task_id,
+        pmd_task_id=pmd_task_id,
+    )
+
+
+@router.post("/findings/unified/summary/batch", response_model=UnifiedFindingsSummaryBatchResponse)
+async def get_unified_findings_summary_batch(
+    payload: UnifiedFindingsSummaryBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+):
+    del current_user
+
+    items: list[UnifiedFindingsSummaryBatchItemResponse] = []
+    for request_item in payload.items:
+        summary = await _load_unified_findings_summary(
+            db=db,
+            opengrep_task_id=request_item.opengrep_task_id,
+            gitleaks_task_id=request_item.gitleaks_task_id,
+            bandit_task_id=request_item.bandit_task_id,
+            phpstan_task_id=request_item.phpstan_task_id,
+            yasa_task_id=request_item.yasa_task_id,
+            pmd_task_id=request_item.pmd_task_id,
+        )
+        items.append(
+            UnifiedFindingsSummaryBatchItemResponse(
+                key=request_item.key,
+                total=summary.total,
+                severity_counts=summary.severity_counts,
+            )
+        )
+
+    return UnifiedFindingsSummaryBatchResponse(items=items)
 
 
 @router.get("/findings/unified", response_model=UnifiedFindingsPageResponse)

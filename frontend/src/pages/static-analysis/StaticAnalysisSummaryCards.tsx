@@ -33,6 +33,7 @@ interface StaticAnalysisSummaryCardsProps {
   yasaTask: YasaScanTask | null;
   enabledEngines: Engine[];
   loadingInitial?: boolean;
+  findingsTotal?: number | null;
 }
 
 function getEngineDisplayLabel(engine: Engine): string {
@@ -53,6 +54,7 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
   yasaTask,
   enabledEngines,
   loadingInitial = false,
+  findingsTotal = null,
 }: StaticAnalysisSummaryCardsProps) {
   const hasAnyLoadedTask = Boolean(
     opengrepTask || gitleaksTask || banditTask || phpstanTask || pmdTask || yasaTask,
@@ -164,14 +166,17 @@ export const StaticAnalysisSummaryCards = memo(function StaticAnalysisSummaryCar
 
   const totalFindings = useMemo(
     () =>
-      toStaticAnalysisSafeMetric(opengrepTask?.total_findings) +
-      toStaticAnalysisSafeMetric(gitleaksTask?.total_findings) +
-      toStaticAnalysisSafeMetric(banditTask?.total_findings) +
-      toStaticAnalysisSafeMetric(phpstanTask?.total_findings) +
-      toStaticAnalysisSafeMetric(pmdTask?.total_findings) +
-      toStaticAnalysisSafeMetric(yasaTask?.total_findings),
+      typeof findingsTotal === "number" && Number.isFinite(findingsTotal)
+        ? Math.max(0, Math.floor(findingsTotal))
+        : toStaticAnalysisSafeMetric(opengrepTask?.total_findings) +
+          toStaticAnalysisSafeMetric(gitleaksTask?.total_findings) +
+          toStaticAnalysisSafeMetric(banditTask?.total_findings) +
+          toStaticAnalysisSafeMetric(phpstanTask?.total_findings) +
+          toStaticAnalysisSafeMetric(pmdTask?.total_findings) +
+          toStaticAnalysisSafeMetric(yasaTask?.total_findings),
     [
       banditTask?.total_findings,
+      findingsTotal,
       gitleaksTask?.total_findings,
       opengrepTask?.total_findings,
       phpstanTask?.total_findings,

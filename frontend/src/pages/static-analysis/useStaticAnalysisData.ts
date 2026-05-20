@@ -45,6 +45,7 @@ import {
 } from "@/shared/api/opengrep";
 import {
   getUnifiedStaticFindings,
+  getUnifiedStaticFindingsSummary,
   type UnifiedStaticFindingsQuery,
 } from "@/shared/api/staticUnifiedFindings";
 import {
@@ -298,6 +299,7 @@ export function useStaticAnalysisData({
   const [loadingFindings, setLoadingFindings] = useState(
     () => hasEnabledEngine && !initialFindingsSnapshot,
   );
+  const [findingsTotal, setFindingsTotal] = useState<number | null>(null);
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
   const [interruptTarget, setInterruptTarget] = useState<Engine | null>(null);
   const [interrupting, setInterrupting] = useState(false);
@@ -578,6 +580,35 @@ export function useStaticAnalysisData({
     [fetchUnifiedFindingsPage, hasEnabledEngine],
   );
 
+  const loadUnifiedSummary = useCallback(async () => {
+    if (!hasEnabledEngine) {
+      setFindingsTotal(0);
+      return;
+    }
+
+    try {
+      const summary = await getUnifiedStaticFindingsSummary({
+        opengrepTaskId,
+        gitleaksTaskId,
+        banditTaskId,
+        phpstanTaskId,
+        yasaTaskId,
+        pmdTaskId,
+      });
+      setFindingsTotal(Math.max(0, Number(summary.total || 0)));
+    } catch {
+      setFindingsTotal(null);
+    }
+  }, [
+    banditTaskId,
+    gitleaksTaskId,
+    hasEnabledEngine,
+    opengrepTaskId,
+    phpstanTaskId,
+    pmdTaskId,
+    yasaTaskId,
+  ]);
+
   const refreshTasks = useCallback(
     async (silent = false, force = false) => {
       if (!hasEnabledEngine) {
@@ -642,9 +673,10 @@ export function useStaticAnalysisData({
       await Promise.all([
         refreshTasks(silent, true),
         loadUnifiedFindings(unifiedQueryRef.current, { silent, force: true }),
+        loadUnifiedSummary(),
       ]);
     },
-    [hasEnabledEngine, loadUnifiedFindings, refreshTasks],
+    [hasEnabledEngine, loadUnifiedFindings, loadUnifiedSummary, refreshTasks],
   );
 
   const refreshOpengrepSilently = useCallback(async () => {
@@ -811,6 +843,10 @@ export function useStaticAnalysisData({
   }, [loadUnifiedFindings, unifiedQuery]);
 
   useEffect(() => {
+    void loadUnifiedSummary();
+  }, [loadUnifiedSummary]);
+
+  useEffect(() => {
     if (!opengrepTaskId || !isStaticAnalysisPollableStatus(opengrepTask?.status)) {
       return;
     }
@@ -879,6 +915,7 @@ export function useStaticAnalysisData({
     yasaTask,
     unifiedRows,
     unifiedTotal,
+    findingsTotal,
     loadingInitial,
     loadingTask,
     loadingFindings,

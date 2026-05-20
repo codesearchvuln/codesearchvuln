@@ -54,11 +54,46 @@ export interface UnifiedStaticFindingsPage {
   page_size: number;
 }
 
-export async function getUnifiedStaticFindings(
-  query: UnifiedStaticFindingsQuery,
-): Promise<UnifiedStaticFindingsPage> {
-  const searchParams = new URLSearchParams();
+export interface UnifiedStaticFindingsSummary {
+  total: number;
+  severity_counts: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
 
+export interface UnifiedStaticFindingsSummaryBatchItem {
+  key: string;
+  opengrepTaskId?: string;
+  gitleaksTaskId?: string;
+  banditTaskId?: string;
+  phpstanTaskId?: string;
+  yasaTaskId?: string;
+  pmdTaskId?: string;
+}
+
+export interface UnifiedStaticFindingsSummaryBatchResponse {
+  items: Array<
+    UnifiedStaticFindingsSummary & {
+      key: string;
+    }
+  >;
+}
+
+function appendUnifiedTaskIds(
+  searchParams: URLSearchParams,
+  query: Pick<
+    UnifiedStaticFindingsQuery,
+    | "opengrepTaskId"
+    | "gitleaksTaskId"
+    | "banditTaskId"
+    | "phpstanTaskId"
+    | "yasaTaskId"
+    | "pmdTaskId"
+  >,
+) {
   const appendIfPresent = (key: string, value?: string | number | null) => {
     if (value === undefined || value === null) return;
     const normalized = String(value).trim();
@@ -72,6 +107,20 @@ export async function getUnifiedStaticFindings(
   appendIfPresent("phpstan_task_id", query.phpstanTaskId);
   appendIfPresent("yasa_task_id", query.yasaTaskId);
   appendIfPresent("pmd_task_id", query.pmdTaskId);
+}
+
+export async function getUnifiedStaticFindings(
+  query: UnifiedStaticFindingsQuery,
+): Promise<UnifiedStaticFindingsPage> {
+  const searchParams = new URLSearchParams();
+  appendUnifiedTaskIds(searchParams, query);
+
+  const appendIfPresent = (key: string, value?: string | number | null) => {
+    if (value === undefined || value === null) return;
+    const normalized = String(value).trim();
+    if (!normalized) return;
+    searchParams.set(key, normalized);
+  };
 
   appendIfPresent("page", query.page);
   appendIfPresent("page_size", query.pageSize);
@@ -88,5 +137,45 @@ export async function getUnifiedStaticFindings(
     `/static-tasks/findings/unified${queryString ? `?${queryString}` : ""}`,
   );
 
+  return response.data;
+}
+
+export async function getUnifiedStaticFindingsSummary(
+  query: Pick<
+    UnifiedStaticFindingsQuery,
+    | "opengrepTaskId"
+    | "gitleaksTaskId"
+    | "banditTaskId"
+    | "phpstanTaskId"
+    | "yasaTaskId"
+    | "pmdTaskId"
+  >,
+): Promise<UnifiedStaticFindingsSummary> {
+  const searchParams = new URLSearchParams();
+  appendUnifiedTaskIds(searchParams, query);
+  const queryString = searchParams.toString();
+  const response = await apiClient.get(
+    `/static-tasks/findings/unified/summary${queryString ? `?${queryString}` : ""}`,
+  );
+  return response.data;
+}
+
+export async function getUnifiedStaticFindingsSummaryBatch(
+  items: UnifiedStaticFindingsSummaryBatchItem[],
+): Promise<UnifiedStaticFindingsSummaryBatchResponse> {
+  const response = await apiClient.post(
+    "/static-tasks/findings/unified/summary/batch",
+    {
+      items: items.map((item) => ({
+        key: item.key,
+        opengrep_task_id: item.opengrepTaskId,
+        gitleaks_task_id: item.gitleaksTaskId,
+        bandit_task_id: item.banditTaskId,
+        phpstan_task_id: item.phpstanTaskId,
+        yasa_task_id: item.yasaTaskId,
+        pmd_task_id: item.pmdTaskId,
+      })),
+    },
+  );
   return response.data;
 }

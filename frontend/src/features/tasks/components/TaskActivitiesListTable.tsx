@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { toast } from "sonner";
@@ -14,10 +14,12 @@ import {
 	getActivityDurationLabel,
 	getRelativeTime,
 	getTaskActivityStageBadgeMeta,
+	type SeverityCounts,
 	getTaskStatusBadgeClassName,
 	getTaskStatusText,
 	type TaskActivityItem,
 } from "@/features/tasks/services/taskActivities";
+import { getUnifiedStaticFindingsSummaryBatch } from "@/shared/api/staticUnifiedFindings";
 import { appendReturnTo } from "@/shared/utils/findingRoute";
 
 interface TaskActivitiesListTableProps {
@@ -30,21 +32,26 @@ interface TaskActivitiesListTableProps {
 	onDeleteActivity?: (activity: TaskActivityItem) => Promise<void>;
 }
 
-function getDefectSummaryLabel(activity: TaskActivityItem): string {
+function getDefectSummaryLabel(
+	activity: TaskActivityItem,
+	staticSummaryOverride?: SeverityCounts | null,
+): string {
 	if (activity.agentFindingStats) {
 		const { critical, high, medium, low } = activity.agentFindingStats;
 		return `严重 ${critical} / 高危 ${high} / 中危 ${medium} / 低危 ${low}`;
 	}
-	if (!activity.staticFindingStats) {
+	const summary = staticSummaryOverride ?? activity.staticFindingStats;
+	if (!summary) {
 		return "-";
 	}
-	const { critical, high, medium, low } = activity.staticFindingStats;
+	const { critical, high, medium, low } = summary;
 	return `严重 ${critical} / 高危 ${high} / 中危 ${medium} / 低危 ${low}`;
 }
 
 function getColumns(
 	nowMs: number,
 	currentRoute: string,
+	staticSummaryOverrides: Record<string, SeverityCounts>,
 	handleInterrupt: ((activity: TaskActivityItem) => Promise<void>) | null,
 	interruptingActivityId: string | null,
 	handleDelete: ((activity: TaskActivityItem) => Promise<void>) | null,
@@ -169,14 +176,18 @@ function getColumns(
 		},
 		{
 			id: "defects",
-			accessorFn: (row) => getDefectSummaryLabel(row),
+			accessorFn: (row) =>
+				getDefectSummaryLabel(row, staticSummaryOverrides[row.id] ?? null),
 			header: "缺陷摘要",
 			meta: {
 				label: "缺陷摘要",
 				minWidth: 200,
 			},
 			cell: ({ row }) => {
-				const summary = getDefectSummaryLabel(row.original);
+				const summary = getDefectSummaryLabel(
+					row.original,
+					staticSummaryOverrides[row.original.id] ?? null,
+				);
 				if (summary === "-") return "-";
 				return (
 					<span className="whitespace-nowrap text-base text-muted-foreground">
@@ -258,8 +269,67 @@ export default function TaskActivitiesListTable({
 }: TaskActivitiesListTableProps) {
 	const location = useLocation();
 	const currentRoute = `${location.pathname}${location.search}`;
+	const [staticSummaryOverrides, setStaticSummaryOverrides] = useState<
+		Record<string, SeverityCounts>
+	>({});
 	const [interruptingActivityId, setInterruptingActivityId] = useState<string | null>(null);
 	const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
+
+	useEffect(() => {
+		const requestItems = activities
+			.filter((activity) => activity.kind === "rule_scan")
+			.map((activity) => {
+				const hasTaskId = Boolean(
+					activity.opengrepTaskId ||
+						activity.gitleaksTaskId ||
+						activity.banditTaskId ||
+						activity.phpstanTaskId ||
+						activity.pmdTaskId ||
+						activity.yasaTaskId,
+				);
+				if (!hasTaskId) return null;
+				return {
+					key: activity.id,
+					opengrepTaskId: activity.opengrepTaskId,
+					gitleaksTaskId: activity.gitleaksTaskId,
+					banditTaskId: activity.banditTaskId,
+					phpstanTaskId: activity.phpstanTaskId,
+					pmdTaskId: activity.pmdTaskId,
+					yasaTaskId: activity.yasaTaskId,
+				};
+			})
+			.filter((item): item is NonNullable<typeof item> => item !== null);
+
+		if (requestItems.length === 0) {
+			setStaticSummaryOverrides({});
+			return;
+		}
+
+		let cancelled = false;
+		void getUnifiedStaticFindingsSummaryBatch(requestItems)
+			.then((response) => {
+				if (cancelled) return;
+				const next: Record<string, SeverityCounts> = {};
+				for (const item of response.items) {
+					next[item.key] = {
+						critical: Math.max(0, Number(item.severity_counts.critical || 0)),
+						high: Math.max(0, Number(item.severity_counts.high || 0)),
+						medium: Math.max(0, Number(item.severity_counts.medium || 0)),
+						low: Math.max(0, Number(item.severity_counts.low || 0)),
+					};
+				}
+				setStaticSummaryOverrides(next);
+			})
+			.catch((error) => {
+				if (cancelled) return;
+				console.error("加载静态缺陷摘要失败", error);
+				setStaticSummaryOverrides({});
+			});
+
+		return () => {
+			cancelled = true;
+		};
+	}, [activities]);
 
 	const handleInterrupt =
 		onInterruptActivity == null
@@ -314,6 +384,7 @@ export default function TaskActivitiesListTable({
 				getColumns(
 					nowMs,
 					currentRoute,
+					staticSummaryOverrides,
 					handleInterrupt,
 					interruptingActivityId,
 					handleDelete,
@@ -326,6 +397,7 @@ export default function TaskActivitiesListTable({
 			handleInterrupt,
 			interruptingActivityId,
 			nowMs,
+			staticSummaryOverrides,
 		],
 	);
 
