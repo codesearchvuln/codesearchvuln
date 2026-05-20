@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+.env*
+.vscode
+.DS_Store
+package-lock.json
+Dockerfile.legacy
+yasa-engine-overrides
+tests
